@@ -23,7 +23,16 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 const fixture = async (actor = 44) => {
-  const f = await termLifecycleFixture(true);
+  const timings: Record<string, number> = {};
+  const measure = async <T>(stage: string, action: () => Promise<T>): Promise<T> => {
+    const start = performance.now();
+    try {
+      return await action();
+    } finally {
+      timings[stage] = (timings[stage] ?? 0) + performance.now() - start;
+    }
+  };
+  const f = await measure("termFixture", () => termLifecycleFixture(true));
   roots.push(f.root);
   const course = parse(fs.readFileSync(path.join(f.writer, "course.yml"), "utf8"));
   course.course.repository_id = 20;
@@ -51,7 +60,7 @@ const fixture = async (actor = 44) => {
   await git(f.writer, ["add", "."]);
   await git(f.writer, ["commit", "-m", "Trusted operation state"]);
   await git(f.writer, ["push", "origin", "main"]);
-  await f.request.input.resynchronize?.();
+  await measure("synchronize", async () => f.request.input.resynchronize?.());
   let active = true;
   currentReader = { ...f.reader, terms: async () => ["27s1", "27s2"] };
   const courseState = { ...f.request.input.course, schemaVersion: 2 };
@@ -77,7 +86,7 @@ const fixture = async (actor = 44) => {
       return result;
     },
     withSynchronizedCourse: async (_repo: number, _user: number, operation: Function) => {
-      const sync = await f.request.input.resynchronize?.();
+      const sync = await measure("synchronize", async () => f.request.input.resynchronize?.());
       return operation(
         {
           ...f.request.input,
@@ -93,7 +102,9 @@ const fixture = async (actor = 44) => {
   const actorCache = managedCoursePath(f.root, actor, 20);
   if (actor !== 42) {
     fs.mkdirSync(path.dirname(actorCache), { recursive: true });
+    const start = performance.now();
     fs.cpSync(f.cache, actorCache, { recursive: true });
+    timings.copyActorCache = performance.now() - start;
   }
   saveEntry(
     f.root,
@@ -110,6 +121,8 @@ const fixture = async (actor = 44) => {
   return {
     ...f,
     guard,
+    timings,
+    measure,
     invoke,
     legacyHandler,
     invalidate: () => {
@@ -320,7 +333,15 @@ describe("trusted managed-operation production bridge", () => {
   it(
     "rejects every legacy mutation channel before course, runtime or student-repository writes",
     async () => {
+      const start = performance.now();
       const f = await fixture();
+      f.timings.fixture = performance.now() - start;
+      const reader = currentReader;
+      currentReader = {
+        ...reader,
+        revision: (...args) => f.measure("remoteRevision", () => reader.revision(...args)),
+        file: (...args) => f.measure("remoteFile", () => reader.file(...args))
+      };
       const before = await git(f.remote, ["rev-parse", "main"]);
       const local = fs.readFileSync(path.join(f.legacy, "course.yml"), "utf8");
       const student = path.join(f.root, "student.git");
@@ -330,10 +351,14 @@ describe("trusted managed-operation production bridge", () => {
         (channel) =>
           channel !== IPC_CHANNELS.changeManagedCourseLifecycle &&
           channel !== IPC_CHANNELS.changeManagedTermLifecycle
-      ))
-        await expect(
-          f.invoke(channel, { termCode: "27s2", sectionId: "001" })
-        ).rejects.toMatchObject({ result: { reason: "operation_unavailable" } });
+      )) {
+        await f.measure(channel, async () => {
+          await expect(
+            f.invoke(channel, { termCode: "27s2", sectionId: "001" })
+          ).rejects.toMatchObject({ result: { reason: "operation_unavailable" } });
+        });
+      }
+      fs.writeSync(process.stdout.fd, `Managed bridge timings ${JSON.stringify(f.timings)}\n`);
       expect(await git(f.remote, ["rev-parse", "main"])).toBe(before);
       expect(fs.readFileSync(path.join(f.legacy, "course.yml"), "utf8")).toBe(local);
       expect(fs.readdirSync(student)).toEqual(studentBefore);
