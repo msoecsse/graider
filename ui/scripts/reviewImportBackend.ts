@@ -52,7 +52,15 @@ export interface ImportResult {
   readonly studentsAffected: number;
   readonly outcomes: readonly ImportOutcome[];
 }
+export interface ImportSynchronization {
+  readonly studentId: string;
+  readonly status: "success" | "failed";
+  readonly code: string;
+  readonly message: string;
+  readonly currentCommitSha?: string;
+}
 export interface ImportPreview {
+  readonly synchronization?: readonly ImportSynchronization[];
   readonly planId: string;
   readonly version: 1;
   readonly plan: ReviewImportPlan;

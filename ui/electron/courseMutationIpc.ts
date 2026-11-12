@@ -2,7 +2,8 @@ import { measureGradingOperation, measureGradingPhase } from "./gradingPerforman
 import { projectManagedCourseResult } from "./managedCourseResultProjection.js";
 import {
   managedCourseOperation,
-  courseOperationDocument
+  courseOperationDocument,
+  reviewImportPreparation
 } from "./managedCourseOperationContext.js";
 import { requireReadRevision } from "./managedCourseTransaction.js";
 import type { VerifiedCourseMutationContext } from "./managedCourseMutationGuard.js";
@@ -422,14 +423,31 @@ export const createCourseMutationIpc = (
             if (!boundary) return handler(event, ...args);
             if (channel === IPC_CHANNELS.chooseReviewImport) {
               // Resolve the source before opening the native chooser, then release the lease.
-              const context = await boundary.read(
+              const context = await boundary.localGrading(
                 folderId,
                 fields.courseFolderPath,
                 async (resolved) => resolved,
                 schemaRequest
               );
               if (context?.managed) bind(event.sender, context);
-              return invoke(context);
+              return reviewImportPreparation.run(
+                {
+                  run: (operation) =>
+                    boundary.localGrading(
+                      folderId,
+                      fields.courseFolderPath,
+                      async (current) => {
+                        if (current?.courseFolderPath !== context?.courseFolderPath)
+                          throw new Error("Course identity changed. Reopen Import Reviews.");
+                        return current === undefined
+                          ? operation()
+                          : managedCourseOperation.run(current, operation);
+                      },
+                      schemaRequest
+                    )
+                },
+                () => invoke(context)
+              );
             }
             return boundary
               .read(

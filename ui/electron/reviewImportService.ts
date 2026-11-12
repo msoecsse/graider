@@ -1,3 +1,7 @@
+import {
+  revalidateCourseOperation,
+  withReviewImportPreparation
+} from "./managedCourseOperationContext.js";
 import { isValidGradingWorkspaceIdentity } from "./gradingWorkspaceService.js";
 import { isPrepareGradingWorkspaceRequest } from "./gradingWorkspaceRequestValidation.js";
 import fs from "node:fs";
@@ -67,71 +71,221 @@ export const createReviewImportService = (dependencies: {
   readonly showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogReturnValue>;
   readonly scope?: typeof resolveCurrentFacultyScope;
   readonly repository?: typeof resolveLocalStudentRepository;
+  readonly synchronize?: (
+    request: Assignment & { readonly studentId: string },
+    proof: {
+      readonly reviewedCommitShas: readonly string[];
+      readonly expectedRepositoryRemote: string;
+    },
+    revalidate: () => Promise<void>
+  ) => Promise<{ readonly status: string; readonly message?: string }>;
 }) => {
   // A single ephemeral preview per renderer owner; selecting again replaces it.
   const sessions = new Map<number, Session>();
-  const prepare = async (request: Assignment) => {
+  const preparing = new Map<number, symbol>();
+  const prepare = async (request: Assignment, studentId?: string) => {
     if (!isValidGradingWorkspaceIdentity(request)) throw new Error("Invalid assignment identity.");
     const scope = (dependencies.scope ?? resolveCurrentFacultyScope)(request);
     if (scope.status !== "success") throw new Error(`Review import unavailable: ${scope.status}.`);
+    const students = scope.students.filter(
+      (student) => studentId === undefined || student.studentId === studentId
+    );
     const repositories = new Map<string, string>();
-    for (const student of scope.students) {
+    for (const student of students) {
       const resolved = (dependencies.repository ?? resolveLocalStudentRepository)(
         getLocalRepositoryLocatorPath(request.userDataPath),
         { ...request, studentId: student.studentId }
       );
       if (resolved.status === "success") repositories.set(student.studentId, resolved.localPath);
     }
-    const context = await dependencies
-      .backend()
-      .createContext(request, scope.students, repositories);
-    return { context, students: scope.students };
+    const context = await dependencies.backend().createContext(request, students, repositories);
+    return { context, students };
   };
   return {
     close: (owner: number): void => {
       sessions.delete(owner);
+      preparing.delete(owner);
     },
     choose: async (request: Assignment, owner: number): Promise<Backend.ImportPreview | null> => {
       if (!isValidGradingWorkspaceIdentity(request))
         throw new Error("Invalid assignment identity.");
-      if (sessions.get(owner)?.applying) throw new Error("Review import is already applying.");
-      const chosen = await dependencies.showOpenDialog({
-        title: "Import Reviews",
-        properties: ["openFile", "multiSelections"],
-        filters: [{ name: "Review JSON", extensions: ["json"] }]
-      });
-      if (chosen.canceled || chosen.filePaths.length === 0) return null;
-      sessions.delete(owner);
-      const backend = dependencies.backend();
-      const inputs = chosen.filePaths.map((file) => {
-        let content = "";
-        // Use Slice 1 constants to bound trusted reads before parsing. The planner
-        // remains the authority for batch/size/schema classifications.
-        if (chosen.filePaths.length <= backend.MAX_REVIEW_FILES) {
-          try {
-            const descriptor = fs.openSync(file, "r");
+      if (sessions.get(owner)?.applying || preparing.has(owner))
+        throw new Error("Review import is already preparing or applying.");
+      const operation = Symbol();
+      preparing.set(owner, operation);
+      try {
+        const chosen = await dependencies.showOpenDialog({
+          title: "Import Reviews",
+          properties: ["openFile", "multiSelections"],
+          filters: [{ name: "Review JSON", extensions: ["json"] }]
+        });
+        if (chosen.canceled || chosen.filePaths.length === 0) return null;
+        sessions.delete(owner);
+        const backend = dependencies.backend();
+        const inputs = chosen.filePaths.map((file) => {
+          let content = "";
+          // Use Slice 1 constants to bound trusted reads before parsing. The planner
+          // remains the authority for batch/size/schema classifications.
+          if (chosen.filePaths.length <= backend.MAX_REVIEW_FILES) {
             try {
-              const buffer = Buffer.alloc(backend.MAX_REVIEW_FILE_BYTES + 1);
-              const length = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
-              content = buffer.subarray(0, length).toString("utf8");
-            } finally {
-              fs.closeSync(descriptor);
+              const descriptor = fs.openSync(file, "r");
+              try {
+                const buffer = Buffer.alloc(backend.MAX_REVIEW_FILE_BYTES + 1);
+                const length = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+                content = buffer.subarray(0, length).toString("utf8");
+              } finally {
+                fs.closeSync(descriptor);
+              }
+            } catch {
+              content = "";
             }
-          } catch {
-            content = "";
           }
-        }
-        return { filename: path.basename(file), content };
-      });
-      const { context, students } = await prepare(request);
-      const preview: Backend.ImportPreview = {
-        planId: randomUUID(),
-        version: 1,
-        plan: await backend.plan(inputs, context),
-        students
-      };
-      sessions.set(owner, { request: { ...request }, inputs, preview, applying: false });
-      return preview;
+          return { filename: path.basename(file), content };
+        });
+        return await withReviewImportPreparation(async () => {
+          const assertCurrent = (): void => {
+            if (preparing.get(owner) !== operation)
+              throw new Error("Review preview expired. Reopen Import Reviews.");
+          };
+          assertCurrent();
+          const initial = await prepare(request);
+          let context = initial.context;
+          let plan = await backend.plan(inputs, context);
+          const affected = new Set(
+            plan.reviews
+              .filter(
+                (review) => review.shaState === "unavailable" || review.shaState === "unrelated"
+              )
+              .flatMap((review) =>
+                review.matchedStudent === undefined ? [] : [review.matchedStudent.studentId]
+              )
+          );
+          const synchronization: Backend.ImportSynchronization[] = [];
+          for (const studentId of affected) {
+            const submission = initial.context.submissions.find(
+              (entry) => entry.student.studentId === studentId
+            );
+            const repository = submission?.repository;
+            if (submission === undefined || repository == null)
+              throw new Error("Student repository identity is unavailable.");
+            const revalidate = async (): Promise<void> => {
+              assertCurrent();
+              const fresh = await prepare(request, studentId);
+              const current = fresh.context.submissions.find(
+                (entry) => entry.student.studentId === studentId
+              );
+              if (
+                JSON.stringify(current?.repository) !== JSON.stringify(repository) ||
+                JSON.stringify(current?.student) !== JSON.stringify(submission.student)
+              )
+                throw new Error("Student repository authorization changed.");
+              assertCurrent();
+            };
+            let result: { readonly status: string; readonly message?: string };
+            try {
+              await revalidate();
+              result =
+                dependencies.synchronize === undefined
+                  ? { status: "github_auth_unavailable" }
+                  : await dependencies.synchronize(
+                      { ...request, studentId },
+                      {
+                        expectedRepositoryRemote: `https://github.com/${repository.owner}/${repository.name}.git`,
+                        reviewedCommitShas: [
+                          ...new Set(
+                            plan.reviews
+                              .filter((review) => review.matchedStudent?.studentId === studentId)
+                              .flatMap((review) =>
+                                review.review === undefined
+                                  ? []
+                                  : [review.review.repository.reviewedCommitSha]
+                              )
+                          )
+                        ]
+                      },
+                      revalidate
+                    );
+            } catch {
+              result = {
+                status: "repository_update_failed",
+                message:
+                  "Repository synchronization could not finish safely. Check faculty access, repository status, and your GitHub session, then reopen Import Reviews."
+              };
+            }
+            synchronization.push({
+              studentId,
+              status:
+                result.status === "success" || result.status === "unchanged" ? "success" : "failed",
+              code: result.status,
+              message:
+                result.message ??
+                (result.status === "github_auth_unavailable"
+                  ? "GitHub authentication is unavailable. Sign in to Graider, then reopen Import Reviews."
+                  : "Repository synchronization could not finish safely. Check repository status, local changes, and remote access, then reopen Import Reviews.")
+            });
+          }
+          if (affected.size > 0) {
+            context = (await prepare(request)).context;
+            for (const [index, update] of synchronization.entries()) {
+              if (update.status === "success") {
+                const current = context.submissions.find(
+                  (entry) => entry.student.studentId === update.studentId
+                );
+                const original = initial.context.submissions.find(
+                  (entry) => entry.student.studentId === update.studentId
+                );
+                if (
+                  current?.currentCommitSha == null ||
+                  current.diagnostics.length > 0 ||
+                  JSON.stringify(current.repository) !== JSON.stringify(original?.repository) ||
+                  JSON.stringify(current.student) !== JSON.stringify(original?.student)
+                )
+                  synchronization[index] = {
+                    ...update,
+                    status: "failed",
+                    code: "synchronized_context_changed",
+                    message:
+                      "The repository may have updated, but submission consistency or authorization changed. Review repository and grading status before reopening Import Reviews."
+                  };
+                else
+                  synchronization[index] = {
+                    ...update,
+                    currentCommitSha: current.currentCommitSha,
+                    message: `Updated local repository for ${update.studentId} to ${current.currentCommitSha}. Review findings have been revalidated against the latest submission.`
+                  };
+              }
+            }
+            context = {
+              ...context,
+              submissions: context.submissions.map((submission) => {
+                const failure = synchronization.find(
+                  (update) =>
+                    update.studentId === submission.student.studentId && update.status === "failed"
+                );
+                return failure === undefined
+                  ? submission
+                  : {
+                      ...submission,
+                      diagnostics: [{ code: failure.code, message: failure.message }]
+                    };
+              })
+            };
+            plan = await backend.plan(inputs, context);
+          }
+          assertCurrent();
+          const preview: Backend.ImportPreview = {
+            planId: randomUUID(),
+            version: 1,
+            plan,
+            students: initial.students,
+            ...(synchronization.length === 0 ? {} : { synchronization })
+          };
+          sessions.set(owner, { request: { ...request }, inputs, preview, applying: false });
+          return preview;
+        });
+      } finally {
+        if (preparing.get(owner) === operation) preparing.delete(owner);
+      }
     },
     apply: async (
       request: Backend.ImportApplyRequest & { readonly userDataPath: string },
@@ -154,6 +308,7 @@ export const createReviewImportService = (dependencies: {
         // Replan retained trusted inputs against fresh faculty, manifest, rubric,
         // repository history and grading state; never accept renderer plan objects.
         const fresh = await dependencies.backend().plan(session.inputs, context);
+        await revalidateCourseOperation();
         const seen = new Set<string>();
         for (const selected of request.selections) {
           const originalReview = session.preview.plan.reviews[selected.reviewIndex];

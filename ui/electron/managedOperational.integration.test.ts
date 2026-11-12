@@ -22,7 +22,11 @@ import {
   COURSE_ADMIN_CHANNELS,
   COURSE_MUTATION_CHANNELS
 } from "./courseMutationIpc";
-import { managedCourseOperation } from "./managedCourseOperationContext";
+import {
+  managedCourseOperation,
+  withReviewImportPreparation,
+  revalidateCourseOperation
+} from "./managedCourseOperationContext";
 import { IPC_CHANNELS } from "./ipc";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
@@ -844,6 +848,13 @@ itGitIntegration(
     const f = await fixture();
     await f.guard.cutover("registered");
     const a = adapter(f);
+    const remoteRead = vi
+      .spyOn(f.deps.session, "withReadOnlyCourse")
+      .mockRejectedValue(new Error("No routine remote reads"));
+    const remoteSync = vi
+      .spyOn(f.deps.session, "withSynchronizedCourse")
+      .mockRejectedValue(new Error("No routine course synchronization"));
+    let prepared = false;
     let enter!: () => void, release!: () => void;
     const entered = new Promise<void>((resolve) => {
         enter = resolve;
@@ -855,6 +866,11 @@ itGitIntegration(
       expect(request.courseFolderPath).toBe(f.cache);
       enter();
       await chosen;
+      await withReviewImportPreparation(async () => {
+        expect(managedCourseOperation.getStore()?.mode).toBe("local_grading");
+        await revalidateCourseOperation();
+        prepared = true;
+      });
       return { status: "canceled" };
     });
     const choosing = a.call(IPC_CHANNELS.chooseReviewImport, {
@@ -870,6 +886,9 @@ itGitIntegration(
       release();
     }
     await choosing;
+    expect(prepared).toBe(true);
+    expect(remoteRead).not.toHaveBeenCalled();
+    expect(remoteSync).not.toHaveBeenCalled();
   }
 );
 

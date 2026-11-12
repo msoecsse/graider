@@ -36,7 +36,6 @@ export const SYNCHRONIZED_COURSE_READ_CHANNELS: readonly string[] = Object.freez
   IPC_CHANNELS.previewRosterSave,
   IPC_CHANNELS.getTemplateWorkflow,
   IPC_CHANNELS.previewTemplateWorkflowSave,
-  IPC_CHANNELS.chooseReviewImport,
   IPC_CHANNELS.previewGradingStudentReport,
   IPC_CHANNELS.getAssignmentApplyPreview,
   IPC_CHANNELS.getAssignmentGradePreview,
@@ -50,6 +49,8 @@ export const LOCAL_GRADING_READ_CHANNELS: readonly string[] = Object.freeze([
 ]);
 /** Pull uses this local course lease plus its own OAuth and student Git boundary. */
 export const LOCAL_GRADING_MUTATION_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.chooseReviewImport,
+  IPC_CHANNELS.applyReviewImport,
   IPC_CHANNELS.pullLatestGradingStudentChanges,
   IPC_CHANNELS.prepareGradingWorkspace,
   IPC_CHANNELS.saveGradingStudentViewState,

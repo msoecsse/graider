@@ -1360,6 +1360,25 @@ export const registerIpcHandlers = (): void => {
   });
   const reviewImports = createReviewImportService({
     backend: loadReviewImportBackend,
+    synchronize: async (request, proof, revalidate) => {
+      if (!oauthSession) return { status: "github_auth_unavailable" };
+      return oauthSession
+        .withAuthenticatedAccount(async (account) =>
+          createGradingStudentRepositoryUpdateService({
+            authenticate: async () => createAuthenticatedProductionGitWorkspace(account.token),
+            reviewImport: proof,
+            revalidate: async () => {
+              if (!(await account.revalidateSession())) throw new Error("GitHub session changed.");
+              await revalidate();
+            }
+          })(request)
+        )
+        .catch(() => ({
+          status: "github_auth_unavailable",
+          message:
+            "Your GitHub session is unavailable or changed. Sign in again, then reopen Import Reviews."
+        }));
+    },
     showOpenDialog: (options) => dialog.showOpenDialog(options)
   });
   const reviewImportOwners = new WeakSet<Electron.WebContents>();

@@ -729,7 +729,26 @@ findings or approve them one at a time with **Process with recovery**. Unresolve
 source locations, invalid rubric associations, and duplicates remain blocked.
 Approval adds no comments until you choose **Apply Reviews**.
 
+If the local student checkout is behind a reviewed commit, Review Import tries
+one safe synchronization per student using your GitHub session. It verifies the
+reviewed commit in the trusted remote branch and advances only by fast-forward
+to its latest HEAD. The preview names the updated student and canonical SHA, and
+revalidates the same JSON automatically. Ordinary imports whose history is already
+available stay local and make no additional remote requests.
+
+Synchronization preserves grading work, notes, scores, completion/publication
+state, imported provenance, source-anchor history, and safe local changes. It
+adds no imported feedback until **Apply Reviews**. Closing the preview preserves
+any completed synchronization. Actual student changes still require recovery
+approval; verified Graider workflow-only changes do not.
+
+If synchronization is blocked, follow its diagnostic: sign in again, check network
+or repository access, or review local conflicts, divergence, or concurrent work
+using repository status/**Pull Latest**. Then reopen Import Reviews. Approval
+cannot bypass missing evidence or inconsistent grading state. Graider does not
+reset or discard local work to make an import succeed.
+
 Graider rechecks the submission, repository, faculty access, source locations,
 rubric mappings, and duplicates before applying feedback. If the submission
-changes after preview, reopen the import. Import does not fetch or pull student
-repositories. See [Review Import](review-import.md) for the review file contract.
+changes after preview, reopen the import. See [Review Import](review-import.md)
+for the review file contract.

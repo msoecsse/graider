@@ -11,8 +11,9 @@ The Java Assignment Review Skill must adopt this contract in Slice 3.
 Open an assignment's grading workspace and choose **Import Reviews...** in the
 assignment header. The native picker accepts multiple JSON files. Main reads a
 bounded amount using the Slice 1 limits; React never reads or parses review JSON.
-Canceling selection or closing **Review Import Preview** before apply changes no
-grading state.
+Canceling the native picker changes no state. Planning may safely synchronize stale
+student repositories as described below; closing the preview does not undo that
+synchronization. No imported feedback is added until **Apply Reviews**.
 
 The preview shows typed batch status counts, student identities/sections,
 repositories, reviewed/current SHAs, and expandable finding details. Finding
@@ -46,9 +47,9 @@ preview. Edited imported comments remain recognizable without overwriting edits.
 
 The shared comment service has an internal lifecycle-preservation option for this
 workflow. Existing comments, notes, view state, completion/publication status,
-zero-score decisions, and repository metadata are preserved. Import does not
-pull, change the canonical SHA, preview/publish reports, commit, push, or dispatch
-workflows. Comments remain editable, movable, duplicable and deletable through
+zero-score decisions, and repository metadata are preserved. When needed, preview preparation can synchronize a stale student checkout and
+reconcile its canonical SHA through the established repository-update lifecycle.
+Import never previews/publishes reports, commits, pushes, or dispatches workflows. Comments remain editable, movable, duplicable and deletable through
 normal grading controls and participate in normal scores/report previews.
 
 Results include applied, duplicate-skipped, failed and affected-student counts,
@@ -56,6 +57,52 @@ with per-finding diagnostics. Successful additions survive unrelated failures.
 Affected grading snapshots and summary scores refresh immediately without
 resetting the current source/document or editor. Closing the flow discards its
 session; starting a new import always replans against current state.
+
+## Automatic synchronization of missing local history
+
+Review Import first validates the retained JSON and plans entirely from local
+history and faculty-scoped mappings. Ordinary exact, administrative-equivalent,
+and recoverable imports do not authenticate to GitHub, fetch student branches, or
+synchronize the course repository. The native picker releases the course lease;
+preparation reacquires local grading authorization after selection.
+
+If a matched, authorized review's commit is unavailable or not in the local
+canonical history, main attempts synchronization at most once per student for
+that import operation. Multiple review files share that attempt. The existing
+OAuth-backed repository-update service calls `updateGradingStudentRepository()`;
+no separate Git synchronization mechanism or new renderer-controlled update IPC
+is used. The review's SHA never selects a fetch ref or checkout target.
+
+The updater fetches the configured branch from the mapped repository, verifies
+all of that student's reviewed SHAs as ancestors of the freshly fetched branch
+HEAD, and rechecks that remote HEAD before merging. Only its existing verified
+fast-forward path can advance the checkout to that frozen, latest remote HEAD.
+Account, faculty scope, repository locator/mapping, working-tree safety, local
+HEAD, concurrent-update guards, and grading consistency remain enforced.
+
+After synchronization, main reloads context and replans the original retained
+JSON against the updated canonical SHA, anchors, rubric, and duplicate provenance.
+Faculty do not select the JSON again. The preview names the updated student and
+canonical SHA. Administrative equivalence remains eligible without recovery;
+actual source changes still require explicit recovery approval. Apply never
+synchronizes or silently approves findings and still replans fresh local evidence.
+
+Synchronization preserves faculty comments/deductions, import provenance,
+original anchor history and relocation, notes, view state, final score decisions,
+and completion/publication status. It may record repository-update metadata and
+mark the submission updated since grading through the ordinary update lifecycle.
+Safe, nonoverlapping local changes remain present; conflicting or unverifiable
+changes are refused without discarding files or the index.
+
+Authentication/network failures, absent reviewed commits, divergence, conflicts,
+concurrent mutation, changed account/faculty/repository identity, and an unexpected
+remote HEAD change block affected students with specific diagnostics and a
+recovery action. Approval cannot bypass a failed synchronization. No automatic
+retry occurs in the same operation. Sign in, restore remote access, or review
+repository/local changes as directed, then reopen Import Reviews. If Git advances
+but state reconciliation fails, existing SHA-consistency protections remain in
+force; review repository and grading status before continuing. No reset or
+rollback is attempted. Missing local history is not itself proof of a resubmission.
 
 ## Remaining Java Assignment Review Skill integration (Slice 3)
 
@@ -209,8 +256,9 @@ regular Git blobs. It never follows symlinks or reads the working tree.
   commit. Invalid, with no eligible additions.
 - `unavailable`: repository/commit/history evidence cannot be obtained, including
   history beyond the workspace API's 100-commit bound. Warning, blocked from
-  application. Missing objects and shallow/incomplete local history must be
-  resolved explicitly; no fetch or pull is attempted.
+  application. The pure planner never fetches or pulls. Preview preparation may attempt the
+  guarded synchronization above once, then replan; missing or incomplete evidence
+  that remains after that attempt stays blocked.
 
 The shared `exact-source-anchor.ts` helper also serves Graider's existing
 repository-update relocation. There is no fuzzy matching, cross-file search,

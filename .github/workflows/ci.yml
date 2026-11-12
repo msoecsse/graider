@@ -149,7 +149,7 @@ jobs:
 
       - name: Test Review Import main-process validation and preview
         working-directory: ui
-        run: npx vitest run --maxWorkers=2 electron/reviewImportService.test.ts src/review-import/ReviewImportWorkflow.test.tsx
+        run: npx vitest run --maxWorkers=2 electron/reviewImportService.test.ts electron/reviewImportSynchronization.integration.test.ts src/review-import/ReviewImportWorkflow.test.tsx
 
       - name: Test serial issue orchestrator process and recovery safeguards
         run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts

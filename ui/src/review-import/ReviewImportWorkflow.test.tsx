@@ -163,6 +163,19 @@ describe("Review Import Preview", () => {
     expect(document.querySelectorAll("details")).toHaveLength(5);
     expect(document.querySelector("details")).toHaveAttribute("open");
   });
+  it("shows synchronized repository identity and canonical SHA directly in the preview", async () => {
+    const message = `Updated local repository for ada to ${SHA}. Review findings have been revalidated against the latest submission.`;
+    const value: ImportPreview = {
+      ...preview(),
+      synchronization: [
+        { studentId: "ada", status: "success", code: "success", currentCommitSha: SHA, message }
+      ]
+    };
+    Object.assign(window.graiderUI, { chooseReviewImport: vi.fn().mockResolvedValue(value) });
+    await open();
+    expect(screen.getByText(message).closest("details")).toBeNull();
+    expect(screen.getByText(message)).toHaveAttribute("role", "status");
+  });
   it("defaults only Ready findings and supports individual, student and bulk selection", async () => {
     await open();
     expect(screen.getByLabelText("Select finding Ready one")).toBeChecked();

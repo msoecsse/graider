@@ -1027,6 +1027,17 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
 
   async pullUpstream(request: PullUpstreamRequest = {}): Promise<PullUpstreamResult> {
     try {
+      if (
+        request.requiredAncestorCommits !== undefined &&
+        (request.externalFastForward === undefined ||
+          request.requiredAncestorCommits.length === 0 ||
+          request.requiredAncestorCommits.some((sha) => !isObjectId(sha)))
+      )
+        return {
+          kind: "refused",
+          message:
+            "Review synchronization requires valid reviewed commits and a trusted repository mapping."
+        };
       const state = await this.inspect();
       const dirtyDetails = await unsafeWorkingTreeDetails(this.root, state.workingTree);
       const dirtyMessage = (details: string): string =>
@@ -1165,6 +1176,18 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
             "Local HEAD contains commits outside the freshly fetched upstream history. Local-only commits, divergence, or rewritten remote history require manual recovery."
           );
         }
+        for (const reviewed of request.requiredAncestorCommits ?? []) {
+          try {
+            if (!(await this.isAncestor(reviewed, mergeTarget)))
+              return refuse(
+                "A reviewed commit is absent from the trusted remote branch history. Verify the review repository and SHA, then regenerate the review or review repository status."
+              );
+          } catch {
+            return refuse(
+              "A reviewed commit could not be verified in the trusted remote branch history. Verify the review SHA and repository access, then retry Import Reviews."
+            );
+          }
+        }
         let incoming: readonly RelativeGitPath[];
         try {
           // Disabling rename detection exposes both rename endpoints as deletion
@@ -1206,6 +1229,23 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           return refuse(
             `Local changes overlap incoming remote changes or their safety cannot be established, and were preserved. ${dirtyDetails ?? "Locally present files require manual review."}`
           );
+        if (request.requiredAncestorCommits !== undefined) {
+          const reference = `refs/heads/${branch}`;
+          const observed = (
+            await this.executor.run(
+              this.root,
+              ["ls-remote", "--refs", "--", fetchRemote, reference],
+              "pull",
+              request.authentication === undefined
+                ? {}
+                : { authentication: request.authentication, remote: fetchRemote }
+            )
+          ).trim();
+          if (observed !== `${mergeTarget}\t${reference}`)
+            return refuse(
+              "The trusted remote HEAD changed during synchronization. Local changes were preserved. Retry Import Reviews against the latest remote submission."
+            );
+        }
         await request.revalidate?.();
         const current = await this.inspect();
         const currentEvidence = await this.localFastForwardEvidence(current.workingTree);

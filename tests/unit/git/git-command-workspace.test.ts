@@ -1338,6 +1338,49 @@ describeGitIntegration("explicit external fast-forward with local grading work",
     return { ...f, head, publish, request };
   };
 
+  it("requires every reviewed SHA in the freshly fetched history before any fast-forward", async () => {
+    const f = await fixture();
+    await writeFile(join(f.repository, "submission.txt"), "reviewed\n");
+    const target = await f.publish();
+    const absent = "f".repeat(SHA_1_LENGTH);
+    expect(
+      await f.workspace.pullUpstream({ ...f.request, requiredAncestorCommits: [absent] })
+    ).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("reviewed commit") as unknown
+    });
+    expect(await f.workspace.resolveHead()).toBe(f.head);
+    expect(
+      await f.workspace.pullUpstream({ ...f.request, requiredAncestorCommits: [target] })
+    ).toEqual({ kind: "updated" });
+    expect(await f.workspace.resolveHead()).toBe(target);
+  });
+  it("refuses a remote HEAD that changes after fetch during Review Import synchronization", async () => {
+    const f = await fixture();
+    await writeFile(join(f.repository, "submission.txt"), "reviewed\n");
+    const reviewed = await f.publish();
+    const runners = createDugiteGitRunners();
+    let advanced = false;
+    const workspace = await new GitCommandWorkspaceFactory({
+      ...runners,
+      runGit: async (command) => {
+        const output = await runners.runGit(command);
+        if (command.args.includes("fetch") && !advanced) {
+          advanced = true;
+          await writeFile(join(f.repository, "submission.txt"), "new remote head\n");
+          await f.publish();
+        }
+        return output;
+      }
+    }).open(f.destination);
+    expect(
+      await workspace.pullUpstream({ ...f.request, requiredAncestorCommits: [reviewed] })
+    ).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("remote HEAD changed") as unknown
+    });
+    expect(await workspace.resolveHead()).toBe(f.head);
+  });
   it.each(["tracked", "untracked", "ignored"])(
     "preserves unrelated %s bytes without staging",
     async (mode) => {

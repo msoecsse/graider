@@ -217,6 +217,8 @@ export const updateGradingStudentRepository = async (
       typeof error === "object" && error !== null && "kind" in error ? String(error.kind) : "";
     const messages: Record<string, string> = {
       authentication_failed: "GitHub authentication failed. Sign in to Graider again, then retry.",
+      authorization_changed:
+        "Faculty authorization, GitHub session, or repository identity changed. Reopen the assignment and review repository access before retrying.",
       remote_unavailable:
         "The student remote or branch could not be reached. Check your connection and repository access, then retry.",
       repository_unavailable:

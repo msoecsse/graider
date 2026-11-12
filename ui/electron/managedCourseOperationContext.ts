@@ -34,3 +34,13 @@ export const revalidateGradingSubmission = async (
   operation.assertCurrent();
   return current.status === "success" && current.submissionCommitSha === expected;
 };
+
+/** Review Import releases the course lease while its native picker is open, then
+ * reacquires local grading authorization for planning and optional student updates. */
+export const reviewImportPreparation = new AsyncLocalStorage<{
+  run<T>(operation: () => Promise<T>): Promise<T>;
+}>();
+export const withReviewImportPreparation = <T>(operation: () => Promise<T>): Promise<T> => {
+  const preparation = reviewImportPreparation.getStore();
+  return preparation === undefined ? operation() : preparation.run(operation);
+};

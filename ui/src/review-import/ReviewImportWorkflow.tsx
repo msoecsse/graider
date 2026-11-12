@@ -201,6 +201,11 @@ export const ReviewImportWorkflow = ({
                 proposed findings · {selected.size} selected findings
               </p>
               <Diagnostics items={preview.plan.diagnostics} />
+              {preview.synchronization?.map((update) => (
+                <p key={update.studentId} role={update.status === "success" ? "status" : "alert"}>
+                  {update.message}
+                </p>
+              ))}
               {result === undefined ? (
                 <div className="review-import__actions">
                   <button

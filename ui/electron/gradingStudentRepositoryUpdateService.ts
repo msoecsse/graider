@@ -17,6 +17,7 @@ export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
   readRevisionFile(revision: string, file: string): Promise<string | null>;
   pullUpstream(request: {
     readonly authentication: GitAuthenticationContextRef;
+    readonly requiredAncestorCommits?: readonly string[];
     readonly expectedHead: string;
     readonly revalidate?: () => Promise<void>;
     readonly externalFastForward?: { readonly expectedRemote: string };
@@ -56,6 +57,11 @@ export const createGradingStudentRepositoryUpdateService =
     resolveFacultyScope?: typeof resolveCurrentFacultyScope;
     resolveRepository?: typeof resolveLocalStudentRepository;
     authenticate: () => Promise<AuthenticatedGitWorkspaceContext | null>;
+    /** Main-owned Review Import proof; never forwarded from renderer arguments. */
+    reviewImport?: {
+      readonly reviewedCommitShas: readonly string[];
+      readonly expectedRepositoryRemote: string;
+    };
     revalidate?: () => Promise<void>;
     loadBackend?: () => RepositoryUpdateBackend;
   }) =>
@@ -73,8 +79,14 @@ export const createGradingStudentRepositoryUpdateService =
     if (authenticated === null) return { status: "github_auth_unavailable" };
     try {
       const revalidate = async (): Promise<void> => {
-        await revalidateCourseOperation();
-        await overrides.revalidate?.();
+        try {
+          await revalidateCourseOperation();
+          await overrides.revalidate?.();
+        } catch {
+          throw Object.assign(new Error("Repository authorization changed."), {
+            kind: "authorization_changed"
+          });
+        }
         const currentScope = (overrides.resolveFacultyScope ?? resolveCurrentFacultyScope)(request);
         const currentRepository = (overrides.resolveRepository ?? resolveLocalStudentRepository)(
           getLocalRepositoryLocatorPath(request.userDataPath),
@@ -86,7 +98,9 @@ export const createGradingStudentRepositoryUpdateService =
           currentRepository.status !== "success" ||
           currentRepository.localPath !== repository.localPath
         )
-          throw new Error("Repository authorization changed.");
+          throw Object.assign(new Error("Repository authorization changed."), {
+            kind: "authorization_changed"
+          });
       };
       await revalidate();
       // The production authenticated backend returns the full Git workspace. The
@@ -112,15 +126,32 @@ export const createGradingStudentRepositoryUpdateService =
           revalidate,
           resolveHead: () => workspace.resolveHead(),
           readRevisionFile: (revision, file) => workspace.readRevisionFile(revision, file),
-          pullUpstream: (update) =>
-            workspace.pullUpstream({
+          pullUpstream: (update) => {
+            const proof = overrides.reviewImport;
+            if (
+              proof !== undefined &&
+              update.externalFastForward?.expectedRemote.toLowerCase() !==
+                proof.expectedRepositoryRemote.toLowerCase()
+            )
+              return Promise.resolve({
+                kind: "refused" as const,
+                message:
+                  "The student's repository mapping changed. Reopen the assignment and retry Import Reviews."
+              });
+            return workspace.pullUpstream({
               ...update,
               revalidate,
+              ...(proof === undefined ? {} : { requiredAncestorCommits: proof.reviewedCommitShas }),
               authentication: authenticated.authentication
-            })
+            });
+          }
         }
       );
     } catch {
-      return { status: "repository_update_failed" };
+      return {
+        status: "repository_update_failed",
+        message:
+          "Repository authorization or local access changed. Check faculty access and repository status, then retry."
+      };
     }
   };

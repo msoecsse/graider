@@ -293,6 +293,9 @@ export type PullUpstreamResult =
   | { readonly kind: "refused"; readonly message: string };
 
 export interface PullUpstreamRequest {
+  /** Review Import only: prove these commits in the fetched trusted branch before merging.
+   * Never fetch or check out a commit supplied by an import file directly. */
+  readonly requiredAncestorCommits?: readonly string[];
   readonly revalidate?: () => Promise<void>;
   readonly externalFastForward?: { readonly expectedRemote: string };
   readonly authentication?: GitAuthenticationContext;

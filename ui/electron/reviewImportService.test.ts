@@ -13,7 +13,7 @@ const SHA_LENGTH = 40;
 const SHA = "a".repeat(SHA_LENGTH);
 const OLD = "b".repeat(SHA_LENGTH);
 const roots: string[] = [];
-const fixture = () => {
+const fixture = (synchronize?: Parameters<typeof createReviewImportService>[0]["synchronize"]) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-import-test-"));
   roots.push(root);
   fs.cpSync(path.resolve("../tests/fixtures/roster/valid-course"), root, { recursive: true });
@@ -114,6 +114,7 @@ const fixture = () => {
   const applyFinding = vi.fn(backend.applyFinding);
   const service = createReviewImportService({
     backend: () => ({ ...backend, createContext, applyFinding }),
+    ...(synchronize === undefined ? {} : { synchronize }),
     showOpenDialog: choose,
     scope: () => ({ status: "success", students: [student], sections: ["001"], errors: [] }),
     repository: () => ({ status: "success", localPath: root })
@@ -441,4 +442,95 @@ it("rejects injected persisted-comment fields and invalid assignment identities 
       selections: [{ ...request.selections[0], comment: { id: "injected", text: "unsafe" } }]
     })
   ).toBe(false);
+});
+
+describe("Review Import automatic synchronization", () => {
+  it("regenerates the retained preview once per student and never synchronizes ordinary imports", async () => {
+    const synchronize = vi.fn<
+      NonNullable<Parameters<typeof createReviewImportService>[0]["synchronize"]>
+    >(async () => ({ status: "success" }));
+    const f = fixture(synchronize);
+    const original = await f.createContext();
+    const local = await original.repository("jones");
+    if (local === null) throw new Error("Missing reader");
+    let synchronized = false;
+    f.review.repository.reviewedCommitSha = OLD;
+    f.writeReview();
+    f.createContext.mockImplementation(async () => ({
+      ...original,
+      repository: async () => ({ ...local, isInHistory: async () => synchronized })
+    }));
+    synchronize.mockImplementation(async (_request, _proof, revalidate) => {
+      await revalidate();
+      synchronized = true;
+      return { status: "success" };
+    });
+    f.choose.mockResolvedValue({
+      canceled: false,
+      filePaths: [
+        path.join(f.request.courseFolderPath, "review.json"),
+        path.join(f.request.courseFolderPath, "review.json")
+      ]
+    });
+    const p = required(await f.preview());
+    expect(synchronize).toHaveBeenCalledTimes(1);
+    expect(p.plan.reviews[0]?.shaState).toBe("changed");
+    expect(p.plan.reviews[0]?.findings[0]).toMatchObject({
+      eligibleToApply: true,
+      recoveryRequired: true
+    });
+    expect(p.plan.reviews[1]?.status).toBe("duplicate");
+    expect(p.synchronization?.[0]).toMatchObject({
+      studentId: "jones",
+      status: "success",
+      currentCommitSha: SHA
+    });
+    expect(f.choose).toHaveBeenCalledTimes(1);
+    const ordinarySync = vi.fn();
+    const ordinary = fixture(ordinarySync);
+    expect(required(await ordinary.preview()).plan.reviews[0]?.shaState).toBe("exact");
+    expect(ordinarySync).not.toHaveBeenCalled();
+  });
+  it.each([
+    "github_auth_unavailable",
+    "repository_update_failed",
+    "submission_changed",
+    "update_state_record_failed"
+  ])("keeps %s blocked with specific recovery guidance, even with approval", async (status) => {
+    const synchronize = vi.fn(async () => ({
+      status,
+      message: "Synchronization refused. Review repository status and retry Import Reviews."
+    }));
+    const f = fixture(synchronize);
+    const original = await f.createContext();
+    const reader = await original.repository("jones");
+    if (reader === null) throw new Error("Missing reader");
+    f.createContext.mockImplementation(async () => ({
+      ...original,
+      repository: async () => ({ ...reader, isInHistory: async () => null })
+    }));
+    const p = required(await f.preview());
+    expect(p.plan.reviews[0]?.findings.every((finding) => !finding.eligibleToApply)).toBe(true);
+    expect(p.plan.reviews[0]?.diagnostics[0]?.message).toContain("Synchronization refused");
+    expect(p.synchronization?.[0]?.status).toBe("failed");
+    expect(synchronize).toHaveBeenCalledTimes(1);
+    expect(
+      await f.service.apply(
+        {
+          ...f.request,
+          planId: p.planId,
+          version: 1,
+          selections: [
+            {
+              reviewIndex: 0,
+              studentId: "jones",
+              findingKey: '["review-1","general"]',
+              approved: true
+            }
+          ]
+        },
+        1
+      )
+    ).toMatchObject({ applied: 0, failed: 1 });
+  });
 });
