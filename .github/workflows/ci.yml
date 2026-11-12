@@ -49,6 +49,18 @@ jobs:
       - name: UI check formatting
         run: npm --prefix ui run format:check
 
+      - name: Set up Java for real GUI fixtures
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Install real GUI fixture runtime
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
+
+      - name: Verify real JavaFX GUI smoke fixtures
+        run: node --import tsx scripts/verify-java-gui-smoke.ts
+
       - name: Test
         run: npm test
 
@@ -190,23 +202,3 @@ jobs:
       - run: npm --prefix ui run typecheck:prepared
       - name: Complete permanent migration regression suite
         run: npm run test:migration
-
-  java-gui-smoke:
-    name: Real JavaFX GUI smoke fixtures
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "25"
-      - run: npm ci
-      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
-      - run: node --import tsx scripts/verify-java-gui-smoke.ts
