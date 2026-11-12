@@ -46,7 +46,7 @@
     "@octokit/rest": "latest",
     "commander": "latest",
     "dugite": "3.2.3",
-    "fast-xml-parser": "^5.11.1",
+    "fast-xml-parser": "^5.12.0",
     "fast-xml-validator": "^1.4.2",
     "yaml": "latest",
     "yauzl": "^3.4.0",
