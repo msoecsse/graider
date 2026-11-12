@@ -138,6 +138,13 @@ describe("Windows NSIS installer foundation", () => {
     expect(workflow.on.push.branches).toEqual(["remote-course-v2"]);
     const job = workflow.jobs["windows-installer-test"];
     expect(job["runs-on"]).toBe("windows-latest");
+    // Runner context is unavailable in job-level env during workflow validation.
+    expect(JSON.stringify(job.env ?? {})).not.toContain("runner.");
+    expect(
+      job.steps.some((step: { run?: string }) =>
+        step.run?.includes("NSIS_TEST_INSTALL=$env:RUNNER_TEMP")
+      )
+    ).toBe(true);
     const packaging = job.steps.find(
       (step: { run?: string }) => step.run === "npm --prefix ui run package:win:installer-test"
     );

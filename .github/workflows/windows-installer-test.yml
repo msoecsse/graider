@@ -28,9 +28,6 @@ jobs:
     defaults:
       run:
         shell: pwsh
-    env:
-      NSIS_TEST_INSTALL: ${{ runner.temp }}\Graider NSIS test with spaces
-
     steps:
       - name: Preserve repository line endings
         run: git config --global core.autocrlf false
@@ -52,7 +49,10 @@ jobs:
             ui/package-lock.json
 
       - name: Verify native Windows x64
-        run: node -e "if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Native Windows x64 required');"
+        run: |
+          node -e "if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Native Windows x64 required');"
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows x64 required.' }
+          "NSIS_TEST_INSTALL=$env:RUNNER_TEMP\Graider NSIS test with spaces" >> $env:GITHUB_ENV
 
       - run: npm ci
       - run: npm ci --prefix ui
