@@ -19,8 +19,12 @@ repositories, reviewed/current SHAs, and expandable finding details. Finding
 previews use Graider's existing comment Markdown renderer, including inert links.
 Ready findings start selected. Student checkboxes, individual checkboxes,
 **Select all Ready**, and **Clear selections** control the additions. Eligible
-warnings require explicit approval; changed-SHA findings use **Process with
-recovery**. Blocked, duplicate, invalid, and unmatched findings cannot be applied.
+warnings require explicit approval. For a genuine changed submission, the student
+preview explains the SHA mismatch and approval requirement above the findings.
+Choose **Review and approve all eligible recovered findings** to expand that
+student's findings, inspect the feedback, then choose **Approve and select all
+eligible recovered findings**. Individual **Process with recovery** approval and
+selection/deselection remain available. Blocked, duplicate, invalid, and unmatched findings cannot be applied.
 Approval never turns an unresolved anchor or rubric association into an eligible
 finding. Recovered locations come exclusively from Slice 1.
 
@@ -182,6 +186,19 @@ regular Git blobs. It never follows symlinks or reads the working tree.
   available in the expected local repository. Verify recorded path, line range
   and exact excerpt. A mismatch is unresolved; line numbers are never trusted
   by themselves, and exact-SHA mismatches are not relocated.
+- `administrative`: both original SHAs remain in the plan, but trusted local Git
+  evidence proves the reviewable submission unchanged. Only the supported managed
+  grading workflow path may differ. Every inspected intervening commit must have
+  Graider's workflow deployment subject, identical object IDs/types/modes for all
+  other paths, and a regular nonexecutable workflow blob exactly matching the
+  workflow generated from trusted assignment configuration. A preexisting workflow
+  must have supported Graider ownership. Filename, ownership marker, or commit
+  subject alone never establishes equivalence. Source anchors still verify the
+  exact reviewed excerpt and unchanged current file; rubric validation is unchanged.
+  Ordinary import needs no recovery approval (other warnings still need approval).
+  Original source SHA/location/excerpt are retained in anchor history on apply.
+  Missing configuration, inaccessible objects, unsupported ownership, unexpected
+  changes, or inconclusive evidence retain changed-SHA recovery behavior.
 - `changed`: reviewed commit is in current canonical history but differs.
   Requires explicit instructor recovery approval even for general comments.
   First verify the excerpt at the recorded reviewed revision. Then search only

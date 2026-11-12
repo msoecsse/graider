@@ -1,3 +1,6 @@
+import { getEffectiveAssignmentGrading } from "../../src/config/effective-grading.js";
+import { isManagedGradingWorkflowEligible } from "../../src/workflows/managed-workflow-deployment.js";
+import { renderJavaJunitCheckstyleWorkflow } from "../../src/workflows/java-junit-checkstyle-workflow.js";
 import { randomUUID } from "node:crypto";
 import { loadGraiderConfig } from "../../src/config/config-loader.js";
 import { loadManifest } from "../../src/manifest/manifest-loader.js";
@@ -76,6 +79,10 @@ export const createContext = async (
   );
   if (config.status !== "success" || manifest.status !== "loaded")
     throw new Error("Assignment configuration or manifest is unavailable.");
+  const grading = getEffectiveAssignmentGrading(config.config);
+  const canonicalWorkflow = isManagedGradingWorkflowEligible(grading)
+    ? renderJavaJunitCheckstyleWorkflow({ grading })
+    : undefined;
   const factory = createDugiteGitWorkspaceFactory();
   const heads = new Map<string, string>();
   const readers = new Map<string, Awaited<ReturnType<typeof factory.open>>>();
@@ -98,7 +105,9 @@ export const createContext = async (
     currentHeads: heads,
     repository: async (id) => {
       const workspace = readers.get(id);
-      return workspace === undefined ? null : createReviewRepositoryReader(workspace);
+      return workspace === undefined
+        ? null
+        : createReviewRepositoryReader(workspace, canonicalWorkflow);
     }
   });
   if (result.status !== "success")
@@ -175,7 +184,7 @@ export const applyFinding = (
         ? {}
         : { rubricCategoryId: finding.rubric.categoryId }),
       ...(finding.anchor.proposed === undefined ? {} : { sourceLocation: finding.anchor.proposed }),
-      ...(original === undefined || !finding.recoveryRequired
+      ...(original === undefined || reviewedSha === canonicalSha
         ? {}
         : {
             sourceAnchor: {

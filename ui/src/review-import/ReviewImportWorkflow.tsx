@@ -40,6 +40,7 @@ export const ReviewImportWorkflow = ({
   const [preview, setPreview] = useState<ImportPreview>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [approved, setApproved] = useState<Set<string>>(new Set());
+  const [recoveryReviews, setRecoveryReviews] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult>();
   const [error, setError] = useState<string>();
@@ -75,6 +76,7 @@ export const ReviewImportWorkflow = ({
         setPreview(value);
         setSelected(readySelections(value));
         setApproved(new Set());
+        setRecoveryReviews(new Set());
         setResult(undefined);
       }
     } catch (error) {
@@ -249,6 +251,18 @@ export const ReviewImportWorkflow = ({
                   const student = preview.students.find(
                     (student) => student.studentId === review.matchedStudent?.studentId
                   );
+                  const recoverable = review.findings
+                    .filter(
+                      (finding) =>
+                        finding.eligibleToApply &&
+                        finding.recoveryRequired &&
+                        finding.operation === "add_comment" &&
+                        finding.rubric.status !== "unresolved" &&
+                        finding.anchor.status !== "unresolved" &&
+                        !finding.duplicate &&
+                        finding.status !== "invalid"
+                    )
+                    .map((finding) => selectionId(index, finding.key));
                   const selectable = review.findings
                     .filter((finding) => available(finding, selectionId(index, finding.key)))
                     .map((finding) => selectionId(index, finding.key));
@@ -317,7 +331,43 @@ export const ReviewImportWorkflow = ({
                         requiring approval
                       </p>
                       <Diagnostics items={review.diagnostics} />
-                      <details>
+                      {review.shaState === "changed" ? (
+                        <div className="review-import__approval">
+                          <p>
+                            The reviewed SHA differs from the current canonical submission. Student
+                            files may have changed. Review the findings and approve recovery before
+                            importing; unresolved or invalid findings remain blocked.
+                          </p>
+                          {recoverable.length === 0 ? null : recoveryReviews.has(index) ? (
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => {
+                                setApproved((current) => new Set([...current, ...recoverable]));
+                                toggle(recoverable, true);
+                              }}
+                            >
+                              Approve and select all eligible recovered findings
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => {
+                                setRecoveryReviews((current) => new Set([...current, index]));
+                              }}
+                            >
+                              Review and approve all eligible recovered findings
+                            </button>
+                          )}
+                        </div>
+                      ) : review.shaState === "administrative" ? (
+                        <p>
+                          Local Git evidence verifies only Graider-managed workflow changes. The
+                          reviewable submission is unchanged; recovery approval is unnecessary.
+                        </p>
+                      ) : null}
+                      <details open={recoveryReviews.has(index) ? true : undefined}>
                         <summary>Findings ({review.findings.length})</summary>
                         {review.findings.map((finding) => {
                           const id = selectionId(index, finding.key);

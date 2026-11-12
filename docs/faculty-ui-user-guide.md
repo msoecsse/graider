@@ -708,3 +708,28 @@ reported problem before retrying. Graider does not reset, clean, stash, or repla
 the checkout. If Git completes but saving the new submission SHA fails, grading
 remains blocked by its consistency guard until the repository and recorded SHA
 are reconciled; existing grading work remains saved.
+
+## Importing externally reviewed feedback
+
+In an assignment's grading workspace, choose **Import Reviews...** and select the
+review JSON files. **Review Import Preview** shows each student, repository,
+reviewed SHA, current canonical SHA, and finding counts. Ready findings start
+selected; **Apply Reviews** adds the selected feedback to ordinary grading.
+
+When local Git evidence verifies that only Graider's managed grading workflow
+changed, the preview explains that the reviewable submission is unchanged.
+Both SHAs remain visible and ordinary import needs no recovery approval.
+Other warnings, such as a rubric name fallback, still require approval.
+
+For a student resubmission, the preview explains the SHA mismatch and required
+approval above the findings. Choose **Review and approve all eligible recovered
+findings** for the student, inspect the expanded findings, then choose **Approve
+and select all eligible recovered findings**. You can still deselect individual
+findings or approve them one at a time with **Process with recovery**. Unresolved
+source locations, invalid rubric associations, and duplicates remain blocked.
+Approval adds no comments until you choose **Apply Reviews**.
+
+Graider rechecks the submission, repository, faculty access, source locations,
+rubric mappings, and duplicates before applying feedback. If the submission
+changes after preview, reopen the import. Import does not fetch or pull student
+repositories. See [Review Import](review-import.md) for the review file contract.

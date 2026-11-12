@@ -144,6 +144,13 @@ jobs:
       - name: Test actual student Git updates and grading preservation
         run: npx vitest run --maxWorkers=2 tests/unit/grading/grading-student-repository-update.test.ts tests/unit/git/git-command-workspace.test.ts
 
+      - name: Test Review Import local Git evidence and faculty recovery workflow
+        run: npx vitest run --maxWorkers=2 tests/unit/review-import
+
+      - name: Test Review Import main-process validation and preview
+        working-directory: ui
+        run: npx vitest run --maxWorkers=2 electron/reviewImportService.test.ts src/review-import/ReviewImportWorkflow.test.tsx
+
       - name: Test serial issue orchestrator process and recovery safeguards
         run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts
 

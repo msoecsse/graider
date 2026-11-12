@@ -216,3 +216,83 @@ describe("read-only Git review repository adapter", () => {
     expect(ws.readRevisionFile).toHaveBeenCalledOnce();
   });
 });
+
+describe("administrative submission equivalence", () => {
+  const managed = "# Managed by Graider\n# graider-workflow-version: 1\nname: Grade\n";
+  const requiredPath = (value: string) => {
+    const result = createRelativeGitPath(value);
+    if (result === null) throw new Error("Invalid fixture path");
+    return result;
+  };
+  const setup = () => {
+    const ws = workspace();
+    const source = {
+      path: requiredPath("src/Main.java"),
+      objectId: objectId(OLD_SHA),
+      mode: "100644",
+      objectType: "blob" as const
+    };
+    const workflow = {
+      ...source,
+      path: requiredPath(".github/workflows/grade.yml"),
+      objectId: objectId(SHA)
+    };
+    ws.listTree.mockImplementation((sha?: string) =>
+      Promise.resolve(sha === OLD_SHA ? [source] : [source, workflow])
+    );
+    ws.listCommits.mockResolvedValue([
+      {
+        id: objectId(SHA),
+        subject: "Configure Graider grading workflow",
+        committedAt: "2026-10-23T00:00:00Z"
+      },
+      { id: objectId(OLD_SHA), subject: "Student submission", committedAt: "2026-10-22T00:00:00Z" }
+    ]);
+    ws.readRevisionFile.mockResolvedValue(managed);
+    return { ws, source, workflow };
+  };
+  it("proves an instructor-managed-workflow-only commit using local tree objects and trusted generated content", async () => {
+    const { ws } = setup();
+    expect(
+      await createReviewRepositoryReader(ws, managed).isReviewableSubmissionUnchanged?.(
+        OLD_SHA,
+        SHA
+      )
+    ).toBe(true);
+  });
+  it.each([
+    "source",
+    "mode",
+    "unmanaged",
+    "spoofed marker",
+    "subject",
+    "missing evidence",
+    "missing history"
+  ])("fails closed for %s", async (kind) => {
+    const { ws, source, workflow } = setup();
+    if (kind === "source")
+      ws.listTree.mockImplementation((sha?: string) =>
+        Promise.resolve(
+          sha === OLD_SHA ? [source] : [{ ...source, objectId: objectId(SHA) }, workflow]
+        )
+      );
+    if (kind === "mode")
+      ws.listTree.mockImplementation((sha?: string) =>
+        Promise.resolve(sha === OLD_SHA ? [source] : [{ ...source, mode: "100755" }, workflow])
+      );
+    if (kind === "unmanaged") ws.readRevisionFile.mockResolvedValue("name: Grade");
+    if (kind === "spoofed marker")
+      ws.readRevisionFile.mockResolvedValue(managed + "arbitrary student content");
+    if (kind === "subject")
+      ws.listCommits.mockResolvedValue([
+        { id: objectId(SHA), subject: "Student work", committedAt: "date" },
+        { id: objectId(OLD_SHA), subject: "Old", committedAt: "date" }
+      ]);
+    if (kind === "missing history") ws.listCommits.mockResolvedValue([]);
+    const result = await createReviewRepositoryReader(
+      ws,
+      kind === "missing evidence" ? undefined : managed
+    ).isReviewableSubmissionUnchanged?.(OLD_SHA, SHA);
+    expect(result).toBe(false);
+  });
+});

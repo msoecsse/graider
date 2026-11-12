@@ -5,7 +5,7 @@ import type { Review, ReviewFinding, ReviewProvenance } from "./review-schema.js
 import type { ReviewDiagnostic } from "./review-input.js";
 
 export type ImportStatus = "ready" | "warning" | "duplicate" | "unmatched" | "invalid";
-export type ShaState = "exact" | "changed" | "unavailable" | "unrelated";
+export type ShaState = "exact" | "administrative" | "changed" | "unavailable" | "unrelated";
 export interface ReviewSubmission {
   readonly student: Pick<RosterStudent, "studentId" | "githubUsername">;
   readonly repository: { readonly owner: string; readonly name: string } | null;
@@ -27,6 +27,9 @@ export interface ReviewRepositoryReader {
   /** Proves membership in current canonical commit history; false = unrelated,
    * null = history unavailable. No fetching, pulls or checkout permitted. */
   isInHistory(reviewedSha: string, currentSha: string): Promise<boolean | null>;
+  /** Optional proof from local Git objects and trusted generated workflow content.
+   * Missing or inconclusive evidence must return false. */
+  isReviewableSubmissionUnchanged?(reviewedSha: string, currentSha: string): Promise<boolean>;
   readRevisionFile(sha: string, file: string): Promise<string | null>;
 }
 export interface RubricMapping {

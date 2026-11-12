@@ -244,6 +244,35 @@ describe("trusted review import workflow", () => {
       }
     });
   });
+  it("revalidates administrative equivalence at apply and preserves original anchor history", async () => {
+    const f = fixture();
+    f.review.repository.reviewedCommitSha = OLD;
+    f.writeReview();
+    const trusted = await f.createContext();
+    const baseReader = await trusted.repository("jones");
+    if (baseReader === null) throw new Error("Missing reader");
+    let equivalent = true;
+    f.createContext.mockImplementation(async () => ({
+      ...trusted,
+      repository: async () => ({
+        ...baseReader,
+        isReviewableSubmissionUnchanged: async () => equivalent,
+        readRevisionFile: async () => "input.trim();\n"
+      })
+    }));
+    const p = required(await f.preview());
+    expect(p.plan.reviews[0]?.shaState).toBe("administrative");
+    equivalent = false;
+    expect(await f.apply(p, false, [0])).toMatchObject({ applied: 0, failed: 1 });
+    equivalent = true;
+    expect(await f.apply(p, false, [0])).toMatchObject({ applied: 1, failed: 0 });
+    expect(f.readState().appliedComments.at(-1)).toMatchObject({
+      sourceAnchor: {
+        originalCommitSha: OLD,
+        originalLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+      }
+    });
+  });
   it("blocks unsafe anchors even with approval", async () => {
     const f = fixture();
     f.review.findings[0]!.sourceLocation!.excerpt = "missing();";

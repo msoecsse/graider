@@ -124,6 +124,15 @@ const planReview = async (
   } catch {
     reader = null;
   }
+  let administrative = false;
+  if (history === true && reviewedSha !== canonicalSha && reader !== null) {
+    try {
+      administrative =
+        (await reader.isReviewableSubmissionUnchanged?.(reviewedSha, canonicalSha)) === true;
+    } catch {
+      // Unverifiable administrative evidence retains explicit recovery approval.
+    }
+  }
   const shaState: ShaState =
     history === false
       ? "unrelated"
@@ -131,7 +140,9 @@ const planReview = async (
         ? "unavailable"
         : reviewedSha === canonicalSha
           ? "exact"
-          : "changed";
+          : administrative
+            ? "administrative"
+            : "changed";
   const diagnostics = [...match.diagnostics];
   if (shaState === "changed")
     diagnostics.push(
@@ -171,7 +182,8 @@ const planReview = async (
       reader,
       reviewedSha,
       canonicalSha,
-      history === true
+      history === true,
+      administrative
     );
     const findingDiagnostics = [...rubric.diagnostics, ...anchor.diagnostics];
     if (duplicate)

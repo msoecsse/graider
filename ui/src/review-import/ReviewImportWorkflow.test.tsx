@@ -200,6 +200,26 @@ describe("Review Import Preview", () => {
     expect(screen.getByLabelText("Select finding Recover")).toBeDisabled();
     expect(screen.getByLabelText("Select finding Recover")).not.toBeChecked();
   });
+  it("exposes per-student recovery approval outside collapsed findings and preserves individual deselection", async () => {
+    await open();
+    const action = screen.getByRole("button", {
+      name: "Review and approve all eligible recovered findings"
+    });
+    expect(action.closest("details")).toBeNull();
+    expect(screen.getByText(/The reviewed SHA differs/).closest("details")).toBeNull();
+    fireEvent.click(action);
+    expect(document.querySelectorAll("details[open]")).toHaveLength(1);
+    expect(screen.getByLabelText("Approve Recover")).not.toBeChecked();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve and select all eligible recovered findings" })
+    );
+    expect(screen.getByLabelText("Approve Recover")).toBeChecked();
+    expect(screen.getByLabelText("Select finding Recover")).toBeChecked();
+    expect(screen.getByLabelText("Select finding Unsafe")).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Select finding Recover"));
+    expect(screen.getByLabelText("Select finding Recover")).not.toBeChecked();
+    expect(screen.getByLabelText("Approve Recover")).toBeChecked();
+  });
   it("sends only selections/approvals with plan identity and refreshes ordinary grading, then shows partial results", async () => {
     const onApplied = await open();
     fireEvent.click(screen.getByText("Clear selections"));

@@ -126,7 +126,8 @@ export const planReviewAnchor = async (
   reader: ReviewRepositoryReader | null,
   reviewedSha: string,
   currentSha: string,
-  historyVerified: boolean
+  historyVerified: boolean,
+  administrative = false
 ): Promise<AnchorPlan> => {
   const original = finding.sourceLocation;
   if (original === undefined) return { status: "general", diagnostics: [] };
@@ -173,7 +174,13 @@ export const planReviewAnchor = async (
     startLine: original.startLine,
     endLine: original.endLine
   };
-  if (reviewedSha === currentSha) return { status: "ready", original, proposed, diagnostics: [] };
+  if (administrative && before !== after)
+    return unresolved(
+      "source_changed",
+      "Administrative equivalence does not match the source blobs."
+    );
+  if (reviewedSha === currentSha || administrative)
+    return { status: "ready", original, proposed, diagnostics: [] };
   const matches = exactSourceMatches(after, original.excerpt);
   const startLine = matches[0];
   return matches.length === 1 && startLine !== undefined

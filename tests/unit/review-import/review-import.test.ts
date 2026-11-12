@@ -428,6 +428,57 @@ describe("anchor verification and rubric mapping", () => {
       ).anchor.status
     ).toBe("unresolved");
   });
+  it("imports verified administrative-only changes without recovery while preserving both SHAs", async () => {
+    const plan = await single(
+      fixture("changed-recoverable"),
+      context({
+        reader: reader({ isReviewableSubmissionUnchanged: () => Promise.resolve(true) })
+      })
+    );
+    expect(plan).toMatchObject({
+      status: "ready",
+      shaState: "administrative",
+      currentCommitSha: CURRENT_SHA
+    });
+    expect(plan.review?.repository.reviewedCommitSha).toBe(PREVIOUS_SHA);
+    expect(first(plan)).toMatchObject({
+      requiresApproval: false,
+      recoveryRequired: false,
+      anchor: { status: "ready", original: { startLine: 2 }, proposed: { startLine: 2 } }
+    });
+    expect(plan.findings[1]).toMatchObject({ requiresApproval: false, recoveryRequired: false });
+  });
+  it("still validates source and rubric for administrative equivalence", async () => {
+    const review = fixture("changed-recoverable");
+    required(review.findings[1]).rubric = { id: "unknown" };
+    const plan = await single(
+      review,
+      context({
+        reader: reader({
+          isReviewableSubmissionUnchanged: () => Promise.resolve(true),
+          readRevisionFile: (sha) => Promise.resolve(sha === PREVIOUS_SHA ? SOURCE : "wrong")
+        })
+      })
+    );
+    expect(first(plan).eligibleToApply).toBe(false);
+    expect(plan.findings[1]?.eligibleToApply).toBe(false);
+  });
+  it("keeps recovery approval when administrative evidence is unavailable", async () => {
+    const plan = await single(
+      fixture("changed-recoverable"),
+      context({
+        reader: reader({
+          isReviewableSubmissionUnchanged: () => Promise.reject(new Error("unavailable"))
+        })
+      })
+    );
+    expect(plan.shaState).toBe("changed");
+    expect(first(plan)).toMatchObject({
+      eligibleToApply: true,
+      requiresApproval: true,
+      recoveryRequired: true
+    });
+  });
   it("requires approval for unique same-file changed-SHA recovery", async () => {
     const review = fixture("changed-recoverable");
     const plan = await single(
