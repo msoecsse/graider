@@ -540,9 +540,9 @@ describe("optional GUI evidence", () => {
     });
     const result = JSON.parse(
       fs.readFileSync(path.join(repository, "graider-output/grading-results.json"), "utf8")
-    );
+    ) as { status: string; summary: string; checks: { status: string }[] };
     expect(result.status).toBe(status);
-    expect(result.summary).toBe(`${guiStatus}: ${verified} verified GUI tests`);
+    expect(result.summary).toBe(`${guiStatus}: ${String(verified)} verified GUI tests`);
     expect(result.checks).toHaveLength(journal === "" ? 2 : 3);
     expect(result.checks.every((check: { status: string }) => check.status !== "skipped")).toBe(
       true
