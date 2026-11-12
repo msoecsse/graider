@@ -128,6 +128,24 @@ files as:
 
 ## 6. Validation and failures
 
+Use change-scoped local validation. Identify changed production files and
+affected dependencies; run new or modified tests and relevant regression tests.
+Run affected integration tests when behavior crosses service, IPC, Git,
+authorization, or persistence boundaries. Run typechecking, test hygiene, and
+appropriate lint/format checks, and build affected components where needed.
+Do not routinely run complete root and UI suites locally or repeat successful
+unrelated tests. Make one final relevant local validation pass before committing.
+
+Existing CI provides comprehensive root/UI regression coverage. Required CI
+success at the exact commit is acceptable evidence for comprehensive regression
+validation. Preserve Windows x64 and macOS arm64 compatibility checks and all
+security, migration, and performance coverage. Investigate individual CI
+failures with targeted tests; do not automatically rerun whole suites after
+unrelated changes. Broader local validation remains necessary for migrations,
+authorization, security-sensitive Git operations, or changes without
+equivalent CI coverage. Honor explicit issue requirements for additional local
+validation.
+
 Run the lightest focused tests first, then the validation required by the issue
 and shared contracts.
 
@@ -185,8 +203,8 @@ blocker instead.
 ## Permanent migration regression validation
 
 Changes affecting schemas, migration, course management, Git transactions,
-authorization or reconciliation must run `npm run test:migration` from the root,
-in addition to scope-required root/UI validation. Both native CI jobs (macOS arm64
-and Windows x64) must pass before merging or releasing affected changes. This
-suite remains required after Phase 9. See
+authorization or reconciliation must retain the permanent
+`npm run test:migration` requirement. Run it locally for affected work; both
+native CI jobs (macOS arm64 and Windows x64) must pass before merging or
+releasing. This suite remains required after Phase 9. See
 [coverage and failure diagnosis](docs/migration-regression.md).

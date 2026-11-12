@@ -93,23 +93,26 @@ repeating standard safety, testing, and validation guidance.
 
 ## Validation Expectations
 
-Use actual script names if they differ on the current branch.
+Use change-scoped local validation as described in the
+[development contract](codex-development-contract.md): identify changed
+production files and dependencies, run new or modified tests plus relevant
+regression tests, affected integration tests at service/IPC/Git/authorization/
+persistence boundaries, and applicable typecheck, hygiene, lint, format, and
+component build checks. Do not routinely run complete root/UI suites or repeat
+successful unrelated tests. Complete one final relevant local pass before
+committing.
 
-For UI fixes, default to:
+CI provides comprehensive root/UI regression coverage. Required success at the
+exact commit is acceptable as comprehensive regression evidence, while local
+focused tests establish readiness to commit. Preserve both native platform CI
+jobs and all security, migration, and performance coverage. Use targeted tests
+to investigate individual CI failures. Broader local validation remains
+necessary for migration, authorization, security-sensitive Git operations, or
+any change without equivalent CI coverage. Follow explicit task requirements
+for additional local validation.
 
-```bash
-cd ui && npm run typecheck && npm test && npm run build
-```
-
-For backend fixes, default to:
-
-```bash
-npm run typecheck
-npm run lint
-npm run format:check
-npm test
-npm run build
-```
+Use actual script names if they differ on the current branch. Select checks
+based on the affected component rather than running every listed command.
 
 For packaged app fixes, include packaging validation when relevant:
 

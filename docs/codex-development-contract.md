@@ -72,14 +72,27 @@ Use this contract for all backend, UI, test, and documentation changes.
 
 ### Efficient validation and output
 
-- During implementation, run focused tests and checks. Repeat them as necessary
-  during debugging.
-- Run the full validation required by the issue once near completion, after
-  focused tests pass and changes are stable.
-- Repeat full validation when later changes could invalidate its results or
-  failures require it. Never omit required validation.
-- Run root and UI suites according to issue scope and explicit validation
-  requirements. Avoid unnecessary repeated full-suite executions.
+- Identify changed production files and affected dependencies. During
+  implementation, run new or modified tests and relevant existing regression
+  tests.
+- Run affected integration tests when behavior crosses service, IPC, Git,
+  authorization, or persistence boundaries.
+- Run typechecking, test hygiene, and appropriate lint/format checks. Build
+  affected components when needed.
+- Do not routinely run complete root and UI suites locally, and do not repeat
+  successful unrelated tests. Make one final relevant local validation pass
+  before committing.
+- Existing CI remains responsible for comprehensive root/UI regression testing.
+  Required CI success at the exact commit is acceptable completion evidence for
+  comprehensive regression validation. Preserve Windows x64 and macOS arm64
+  compatibility verification and all security, migration, and performance
+  coverage.
+- Investigate individual CI failures using targeted tests. Do not automatically
+  repeat entire suites following unrelated changes.
+- Broader local validation remains necessary for migrations, authorization,
+  security-sensitive Git operations, and changes without equivalent CI
+  coverage. Honor explicit task requirements for additional local validation.
+- Avoid unnecessary builds, packaging, and dependency installation.
 - Capture verbose test output in temporary log files where practical. Show
   concise summaries and relevant failure excerpts instead of thousands of
   passing lines.
@@ -116,7 +129,9 @@ delete, or weaken the test to obtain a green run. There is no guard allowlist.
 
 ## Validation Commands
 
-For backend or shared code changes, the preferred validation sequence is:
+For backend or shared code changes, select checks based on changed files and
+their affected dependencies. Do not treat this full sequence as a routine local
+requirement:
 
 ```bash
 npm run typecheck
