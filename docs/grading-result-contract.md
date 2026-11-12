@@ -414,3 +414,50 @@ Implementation should preserve Graider's existing safety constraints: normal
 tests must not require live GitHub credentials, published student reports must
 not include other students' data, and runtime behavior should change only in the
 slice that explicitly implements that behavior.
+
+## Optional managed JavaFX GUI smoke verification
+
+Faculty approved the optional helper and informational result semantics in
+[#48](https://github.com/msoecsse/graider/issues/48), resolving the design blocker
+for [#34](https://github.com/msoecsse/graider/issues/34).
+
+The generated preset compiles `graider.gui.GuiSmoke` outside submission source
+roots when JavaFX is required. Faculty JUnit tests call
+`GuiSmoke.verify(ApplicationClass.class, "#nodeId", stage -> observableCondition)`.
+The helper invokes the application's initialization and `start(Stage)`, requires
+a showing Stage with a Scene, clicks the selected visible enabled node using a
+JavaFX Robot, and requires the condition to change from false to true. Predicates
+run on the JavaFX thread. Call the helper from the JUnit test thread. Applications
+must support normal JavaFX construction and lifecycle methods; custom launch
+arguments and applications depending on an overridden launcher are not supported.
+Existing TestFX tests remain ordinary JUnit tests unless adapted. Avoid mixing
+TestFX toolkit lifecycle management and the helper in the same JVM.
+
+Startup/init and Stage creation each have a 15-second deadline, interaction and
+assertion calls have 10-second deadlines, and cleanup has a 5-second deadline.
+The entire JUnit invocation is limited to 300 seconds with a 5-second termination
+grace period. These deadlines also bound stuck student code; timeout diagnostics
+and partial execution evidence remain in the always-uploaded artifact.
+
+The workflow resets `grading-evidence/gui-events.txt` immediately before JUnit.
+Only complete ordered helper sequences (started, launch, interaction, assertion,
+shutdown, passed), together with successful compilation/JUnit, establish GUI
+verification. Counts refer to helper invocations; use one invocation per smoke
+test. Incomplete sequences, failed assertions, launch/cleanup failures and
+timeouts cannot establish verification, even if a test catches the exception.
+`grading-evidence/gui.json` and metadata's optional `gui` field contain the
+executed and verified counts, status and phase events. The writer regenerates
+these and the result JSON; submission-provided result JSON is never accepted as
+GUI proof. Like existing JUnit evidence, this is test execution evidence, not a
+sandbox against deliberately malicious code running inside the grading JVM.
+
+With no helper executions, the result `summary`, Actions summary and GUI evidence
+say **GUI not verified: 0 verified GUI tests**. No GUI check is added, and existing
+pass/fail behavior is preserved. This is informational, including for JavaFX
+projects whose ordinary JUnit/TestFX tests all pass. With explicit executions,
+a `GUI Smoke Tests` check passes only for complete successful execution; all
+other executed outcomes fail that check and overall grading. CheckStyle and Unit
+Tests remain mandatory, and skipped checks still cannot produce a managed pass.
+The artifact name, schema version and evidence identity binding are unchanged.
+Existing deployed workflows require the normal explicit managed workflow repair
+to adopt this generated content; generation does not modify student repositories.

@@ -63,7 +63,8 @@ describe("managed workflow policy", () => {
 
     expect(earlierManagedWorkflow).not.toBe(canonical);
     expect(earlierManagedWorkflow).not.toContain("Set final grading status");
-    expect(canonical.startsWith(earlierManagedWorkflow)).toBe(true);
+    expect(canonical).toContain("Set final grading status");
+    expect(canonical).toContain("Prepare optional GUI smoke helper");
     expect(earlierManagedWorkflow).toContain("# graider-workflow-version: 1");
     expect(classifyManagedWorkflow(earlierManagedWorkflow, canonical)).toEqual({
       classification: "managed_outdated",

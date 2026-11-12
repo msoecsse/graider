@@ -752,3 +752,37 @@ Graider rechecks the submission, repository, faculty access, source locations,
 rubric mappings, and duplicates before applying feedback. If the submission
 changes after preview, reopen the import. See [Review Import](review-import.md)
 for the review file contract.
+
+### Optional JavaFX GUI smoke tests
+
+A successful JavaFX compilation or ordinary JUnit/TestFX run does not verify the
+GUI. The managed Java preset reports **GUI not verified** with zero verified GUI
+tests unless a faculty-provided test uses the optional `graider.gui.GuiSmoke`
+helper. Existing assignments do not need to adopt it and retain their grading
+behavior. The informational status appears in the grading result summary, the
+Actions job summary and the grading artifact's `grading-evidence/gui.json`.
+
+For an Application with a button `#submit` and label `#result`, a JUnit test can
+use:
+
+```java
+@Test
+void submitUpdatesResult() throws Exception {
+    GuiSmoke.verify(MyApplication.class, "#submit", stage ->
+        "Submitted".equals(((Label) stage.getScene().lookup("#result")).getText()));
+}
+```
+
+Import `graider.gui.GuiSmoke` and the usual JUnit/JavaFX types. The label must
+start with a different value. The helper shows the actual student application,
+checks its Stage/Scene, clicks the button through JavaFX Robot under Xvfb, and
+waits for the label change. Use one helper call per test. Existing TestFX tests
+need explicit adaptation; do not combine competing toolkit lifecycle managers.
+
+GUI launch, click/assertion and shutdown failures fail grading. Consult the
+JUnit output and ordered GUI phase events in the always-uploaded artifact to
+locate a failure. Startup, interaction and shutdown deadlines prevent hangs.
+See the [grading result contract](grading-result-contract.md#optional-managed-javafx-gui-smoke-verification)
+for deadlines, lifecycle compatibility and evidence semantics. Adopt the new
+workflow using the existing explicit managed workflow repair; Graider does not
+silently deploy it to existing repositories.

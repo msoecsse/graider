@@ -469,3 +469,87 @@ describe("java-junit-checkstyle workflow", () => {
     expect(workflow).toContain("graider-output/custom-result.json");
   });
 });
+
+describe("optional GUI evidence", () => {
+  it.each([
+    ["plain Java", "", "success", "GUI not verified", "passed", 0],
+    ["ordinary JavaFX/TestFX", "", "success", "GUI not verified", "passed", 0],
+    [
+      "completed helper",
+      "started\nlaunch\ninteraction\nassertion\nshutdown\npassed\n",
+      "success",
+      "GUI verified",
+      "passed",
+      1
+    ],
+    [
+      "assertion failure",
+      "started\nlaunch\ninteraction\nshutdown\n",
+      "failure",
+      "GUI verification failed",
+      "failed",
+      0
+    ],
+    ["startup timeout", "started\n", "failure", "GUI verification failed", "failed", 0],
+    [
+      "missing evidence",
+      "started\nlaunch\npassed\n",
+      "success",
+      "GUI verification failed",
+      "failed",
+      0
+    ],
+    [
+      "shutdown failure",
+      "started\nlaunch\ninteraction\nassertion\n",
+      "failure",
+      "GUI verification failed",
+      "failed",
+      0
+    ],
+    [
+      "failed enclosing test",
+      "started\nlaunch\ninteraction\nassertion\nshutdown\npassed\n",
+      "failure",
+      "GUI verification failed",
+      "failed",
+      0
+    ]
+  ])("classifies %s", (_name, journal, junit, guiStatus, status, verified) => {
+    const repository = createTemporaryRepository();
+    const workflow = renderJavaJunitCheckstyleWorkflow({ grading });
+    const writer = workflowStep(workflow, "Write Graider grading result and evidence metadata");
+    const evidence = path.join(repository, "grading-evidence");
+    writeRepositoryFile(repository, "grading-evidence/gui-events.txt", journal);
+    // Student JSON is never an input to the managed result writer.
+    writeRepositoryFile(
+      repository,
+      "graider-output/grading-results.json",
+      '{"status":"passed","gui":"verified"}'
+    );
+    runBashStep(writer.run ?? "", repository, {
+      CHECKSTYLE_OUTCOME: "success",
+      COMPILE_OUTCOME: "success",
+      UNIT_TESTS_OUTCOME: junit,
+      SUBMISSION_COMMIT_SHA: "submission",
+      WORKFLOW_RUN_ID: "123",
+      WORKFLOW_RUN_ATTEMPT: "1",
+      RESULT_OUTPUT_PATH: "graider-output/grading-results.json",
+      EVIDENCE_DIR: evidence,
+      OUTPUT_DIR: path.join(repository, "graider-output")
+    });
+    const result = JSON.parse(
+      fs.readFileSync(path.join(repository, "graider-output/grading-results.json"), "utf8")
+    );
+    expect(result.status).toBe(status);
+    expect(result.summary).toBe(`${guiStatus}: ${verified} verified GUI tests`);
+    expect(result.checks).toHaveLength(journal === "" ? 2 : 3);
+    expect(result.checks.every((check: { status: string }) => check.status !== "skipped")).toBe(
+      true
+    );
+    expect(JSON.parse(fs.readFileSync(path.join(evidence, "gui.json"), "utf8"))).toMatchObject({
+      status: guiStatus,
+      verified
+    });
+  });
+});

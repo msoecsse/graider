@@ -1,3 +1,4 @@
+import { javaGuiSmokeHelper } from "./java-gui-smoke-helper.js";
 import type { EffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { renderManagedWorkflowMarker } from "./managed-workflow-policy.js";
 
@@ -191,6 +192,16 @@ jobs:
             if ! jar tf "__GRAIDER_DOLLAR__jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: __GRAIDER_DOLLAR__jar_file"; exit 1; fi
           done
 
+      - name: Prepare optional GUI smoke helper
+        if: env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "__GRAIDER_DOLLAR__TOOLS_DIR/gui-source/graider/gui"
+          cat > "__GRAIDER_DOLLAR__TOOLS_DIR/gui-source/graider/gui/GuiSmoke.java" <<'JAVA'
+__GUI_HELPER__
+          JAVA
+
       - name: CheckStyle
         id: checkstyle
         continue-on-error: true
@@ -230,6 +241,9 @@ jobs:
           JAVAFX_COMPILE_ARGS=()
           if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
             JAVAFX_COMPILE_ARGS=(--module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
+          fi
+          if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
+            JAVA_FILES+=("__GRAIDER_DOLLAR__TOOLS_DIR/gui-source/graider/gui/GuiSmoke.java")
           fi
           javac "__GRAIDER_DOLLAR__{JAVAFX_COMPILE_ARGS[@]}" -cp "__GRAIDER_DOLLAR__CLASSPATH" -d "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"
 
@@ -280,7 +294,10 @@ jobs:
             JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)
             JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
           fi
-          "__GRAIDER_DOLLAR__{JUNIT_COMMAND[@]}" "__GRAIDER_DOLLAR__{JAVAFX_RUNTIME_ARGS[@]}" -jar "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" execute "__GRAIDER_DOLLAR__{TAG_ARGS[@]}" --scan-class-path --class-path "__GRAIDER_DOLLAR__TEST_CLASSPATH" --reports-dir "__GRAIDER_DOLLAR__EVIDENCE_DIR/junit" --fail-if-no-tests
+          # Reset GUI execution evidence after checkout/compilation; never consume student result JSON.
+          export GRAIDER_GUI_JOURNAL="__GRAIDER_DOLLAR__EVIDENCE_DIR/gui-events.txt"
+          : > "__GRAIDER_DOLLAR__GRAIDER_GUI_JOURNAL"
+          timeout --signal=TERM --kill-after=5s 300s "__GRAIDER_DOLLAR__{JUNIT_COMMAND[@]}" "__GRAIDER_DOLLAR__{JAVAFX_RUNTIME_ARGS[@]}" -jar "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" execute "__GRAIDER_DOLLAR__{TAG_ARGS[@]}" --scan-class-path --class-path "__GRAIDER_DOLLAR__TEST_CLASSPATH" --reports-dir "__GRAIDER_DOLLAR__EVIDENCE_DIR/junit" --fail-if-no-tests
 
       - name: Write Graider grading result and evidence metadata
         if: always()
@@ -313,6 +330,39 @@ jobs:
           overall_status = "passed" if checkstyle_status == "passed" and unit_tests_status == "passed" else "failed"
           grading_result = {"schema_version": 1, "status": overall_status, "checks": [{"name": "CheckStyle", "status": checkstyle_status}, {"name": "Unit Tests", "status": unit_tests_status}]}
           metadata = {"schemaVersion": 1, "submissionCommitSha": os.environ["SUBMISSION_COMMIT_SHA"], "workflowRunId": os.environ["WORKFLOW_RUN_ID"], "workflowRunAttempt": os.environ["WORKFLOW_RUN_ATTEMPT"], "compile": {"outcome": compile_result}, "junit": {"outcome": junit}, "checkstyle": {"outcome": checkstyle}}
+          # Only the ordered helper execution journal participates in GUI classification.
+          # The result JSON is always regenerated, never read from the submission.
+          journal = Path(os.environ["EVIDENCE_DIR"]) / "gui-events.txt"
+          events = journal.read_text(encoding="utf-8").splitlines() if journal.exists() else []
+          sequence = ["started", "launch", "interaction", "assertion", "shutdown", "passed"]
+          attempts = events.count("started")
+          verified = 0
+          pending = []
+          invalid = False
+          for event in events:
+              if event == "started":
+                  if pending: invalid = True
+                  pending = []
+              pending.append(event)
+              if pending == sequence:
+                  verified += 1
+                  pending = []
+          invalid = invalid or bool(pending) or verified != attempts
+          gui_status = "GUI not verified"
+          if attempts or events:
+              gui_passed = not invalid and verified > 0 and unit_tests_status == "passed"
+              gui_status = "GUI verified" if gui_passed else "GUI verification failed"
+              grading_result["checks"].append({"name": "GUI Smoke Tests", "status": "passed" if gui_passed else "failed", "message": gui_status})
+              if not gui_passed: grading_result["status"] = "failed"
+          gui = {"status": gui_status, "executed": attempts, "verified": verified if gui_status == "GUI verified" else 0, "events": events}
+          grading_result["summary"] = gui_status + ": " + str(gui["verified"]) + " verified GUI tests"
+          metadata["gui"] = gui
+          (Path(os.environ["EVIDENCE_DIR"]) / "gui.json").write_text(json.dumps(gui, indent=2) + "\n", encoding="utf-8")
+          print(grading_result["summary"])
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as summary:
+                  summary.write(grading_result["summary"] + "\n")
           output_path = Path(os.environ["RESULT_OUTPUT_PATH"])
           output_path.parent.mkdir(parents=True, exist_ok=True)
           output_path.write_text(json.dumps(grading_result, indent=2) + "\n", encoding="utf-8")
@@ -364,6 +414,14 @@ jobs:
 
   return [...renderManagedWorkflowMarker(), workflow]
     .join("\n")
+    .replaceAll(
+      "__GUI_HELPER__",
+      javaGuiSmokeHelper
+        .trimEnd()
+        .split("\n")
+        .map((line) => `          ${line}`)
+        .join("\n")
+    )
     .replaceAll(DOLLAR_TOKEN, "$")
     .replaceAll("__ARTIFACT__", artifact)
     .replaceAll("__RESULT_PATH__", result);
