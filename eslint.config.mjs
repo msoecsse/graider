@@ -53,6 +53,7 @@ export default tseslint.config(
   {
     files: [
       "ui/scripts/package-win.cjs",
+      "ui/scripts/package-win-installer-test.cjs",
       "ui/scripts/package-git-proof.cjs",
       "ui/scripts/run-packaged-dugite-proof.cjs",
       "ui/scripts/verify-packaged-dugite.cjs"

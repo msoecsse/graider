@@ -1,0 +1,139 @@
+name: Windows NSIS installer test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - remote-course-v2
+    paths:
+      - ".github/workflows/windows-installer-test.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "ui/package.json"
+      - "ui/package-lock.json"
+      - "ui/electron-builder*.cjs"
+      - "ui/scripts/**"
+      - "ui/electron/windowsInstallerConfig.test.ts"
+      - "ui/electron/packagingConfig.test.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer-test:
+    name: Native Windows x64 NSIS install and bundled Git
+    if: github.repository == 'msoecsse/graider'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      NSIS_TEST_INSTALL: ${{ runner.temp }}\Graider NSIS test with spaces
+
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+
+      - name: Check out exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js 24 x64
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: x64
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Verify native Windows x64
+        run: node -e "if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Native Windows x64 required');"
+
+      - run: npm ci
+      - run: npm ci --prefix ui
+
+      - name: Test installer and existing packaging contracts
+        working-directory: ui
+        run: npx vitest run electron/windowsInstallerConfig.test.ts electron/packagingConfig.test.ts
+
+      - name: Build unsigned NSIS test installer
+        env:
+          # Nonfunctional CI-only value; no sign-in, release or production credentials.
+          GRAIDER_GITHUB_OAUTH_CLIENT_SECRET: ci-only-nonfunctional-nsis-test
+        run: npm --prefix ui run package:win:installer-test
+
+      - name: Remove loose OAuth configuration
+        if: always()
+        run: |
+          $config = 'ui/dist-electron/github-oauth.release.json'
+          if (Test-Path -LiteralPath $config) {
+            Remove-Item -LiteralPath $config -Force -ErrorAction Stop
+          }
+
+      - name: Verify unsigned installer and differential blockmap
+        run: |
+          $version = (Get-Content -Raw ui/package.json | ConvertFrom-Json).version
+          $installer = "ui/release/windows-installer-test/Graider-$version-win-x64-unsigned-test-setup.exe"
+          if (!(Test-Path -LiteralPath $installer) -or (Get-Item -LiteralPath $installer).Length -eq 0) {
+            throw 'Expected a nonempty, versioned NSIS test installer.'
+          }
+          if ((Get-AuthenticodeSignature -LiteralPath $installer).Status -ne 'NotSigned') {
+            throw 'The NSIS test installer must be unsigned.'
+          }
+          node -e "const fs=require('node:fs');const z=require('node:zlib');const assert=require('node:assert/strict');const p=process.argv[1];const b=fs.readFileSync(p);assert.equal(b.subarray(0,2).toString(),'MZ');const m=JSON.parse(z.gunzipSync(fs.readFileSync(p+'.blockmap')));assert.ok(m.files.length>0);assert.ok(m.files.every(f=>f.checksums.length>0&&f.checksums.length===f.sizes.length));" $installer
+          if ($LASTEXITCODE -ne 0) { throw 'Installer or blockmap validation failed.' }
+          if (Test-Path 'ui/release/windows-installer-test/win-unpacked/resources/app-update.yml') {
+            throw 'Unsigned test packages must not contain an update feed.'
+          }
+          if (Get-ChildItem 'ui/release/windows-installer-test' -Filter '*latest*.yml') {
+            throw 'Unsigned test packages must not produce release update metadata.'
+          }
+          "NSIS_TEST_SHA256=$((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash)" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Install and reinstall per-user without launching Graider
+        run: |
+          $version = (Get-Content -Raw ui/package.json | ConvertFrom-Json).version
+          $installer = (Resolve-Path "ui/release/windows-installer-test/Graider-$version-win-x64-unsigned-test-setup.exe").Path
+          # NSIS requires /D last, without quotes even when the path contains spaces.
+          foreach ($attempt in 1..2) {
+            $process = Start-Process -FilePath $installer -ArgumentList "/S /D=$env:NSIS_TEST_INSTALL" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "NSIS install attempt $attempt failed: $($process.ExitCode)" }
+            if (!(Test-Path -LiteralPath "$env:NSIS_TEST_INSTALL\Graider.exe")) {
+              throw 'The installed Graider executable is missing.'
+            }
+          }
+
+      - name: Verify installed x64 app and bundled Git with no system Git
+        env:
+          ELECTRON_RUN_AS_NODE: "1"
+        run: |
+          $app = "$env:NSIS_TEST_INSTALL\Graider.exe"
+          node -e "const fs=require('node:fs');const assert=require('node:assert/strict');const b=fs.readFileSync(process.argv[1]);const o=b.readUInt32LE(0x3c);assert.equal(b.subarray(o,o+4).toString('hex'),'50450000');assert.equal(b.readUInt16LE(o+4),0x8664);" $app
+          if ($LASTEXITCODE -ne 0) { throw 'Installed app is not Windows x64.' }
+          & $app "$env:GITHUB_WORKSPACE\ui\scripts\verify-packaged-dugite.cjs" --resources "$env:NSIS_TEST_INSTALL\resources"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed bundled Git proof failed.' }
+
+      - name: Uninstall test app
+        if: always()
+        run: |
+          $uninstaller = "$env:NSIS_TEST_INSTALL\Uninstall Graider.exe"
+          if (Test-Path -LiteralPath $uninstaller) {
+            $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed: $($process.ExitCode)" }
+            if (Test-Path -LiteralPath "$env:NSIS_TEST_INSTALL\Graider.exe") {
+              throw 'NSIS uninstall left the application executable installed.'
+            }
+          }
+
+      - name: Record test-only scope
+        run: |
+          @"
+          Unsigned Windows x64 NSIS test passed at ${{ github.sha }}.
+          Installer/blockmap built, installed twice, bundled Git verified, and uninstalled.
+          No artifacts uploaded or releases published. No updater runtime or signed update chain validated.
+          "@ >> $env:GITHUB_STEP_SUMMARY

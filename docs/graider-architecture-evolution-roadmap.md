@@ -239,6 +239,16 @@ dependencies; Phase 9 development or a Preview artifact does not mark them compl
 
 Replace the portable-only release path with a signed Windows x64 installer.
 
+First foundation slice **3.1A** ([#49](https://github.com/msoecsse/graider/issues/49))
+adds a separate unsigned NSIS test configuration and native Windows x64
+build/install/reinstall/uninstall plus installed bundled-Git validation. It preserves
+the portable Preview handoff. Test artifacts are versioned, differential-aware and
+isolated; publishing and feed inference are disabled. It adds no updater runtime,
+release metadata/channel publishing, signing credentials or Schema v2 enablement.
+See the [packaging and signing prerequisites](electron-packaging.md#windows-nsis-installer-foundation-phase-31a).
+Full 3.1 remains pending the owner's personal Microsoft signing setup and a separate
+fail-closed signing/verification slice with signed production acceptance.
+
 ## Slice 3.2 — macOS production signing
 
 Configure:
@@ -246,6 +256,7 @@ Configure:
 - Developer ID signing;
 - notarization;
 - production DMG.
+- update ZIP.
 
 ## Slice 3.3 — GitHub Release pipeline
 

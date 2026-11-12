@@ -14,6 +14,7 @@
     "package": "npm run build:cli && npm run build && electron-builder --config electron-builder.config.cjs",
     "package:mac": "npm run build:cli && npm run build && electron-builder --mac dir --arm64 --config electron-builder.config.cjs",
     "package:win": "npm run build:cli && npm run build && node scripts/package-win.cjs",
+    "package:win:installer-test": "npm run build:cli && npm run build && node scripts/package-win-installer-test.cjs",
     "package:git-proof:mac": "npm run build:cli && npm run build && node scripts/package-git-proof.cjs mac",
     "package:git-proof:win": "npm run build:cli && npm run build && node scripts/package-git-proof.cjs win",
     "verify:git-proof:mac": "node scripts/run-packaged-dugite-proof.cjs mac",

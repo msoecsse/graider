@@ -120,7 +120,9 @@ Its output is:
 ui/release/Graider.exe
 ```
 
-The Windows target is x64 only; it does not create an installer or an ARM build.
+The portable Windows target is x64 only; this command does not create an installer
+or an ARM build. The separate [NSIS test path](#windows-nsis-installer-foundation-phase-31a)
+below prepares installer support.
 When building the Windows portable executable from macOS, electron-builder may
 require Wine. Install Wine on the packaging host if `npm run package:win` reports
 it is required; no application-code workaround is needed.
@@ -187,8 +189,8 @@ persistence uses the existing runtime behavior. The tester needs no client secre
 Node.js, npm, system Git or GitHub CLI and is never prompted to configure a secret.
 
 This is **unsigned Preview/testing software**; Windows security/SmartScreen
-warnings are expected for now. Phase 3.1 will replace this portable handoff with a
-signed Windows installer. Full Phase 3.3 will replace short-lived workflow
+warnings are expected for now. Phase 3.1 adds a signed Windows installer separately;
+the portable Preview handoff remains available. Full Phase 3.3 will replace short-lived workflow
 artifacts with the formal GitHub Release pipeline and permanent release archive.
 This precursor does not complete Phase 3.3 or add update channels or auto-update.
 
@@ -264,6 +266,118 @@ The UI audit also retains moderate React Router 6 findings
 The reported fix requires React Router 7.18.0 or newer; an application router major
 migration is outside this high-severity dependency refresh. These are runtime
 dependencies and are not classified as development-only minimatch findings.
+
+## Windows NSIS installer foundation (Phase 3.1A)
+
+Issue [#49](https://github.com/msoecsse/graider/issues/49) adds a separate
+**unsigned test-only installer**, using the existing electron-builder 26 tooling.
+It does not complete production Windows signing or provide in-app updates.
+Portable Preview commands, output and workflow remain unchanged.
+
+On a **native Windows x64** host with both lockfiles installed, run from the root:
+
+```powershell
+# Use this nonfunctional value only for packaging validation, never faculty distribution.
+$env:GRAIDER_GITHUB_OAUTH_CLIENT_SECRET = 'ci-only-nonfunctional-nsis-test'
+npm --prefix ui run package:win:installer-test
+```
+
+Outputs are isolated under `ui/release/windows-installer-test/`:
+
+```text
+Graider-<version>-win-x64-unsigned-test-setup.exe
+Graider-<version>-win-x64-unsigned-test-setup.exe.blockmap
+win-unpacked/
+```
+
+The command builds the CLI and app before invoking NSIS with `--publish never`.
+The config also sets `publish: null`, preventing repository/CI inference of an
+update feed or `latest.yml`. The wrapper removes inherited certificate file/password
+variables, disables signing identity discovery, and the config disables executable
+signing. Signature verification for future updates remains enabled. The OAuth
+packaging guard is unchanged; tests use the nonfunctional value above and cannot
+sign in. Test packages are neither signed production releases nor update clients.
+
+The installer retains `appId: edu.graider.ui`, product name `Graider`, and the UI
+package's version. Builder derives the NSIS installation GUID from this app ID;
+do not change it between production versions. One-click, per-user installation
+uses the standard builder location without requiring administrator privileges;
+normal installer completion does not launch Graider. Uninstall retains app data.
+The bundled CLI and complete Dugite distribution keep the existing unpacked
+layout. Built-in differential packaging creates a blockmap; real differential
+downloads and full-installer fallback require later electron-updater integration
+and end-to-end update validation. See the versioned
+[NSIS documentation](https://www.electron.build/v26/docs/nsis/).
+
+`Windows NSIS installer test` runs automatically for scoped packaging changes on
+`remote-course-v2`, and supports manual dispatch once available on the default
+branch. On a clean native Windows x64 runner it runs deterministic packaging
+tests, builds with no real credentials, checks the unsigned installer and its
+blockmap, verifies no update feed/metadata, silently installs and reinstalls to
+a temporary path with spaces, checks installed Electron x64 and bundled Git using
+the existing offline packaged proof, then uninstalls. It records the commit and
+SHA-256 but uploads no test package and publishes no release. Normal CI retains
+macOS arm64 and Windows x64 regression coverage. This proves installer construction
+and local installation, not signed version-to-version updates or faculty UI acceptance.
+
+### Personal owner signing and external prerequisites
+
+The source repository remains `msoecsse/graider`. Signing identities belong to the
+project owner's **personal** accounts; the repository organization does not imply
+an MSOE publisher identity. Those accounts are not configured yet.
+
+- **Windows:** finish personal Microsoft signing-account enrollment, identity
+  verification and eligibility for the selected Authenticode signing service.
+  Provision its signing certificate/profile, authorized signing role and protected
+  CI authentication. Confirm the actual certificate publisher identity before
+  configuring builder's publisher verification; do not invent a publisher name.
+  Validate the supported signing integration against the locked builder 26 version.
+  See [Windows signing](https://www.electron.build/v26/docs/features/code-signing/code-signing-win/).
+- **macOS (3.2):** enroll the owner's personal Apple Developer account; provision
+  Developer ID Application signing, Team ID and notarization authentication in
+  protected secret storage. Validate signed/notarized arm64 DMG **and ZIP** on a
+  native Apple Silicon host. No Apple signing identity is configured by this slice.
+- **GitHub Releases (3.3):** verify public unauthenticated release-asset access for
+  `msoecsse/graider`, protected release credentials and an explicit human approval
+  gate before a release can become visible to clients. Publishing authorization
+  belongs only to release automation. Never use faculty OAuth tokens for public
+  update retrieval. Configure the existing OAuth release secret separately from
+  signing credentials; no actual secret belongs in source or logs.
+
+Before production distribution, add a separate fail-closed signed configuration
+(`forceCodeSigning: true`), verify Authenticode signatures on the app, installer and
+uninstaller, and validate a signed version-to-version update on native Windows.
+Keep this unsigned command test-only. Signing alone does not guarantee SmartScreen
+reputation or remove the need for Windows acceptance testing.
+
+### Release/updater compatibility gate before first production update client
+
+The approved design is electron-updater with electron-builder and public GitHub
+Releases, Stable first. No custom updater, patch format or server is required.
+Before publishing the first update-capable release, record and validate:
+
+1. Stable monotonically increasing SemVer, the relationship between root/UI app
+   versions and release tags, and the locked builder/updater metadata compatibility
+   floor. The current `0.1.0` is a development version, not a production milestone.
+2. Stable app/installer identity, Windows x64 per-user upgrade behavior, actual
+   publisher verification identity and signing renewal/rotation handling. Portable
+   Preview executables have no automatic migration into an installed updater.
+3. Approved public GitHub feed and release visibility rules: no unapproved build
+   reaches installed clients; draft/test/prerelease artifacts must not enter Stable.
+   Retain versioned installers, macOS ZIP/DMG, blockmaps, checksums and matching
+   metadata/release notes. Define channel behavior separately in 3.4.
+4. Native signed version-to-version update tests on both platforms, differential
+   download/full-package fallback, offline/failure recovery and explicit deferred
+   restart during grading. Main owns asynchronous update work through validated,
+   narrow IPC; renderer and faculty credentials never supply update authority.
+5. A documented mapping from application release to operational course-schema
+   support, including incompatible-client refusal. Packaging support does not enable
+   Schema v2 migration or satisfy its production-enablement gates.
+
+These are acceptance requirements for later slices, not capabilities of this
+unsigned installer. Next is a narrow signed Windows configuration/verification
+slice once the owner's signing identity and service are available. Production
+3.1 remains incomplete until those prerequisites and signed acceptance pass.
 
 ## RC1 Faculty Release Package
 
@@ -415,7 +529,8 @@ mutate GitHub/course state or start GitHub Actions workflows.
 - GitHub CLI is an external dependency for token fallback.
 - No code signing or notarization is configured.
 - No custom app icon is configured.
-- Windows and Linux packaging are not validated.
+- Native Windows x64 unsigned NSIS install/reinstall and bundled-Git validation
+  run in CI; signed production Windows acceptance remains pending. Linux is not validated.
 - Auto-update is not configured.
 - Student report publishing remains deferred in the UI.
 
