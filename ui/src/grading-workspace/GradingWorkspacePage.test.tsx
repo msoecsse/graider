@@ -4302,116 +4302,142 @@ it.each(["to_grade", "graded"] as const)(
   }
 );
 
-it("imports reviews at assignment level and refreshes comments/scores without resetting source or completing students", async () => {
-  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  });
-  HTMLDialogElement.prototype.close = vi.fn();
-  const imported = {
-    id: "normal-internal-id",
-    title: "Imported title",
-    text: "Imported **body**",
-    deduction: 2,
-    sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
-  };
-  const loadSource = vi.fn().mockResolvedValue(source("ada"));
-  const loadSnapshot = vi
-    .fn()
-    .mockResolvedValueOnce(snapshot("ada"))
-    .mockResolvedValue({
-      ...snapshot("ada"),
-      appliedComments: [imported],
-      grade: {
-        ...snapshot("ada").grade,
-        categories: [
-          {
-            id: "quality",
-            name: "Quality",
-            pointsPossible: 100,
-            score: 100,
-            categorizedCommentAdjustmentTotal: 0,
-            manualAdjustmentTotal: 0
-          }
-        ],
-        totalScore: 98,
-        uncategorizedCommentAdjustmentTotal: -2
+it.each([false, true])(
+  "imports reviews at assignment level and refreshes comments/scores without resetting source or completing students (deferred modal=%s)",
+  async (deferModal) => {
+    let pendingDialog: HTMLDialogElement | undefined;
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+      if (deferModal) {
+        pendingDialog = this;
+      } else {
+        this.setAttribute("open", "");
       }
     });
-  setApis(vi.fn().mockResolvedValue(workspace()), loadSource, undefined, undefined, loadSnapshot);
-  Object.assign(window.graiderUI, {
-    chooseReviewImport: vi.fn().mockResolvedValue({
-      planId: "plan",
-      version: 1,
-      students: [{ studentId: "ada", githubUsername: "ada-gh", section: "001" }],
-      plan: {
-        schemaVersion: 1,
-        diagnostics: [],
-        summary: {
-          totalFiles: 1,
-          ready: 1,
-          warning: 0,
-          duplicate: 0,
-          invalid: 0,
-          unmatched: 0,
-          eligibleFindings: 1
-        },
-        reviews: [
-          {
-            filename: "ada.json",
-            status: "ready",
-            matchedStudent: { studentId: "ada", githubUsername: "ada-gh" },
-            diagnostics: [],
-            findingCounts: { duplicate: 0 },
-            findings: [
-              {
-                key: "stable-pair",
-                finding: {
-                  id: "external-id",
-                  title: "Imported title",
-                  text: imported.text,
-                  deduction: 2
-                },
-                status: "ready",
-                eligibleToApply: true,
-                requiresApproval: false,
-                rubric: { status: "general" },
-                anchor: { status: "general" },
-                diagnostics: []
-              }
-            ]
-          }
+    HTMLDialogElement.prototype.close = vi.fn();
+    const imported = {
+      id: "normal-internal-id",
+      title: "Imported title",
+      text: "Imported **body**",
+      deduction: 2,
+      sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+    };
+    const loadSource = vi.fn().mockResolvedValue(source("ada"));
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot("ada"))
+      .mockResolvedValue({
+        ...snapshot("ada"),
+        appliedComments: [imported],
+        grade: {
+          ...snapshot("ada").grade,
+          categories: [
+            {
+              id: "quality",
+              name: "Quality",
+              pointsPossible: 100,
+              score: 100,
+              categorizedCommentAdjustmentTotal: 0,
+              manualAdjustmentTotal: 0
+            }
+          ],
+          totalScore: 98,
+          uncategorizedCommentAdjustmentTotal: -2
+        }
+      });
+    setApis(vi.fn().mockResolvedValue(workspace()), loadSource, undefined, undefined, loadSnapshot);
+    Object.assign(window.graiderUI, {
+      chooseReviewImport: vi.fn().mockResolvedValue({
+        planId: "plan",
+        version: 1,
+        students: [{ studentId: "ada", githubUsername: "ada-gh", section: "001" }],
+        plan: {
+          schemaVersion: 1,
+          diagnostics: [],
+          summary: {
+            totalFiles: 1,
+            ready: 1,
+            warning: 0,
+            duplicate: 0,
+            invalid: 0,
+            unmatched: 0,
+            eligibleFindings: 1
+          },
+          reviews: [
+            {
+              filename: "ada.json",
+              status: "ready",
+              matchedStudent: { studentId: "ada", githubUsername: "ada-gh" },
+              diagnostics: [],
+              findingCounts: { duplicate: 0 },
+              findings: [
+                {
+                  key: "stable-pair",
+                  finding: {
+                    id: "external-id",
+                    title: "Imported title",
+                    text: imported.text,
+                    deduction: 2
+                  },
+                  status: "ready",
+                  eligibleToApply: true,
+                  requiresApproval: false,
+                  rubric: { status: "general" },
+                  anchor: { status: "general" },
+                  diagnostics: []
+                }
+              ]
+            }
+          ]
+        }
+      }),
+      applyReviewImport: vi.fn().mockResolvedValue({
+        applied: 1,
+        duplicatesSkipped: 0,
+        failed: 0,
+        studentsAffected: 1,
+        outcomes: [
+          { studentId: "ada", findingKey: "stable-pair", status: "applied", message: "Applied" }
         ]
-      }
-    }),
-    applyReviewImport: vi.fn().mockResolvedValue({
-      applied: 1,
-      duplicatesSkipped: 0,
-      failed: 0,
-      studentsAffected: 1,
-      outcomes: [
-        { studentId: "ada", findingKey: "stable-pair", status: "applied", message: "Applied" }
-      ]
-    }),
-    closeReviewImport: vi.fn().mockResolvedValue(undefined)
-  });
-  render(<GradingWorkspacePage request={REQUEST} />);
-  await screen.findByTestId("mock-monaco");
-  fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
-  fireEvent.click(screen.getByRole("button", { name: "Import Reviews..." }));
-  await screen.findByText("Review Import Preview");
-  fireEvent.click(screen.getByRole("button", { name: "Apply Reviews" }));
-  await screen.findByText("Review import results");
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(await screen.findByText("Imported title")).toBeInTheDocument();
-  expect(screen.getByText("98 / 100")).toBeInTheDocument();
-  expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:class ada {}");
-  expect(loadSource).toHaveBeenCalledTimes(1);
-  expect(screen.getByText(/Selected source: src\/Main.java: 1/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
-  fireEvent.click(screen.getByRole("button", { name: "Show comment location: Imported title" }));
-  expect(screen.getByTestId("mock-navigation")).toHaveTextContent('"startLine":1');
-  expect(screen.getByRole("button", { name: "Edit comment: Imported **body**" })).toBeEnabled();
-});
+      }),
+      closeReviewImport: vi.fn().mockResolvedValue(undefined)
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import Reviews..." }));
+    const applyReviews = async () => {
+      // Preview markup can commit before showModal makes its controls accessible.
+      const dialog = await screen.findByRole("dialog", { name: "Review Import Preview" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Apply Reviews" }));
+    };
+    if (deferModal) {
+      await waitFor(() => expect(pendingDialog).toBeDefined());
+      expect(screen.getByText("Review Import Preview")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Review Import Preview" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Apply Reviews" })).toBeNull();
+    }
+    const applying = applyReviews();
+    if (deferModal) {
+      await screen.findByText("Review Import Preview");
+      expect(window.graiderUI.applyReviewImport).not.toHaveBeenCalled();
+      act(() => {
+        pendingDialog!.setAttribute("open", "");
+      });
+    }
+    await applying;
+    await screen.findByText("Review import results");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByText("Imported title")).toBeInTheDocument();
+    expect(screen.getByText("98 / 100")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:class ada {}");
+    expect(loadSource).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Selected source: src\/Main.java: 1/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Show comment location: Imported title" }));
+    expect(screen.getByTestId("mock-navigation")).toHaveTextContent('"startLine":1');
+    expect(screen.getByRole("button", { name: "Edit comment: Imported **body**" })).toBeEnabled();
+  }
+);
 
 describe("completion navigation", () => {
   it.each([false, true])("advances after persisted completion (zero=%s)", async (zero) => {
