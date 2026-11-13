@@ -119,6 +119,20 @@ describe("packaging configuration", () => {
     expect(packagingConfig.asarUnpack).toContain("node_modules/dugite/**/*");
   });
 
+  it("bundles every other CLI runtime dependency so installed apps cannot rely on the checkout", async () => {
+    const cliConfig = (
+      await import(path.join(process.cwd(), "scripts/tsup.graider-cli.config.mjs"))
+    ).default;
+    const rootPackage = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "../package.json"), "utf8")
+    ) as { dependencies: Record<string, string> };
+    const bundledDependencies = Object.keys(rootPackage.dependencies).filter(
+      (name) => name !== "dugite"
+    );
+    expect(cliConfig.noExternal.toSorted()).toEqual(bundledDependencies.toSorted());
+    expect(cliConfig.external).toEqual(["dugite"]);
+  });
+
   it("builds the bundled CLI before packaging app artifacts", () => {
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")

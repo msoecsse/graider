@@ -9,5 +9,13 @@ export default {
     js: 'import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);'
   },
   external: ["dugite"],
-  noExternal: ["@octokit/rest", "commander", "yaml", "zod"]
+  noExternal: [
+    "@octokit/rest",
+    "commander",
+    "fast-xml-parser",
+    "fast-xml-validator",
+    "yaml",
+    "yauzl",
+    "zod"
+  ]
 };

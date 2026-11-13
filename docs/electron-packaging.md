@@ -43,6 +43,12 @@ The main process invokes that unpacked helper with argv arrays and sets `cwd` to
 the registered course folder. The course folder path is never shell-escaped,
 quoted, split, or passed as a dashboard argument.
 
+The CLI bundle includes every root JavaScript runtime dependency except Dugite,
+which is explicitly external and unpacked with its native distribution. The
+dependency contract test checks that list against the root manifest. Installed
+apps must not depend on source-checkout `node_modules`; the NSIS proof runs from
+an installed temporary directory outside the checkout to validate this boundary.
+
 When `VITE_DEV_SERVER_URL` is unset, the app loads `dist/index.html`. The Vite
 dev server is used only by `npm run dev:electron`.
 
