@@ -46,6 +46,8 @@ function harness(platform = "darwin", arch = "arm64") {
   const writes = vi.fn();
   const removes = vi.fn();
   const permissions = vi.fn();
+  const reads = vi.fn(() => Buffer.from("fake-archive"));
+  const directories = vi.fn((prefix: string) => `${prefix}test`);
   const verify = { verifySignature: vi.fn() };
   const command = vi.fn((file: string, args: string[], _env: Record<string, string>): string => {
     if (args[0] === "find-identity")
@@ -57,17 +59,18 @@ function harness(platform = "darwin", arch = "arm64") {
     exports: {} as {
       sign: (env: Record<string, string>, cmd: typeof command, verifier: typeof verify) => void;
       notarize: (file: string, env: Record<string, string>, cmd: typeof command) => void;
+      diagnostic: (error: unknown) => string;
     }
   };
   const loader = Object.assign(
     (name: string): unknown => {
       if (name === "node:fs")
         return {
-          mkdtempSync: (prefix: string) => `${prefix}test`,
+          mkdtempSync: directories,
           chmodSync: permissions,
           writeFileSync: writes,
           rmSync: removes,
-          readFileSync: () => Buffer.from("fake-archive")
+          readFileSync: reads
         };
       if (name === "./macos-signing-config.cjs") return helpers;
       if (name === "./verify-macos-signatures.cjs") return verify;
@@ -81,7 +84,7 @@ function harness(platform = "darwin", arch = "arm64") {
     __dirname: path.resolve("scripts"),
     process: { platform, arch, execPath: "node", env: {} }
   });
-  return { ...module.exports, writes, removes, permissions, verify, command };
+  return { ...module.exports, writes, removes, permissions, reads, directories, verify, command };
 }
 
 describe("fail-closed macOS production signing", () => {
@@ -96,7 +99,7 @@ describe("fail-closed macOS production signing", () => {
             test.command,
             test.verify
           )
-        ).toThrow(name);
+        ).toThrow("stage=input-validation; category=invalid-configuration");
       }
       expect(test.command).not.toHaveBeenCalled();
       expect(test.writes).not.toHaveBeenCalled();
@@ -125,7 +128,9 @@ describe("fail-closed macOS production signing", () => {
     ["linux", "arm64"]
   ])("rejects %s/%s before touching credentials", (platform, arch) => {
     const test = harness(platform, arch);
-    expect(() => test.sign(environment, test.command, test.verify)).toThrow("native macOS arm64");
+    expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+      "stage=host-validation; category=unsupported-host"
+    );
     expect(test.writes).not.toHaveBeenCalled();
     expect(test.command).not.toHaveBeenCalled();
   });
@@ -214,7 +219,9 @@ describe("fail-closed macOS production signing", () => {
   it("rejects a wrong certificate/team before builder", () => {
     const test = harness();
     test.command.mockReturnValue("Wrong identity");
-    expect(() => test.sign(environment, test.command, test.verify)).toThrow("does not match");
+    expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+      "stage=identity-match; category=identity-mismatch"
+    );
     expect(test.command.mock.calls.some((call) => call[1][0] === "builder-cli")).toBe(false);
     expect(test.removes).toHaveBeenCalled();
   });
@@ -224,7 +231,9 @@ describe("fail-closed macOS production signing", () => {
     (response) => {
       const test = harness();
       test.command.mockReturnValue(response);
-      expect(() => test.notarize("artifact.dmg", prepared, test.command)).toThrow("not Accepted");
+      expect(() => test.notarize("artifact.dmg", prepared, test.command)).toThrow(
+        /category=(invalid-response|not-accepted)/
+      );
       expect(test.command).toHaveBeenCalledTimes(1);
     }
   );
@@ -239,15 +248,18 @@ describe("fail-closed macOS production signing", () => {
           throw new Error("failed check");
         return successful(file, args, env);
       });
-      expect(() => test.sign(environment, test.command, test.verify)).toThrow("failed check");
+      expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+        "category=command-failure"
+      );
       expect(test.removes).toHaveBeenCalled();
       expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(false);
     }
   );
 
   it.each([
-    { status: 1, stderr: "fake-secret", stdout: "fake-secret" },
-    { status: null, error: new Error("fake-secret") }
+    { status: 1, stderr: "fake-secret", stdout: "fake-secret", category: "command-exit-failure" },
+    { status: null, error: new Error("fake-secret"), category: "command-start-or-io-failure" },
+    { status: null, signal: "SIGTERM", stderr: "fake-secret", category: "command-terminated" }
   ])("redacts subprocess errors at the executable entry point", (result) => {
     const stderr = vi.fn();
     const processMock = {
@@ -283,7 +295,129 @@ describe("fail-closed macOS production signing", () => {
     });
     expect(processMock.exitCode).toBe(1);
     expect(JSON.stringify(stderr.mock.calls)).not.toContain("fake-secret");
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("No acceptance recorded"));
+    expect(stderr).toHaveBeenCalledWith(
+      `macOS production signing failed. Original failure: stage=keychain-create; category=${result.category}.\nCleanup failure: stage=cleanup-keychain; category=${result.category}. No acceptance recorded.\n`
+    );
+  });
+
+  it.each([
+    ["create-keychain", "keychain-create"],
+    ["set-keychain-settings", "keychain-settings"],
+    ["unlock-keychain", "keychain-unlock"],
+    ["import", "certificate-import"],
+    ["set-key-partition-list", "keychain-partition-list"],
+    ["find-identity", "identity-query"],
+    ["builder-cli", "builder-sign-notarize-archive"],
+    ["notarytool", "dmg-notarization-submit"],
+    ["staple", "dmg-stapler-staple"],
+    ["validate", "dmg-stapler-validate"],
+    ["verify-mac-production.cjs", "archive-installation-verification"],
+    ["delete-keychain", "cleanup-keychain"]
+  ])("reports only safe diagnostics for injected %s failure", (operation, stage) => {
+    const test = harness();
+    const successful = test.command.getMockImplementation()!;
+    test.command.mockImplementation((file, args, env) => {
+      if (args.some((arg) => arg === operation || arg.endsWith(`/${operation}`))) {
+        // Include every class of forbidden data, including a forged safe-looking error.
+        const error = new Error(JSON.stringify({ file, args, env, privateKey }));
+        Object.assign(error, { stage: "forged-stage", category: "forged-category" });
+        throw error;
+      }
+      return successful(file, args, env);
+    });
+    let message = "";
+    try {
+      test.sign(environment, test.command, test.verify);
+    } catch (error) {
+      message = test.diagnostic(error);
+    }
+    expect(message).toBe(
+      operation === "delete-keychain"
+        ? "Signing stages completed.\nCleanup failure: stage=cleanup-keychain; category=command-failure."
+        : `Original failure: stage=${stage}; category=command-failure.`
+    );
+    expect(test.removes).toHaveBeenCalledTimes(2);
+    expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(
+      operation === "delete-keychain"
+    );
+  });
+
+  it.each([
+    "temporary-directory-create",
+    "temporary-directory-permissions",
+    "certificate-write",
+    "api-key-write",
+    "dmg-signature-verification",
+    "checksum-dmg",
+    "checksum-zip"
+  ])("identifies injected %s failure and suppresses private errors", (stage) => {
+    const test = harness();
+    const fail = () => {
+      throw new Error(`private path ${environment.RUNNER_TEMP} ${privateKey}`);
+    };
+    if (stage === "temporary-directory-create") test.directories.mockImplementation(fail);
+    if (stage === "temporary-directory-permissions") test.permissions.mockImplementation(fail);
+    if (stage === "certificate-write") test.writes.mockImplementationOnce(fail);
+    if (stage === "api-key-write")
+      test.writes.mockImplementationOnce(() => {}).mockImplementationOnce(fail);
+    if (stage === "dmg-signature-verification")
+      test.verify.verifySignature.mockImplementation(fail);
+    if (stage === "checksum-dmg") test.reads.mockImplementationOnce(fail);
+    if (stage === "checksum-zip")
+      test.reads.mockImplementationOnce(() => Buffer.from("archive")).mockImplementationOnce(fail);
+    const category = stage.startsWith("checksum")
+      ? "filesystem-or-hash-failure"
+      : stage === "dmg-signature-verification"
+        ? "verification-failure"
+        : "filesystem-failure";
+    expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+      `stage=${stage}; category=${category}`
+    );
+    expect(test.removes).toHaveBeenCalledTimes(stage === "temporary-directory-create" ? 0 : 2);
+  });
+
+  it.each([false, true])(
+    "preserves original failure with independent cleanup failures=%s",
+    (failSigning) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      test.command.mockImplementation((file, args, env) => {
+        if (args[0] === "delete-keychain" || (failSigning && args[0] === "import"))
+          throw new Error("sensitive-command-error");
+        return successful(file, args, env);
+      });
+      test.removes.mockImplementation(() => {
+        throw new Error("sensitive-private-path");
+      });
+      let message = "";
+      try {
+        test.sign(environment, test.command, test.verify);
+      } catch (error) {
+        message = test.diagnostic(error);
+      }
+      expect(message).toBe(
+        [
+          failSigning
+            ? "Original failure: stage=certificate-import; category=command-failure."
+            : "Signing stages completed.",
+          "Cleanup failure: stage=cleanup-keychain; category=command-failure.",
+          "Cleanup failure: stage=cleanup-private-directory; category=cleanup-failure.",
+          "Cleanup failure: stage=cleanup-oauth-file; category=cleanup-failure."
+        ].join("\n")
+      );
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("uses a fixed fallback for untrusted errors and non-error throws", () => {
+    const test = harness();
+    for (const error of [
+      new Error("private path"),
+      "secret",
+      null,
+      { message: "secret", stage: "forged" }
+    ])
+      expect(test.diagnostic(error)).toBe("stage=unknown; category=unexpected-failure");
   });
 
   it("independently checks certificate hash, Developer ID, runtime, minimal entitlements and staple", () => {

@@ -444,11 +444,14 @@ archives. No cross-platform CI checks are removed.
 The separate `electron-builder.mac-production.cjs` and manual **macOS production
 signing verification** workflow use the owner's personal Developer ID Application
 identity. Existing unsigned archive-test, unpacked/RC1 and Windows paths retain
-their behavior. No workflow has been run with real signing credentials as part of
-the initial implementation. Issue #54 remains open.
+their behavior. The first real signing attempt at `0636ab0296e95a3baeb7e95642336f92406d29c0`
+([run 43501894766](https://github.com/msoecsse/graider/actions/runs/43501894766))
+passed preliminary checks/builds but failed in the signing wrapper. Its generic
+error discarded the stage and cause; successful fallback cleanup cannot recover
+that information. No signed acceptance was recorded. Issue #54 remains open.
 
 Configure **Settings → Environments → macos-production-signing**. The environment
-exists but initially has no credentials. Restrict deployment branches to
+holds the owner-configured credentials. Restrict deployment branches to
 `remote-course-v2`, require owner review where supported, and prevent unreviewed
 workflow/source changes from accessing it. Only dispatch trusted reviewed commits.
 The workflow itself allows only that branch in `msoecsse/graider`, checks out its
@@ -509,6 +512,23 @@ imports only into a fresh randomly passworded keychain, requires the configured
 certificate hash and Team ID, and passes only selected host settings and prepared
 credentials to builder. Alternate identities, publishing/debug variables and raw
 P12/password/base64 values are not inherited by builder. Command errors are redacted.
+Diagnostics report a fixed `stage` and safe `category`, never external output,
+arguments, paths, credential values, encoded secrets, key contents or raw errors.
+Command categories distinguish start/I/O failure, termination and nonzero exit;
+validation, filesystem and verification failures use fixed categories. The
+`builder-sign-notarize-archive` stage covers the complete builder subprocess;
+its internal cause cannot be inferred from this category. DMG submission,
+response parsing/acceptance, stapling and validation have separate stages.
+Cleanup failures are reported separately without replacing the original failure,
+and each cleanup action is attempted independently. Cleanup-only failure still
+fails the command and prevents workflow uploads/acceptance.
+
+A new owner-dispatched attempt is appropriate after the diagnostic commit has
+passed normal and native cross-platform CI at its exact SHA and has been reviewed.
+Do not change credentials based solely on the first run's generic error. Use the
+next attempt's safe stage/category to guide further investigation; a successful
+attempt still requires the downloaded native acceptance below.
+
 It neither changes the default keychain nor persists notarization credentials.
 Cleanup runs on success/failure; workflow `always()` cleanup also covers normal
 cancellation on the ephemeral runner. Forced runner termination ultimately relies
