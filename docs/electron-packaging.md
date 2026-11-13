@@ -330,7 +330,10 @@ and local installation, not signed version-to-version updates or faculty UI acce
 
 The source repository remains `msoecsse/graider`. Signing identities belong to the
 project owner's **personal** accounts; the repository organization does not imply
-an MSOE publisher identity. Those accounts are not configured yet.
+an MSOE publisher identity. Windows provisioning remains pending; the owner has
+confirmed active personal Apple membership, a verified Developer ID Application
+identity/exported password-protected P12 and validated App Store Connect Team API
+credentials. Protected CI credentials and native signed acceptance remain pending.
 
 - **Windows:** finish personal Microsoft signing-account enrollment, identity
   verification and eligibility for the selected Authenticode signing service.
@@ -339,10 +342,9 @@ an MSOE publisher identity. Those accounts are not configured yet.
   configuring builder's publisher verification; do not invent a publisher name.
   Validate the supported signing integration against the locked builder 26 version.
   See [Windows signing](https://www.electron.build/v26/docs/features/code-signing/code-signing-win/).
-- **macOS (3.2):** enroll the owner's personal Apple Developer account; provision
-  Developer ID Application signing, Team ID and notarization authentication in
-  protected secret storage. Validate signed/notarized arm64 DMG **and ZIP** on a
-  native Apple Silicon host. No Apple signing identity is configured by this slice.
+- **macOS (3.2):** configure the owner's existing Developer ID and Team API
+  credentials in the protected environment below. Validate signed/notarized arm64
+  DMG **and ZIP** on a native Apple Silicon host before claiming acceptance.
 - **GitHub Releases (3.3):** verify public unauthenticated release-asset access for
   `msoecsse/graider`, protected release credentials and an explicit human approval
   gate before a release can become visible to clients. Publishing authorization
@@ -437,23 +439,124 @@ loose fixture even on failure, and records exact-SHA acceptance. Ordinary source
 changes use normal comprehensive cross-platform CI without rebuilding these
 archives. No cross-platform CI checks are removed.
 
-### Remaining Phase 3.2B prerequisites
+### Phase 3.2B signing configuration — acceptance pending (#54)
 
-The owner must enroll a **personal Apple Developer account** and provision a
-Developer ID Application certificate/private key, actual Team ID and protected
-notarization authentication (App Store Connect API key or supported Apple ID
-credentials). Repository ownership by `msoecsse` does not establish a signing
-identity. Configure secure CI storage/access and renewal/rotation procedures.
+The separate `electron-builder.mac-production.cjs` and manual **macOS production
+signing verification** workflow use the owner's personal Developer ID Application
+identity. Existing unsigned archive-test, unpacked/RC1 and Windows paths retain
+their behavior. No workflow has been run with real signing credentials as part of
+the initial implementation. Issue #54 remains open.
 
-A separate fail-closed signing configuration must require that identity and validate
-hardened runtime/entitlements for Electron helpers, bundled CLI and native Dugite
-payload; sign the app and DMG, notarize the supported submission, staple applicable
-artifacts, and independently verify Developer ID, notarization and Gatekeeper on
-native Apple Silicon for **both DMG and ZIP**. ZIP cannot itself be stapled: validate
-the notarized/stapled app it contains. Test clean downloaded/quarantined installation,
-launch and bundled CLI/Git, and later signed version-to-version update acceptance.
-The unsigned foundation does not prove these production criteria, satisfy Phase
-3.3 publishing/3.4 channels/3.5 updater acceptance, or activate Schema v2 migration.
+Configure **Settings → Environments → macos-production-signing**. The environment
+exists but initially has no credentials. Restrict deployment branches to
+`remote-course-v2`, require owner review where supported, and prevent unreviewed
+workflow/source changes from accessing it. Only dispatch trusted reviewed commits.
+The workflow itself allows only that branch in `msoecsse/graider`, checks out its
+exact SHA with checkout credential persistence disabled, and has read-only contents
+permission. Signing credentials are scoped to one packaging step, after dependency
+installation, audits, typechecks, tests and builds without signing credentials.
+
+Create these **environment secrets** (not source files, issue comments or chat):
+
+| Secret                               | Exact value / encoding                                                                                                                                                                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GRAIDER_MAC_CERT_P12_BASE64`        | Standard single-line base64 of the entire exported binary `.p12`, including its private key and certificate chain. No data URI, URL, pathname, whitespace or line wrapping.                                                                              |
+| `GRAIDER_MAC_CERT_PASSWORD`          | The P12 export password as literal text; no base64, quoting or escaping. A nonempty password is required.                                                                                                                                                |
+| `GRAIDER_APPLE_API_KEY_P8_BASE64`    | Standard single-line base64 of the complete original `AuthKey_<ID>.p8` PEM file, including header, footer and its internal newlines. This is the validated **Team** API key, P-256/EC.                                                                   |
+| `GRAIDER_APPLE_API_KEY_ID`           | The key's 10-character uppercase alphanumeric Key ID, literal text.                                                                                                                                                                                      |
+| `GRAIDER_APPLE_API_ISSUER`           | The Team API issuer UUID (`8-4-4-4-12` hexadecimal characters), literal text. This is not the Apple Team ID.                                                                                                                                             |
+| `GRAIDER_GITHUB_OAUTH_CLIENT_SECRET` | The existing Graider GitHub OAuth app client secret, literal text. Configure in this environment (or retain the existing repository secret with the same name). It is separate from Apple authentication and is embedded by the existing packaging hook. |
+
+Create these **environment variables**:
+
+| Variable                | Exact value / encoding                                                                                                                                                                                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GRAIDER_MAC_CERT_SHA1` | SHA-1 fingerprint of the specific **Developer ID Application** certificate exported in the P12: exactly 40 uppercase hexadecimal characters, no spaces or colons. Obtain locally with `security find-identity -v -p codesigning`; use the hash beside the verified identity, not its display name. |
+| `GRAIDER_APPLE_TEAM_ID` | Actual personal Apple Developer Team ID: exactly 10 uppercase alphanumeric characters, literal text. It must match the Developer ID certificate; do not infer it from repository ownership.                                                                                                        |
+
+On macOS, encode each file directly to the clipboard without printing it to logs:
+
+```bash
+/usr/bin/base64 -i '/secure/path/DeveloperID.p12' | tr -d '\r\n' | pbcopy
+# Paste into GRAIDER_MAC_CERT_P12_BASE64, then encode the original PEM file:
+/usr/bin/base64 -i '/secure/path/AuthKey_KEYID.p8' | tr -d '\r\n' | pbcopy
+```
+
+No Apple ID, app-specific password, keychain profile, GitHub publishing token or
+long-lived CI keychain password is needed. Store offline recovery copies securely.
+Before certificate expiry, replace the P12/password and fingerprint together,
+verify the Team ID, rerun signed archive checks and repeat native acceptance. Rotate
+the API key by replacing P8/Key ID/issuer together, validate the replacement before
+revoking the old key, and revoke compromised credentials immediately through Apple.
+Never record private keys/passwords in rotation evidence.
+
+After configuration, the owner may manually dispatch the workflow. GitHub's
+workflow UI requires the file on the default branch first; integrate it through
+normal review separately, then select `remote-course-v2`. This implementation does
+not change `master` or dispatch signing. The new commands, after both dependency
+trees are installed and built, are:
+
+```bash
+npm --prefix ui run build:cli
+npm --prefix ui run build
+# Supply the documented environment securely, never as literal shell arguments.
+npm --prefix ui run package:mac:production
+```
+
+The wrapper rejects missing/malformed inputs and non-native hosts before importing
+credentials. It creates mode-0600 P12/P8 files in a mode-0700 temporary directory,
+imports only into a fresh randomly passworded keychain, requires the configured
+certificate hash and Team ID, and passes only selected host settings and prepared
+credentials to builder. Alternate identities, publishing/debug variables and raw
+P12/password/base64 values are not inherited by builder. Command errors are redacted.
+It neither changes the default keychain nor persists notarization credentials.
+Cleanup runs on success/failure; workflow `always()` cleanup also covers normal
+cancellation on the ephemeral runner. Forced runner termination ultimately relies
+on GitHub-hosted runner destruction; use no persistent/self-hosted signing runner.
+
+Builder 26 signs nested Electron/native code with hardened runtime and only the
+`allow-jit` exception, notarizes and staples the app before archive construction.
+An `afterSign` gate independently checks the certificate fingerprint, Developer ID,
+Team ID, hardened runtime and entitlements on every real Mach-O, including Dugite
+executables/dylibs under `app.asar.unpacked`, plus the app's stapled ticket. Builder
+signs the DMG; the wrapper separately requires an Accepted DMG notarization result
+and staples/validates it. ZIP itself cannot be stapled; it contains the stapled app.
+No unsigned fallback is allowed. Actual runtime/entitlement compatibility remains
+subject to native acceptance; do not relax entitlements just to pass packaging.
+
+Outputs live only under `ui/release/macos-production/`:
+
+```text
+Graider-<version>-mac-arm64-signed.dmg
+Graider-<version>-mac-arm64-signed.zip
+Graider-<version>-mac-arm64-signed.dmg.sha256
+Graider-<version>-mac-arm64-signed.zip.sha256
+```
+
+Before generating checksums, the native verifier extracts ZIP, mounts DMG read-only,
+copies its app outside the checkout, checks signatures/staples on both copies,
+adds quarantine, runs Gatekeeper assessment, and runs the offline CLI/Dugite proof
+with empty PATH and isolated Git configuration. No GUI launch is automated. Only
+the two archives and checksums are uploaded for 7 days as
+`graider-macos-signed-verification-<full-sha>`; diagnostic YAML, loose OAuth data,
+certificates, keys and keychains are excluded. No GitHub Release is created and no
+feed/channel/updater implementation is added. The current version is development
+`0.1.0`, not a production release milestone.
+
+**Remaining acceptance, required before closing #54:** record the signed workflow
+run, archive hashes and green normal/native cross-platform CI at the exact commit.
+Download both archives onto a clean native Apple Silicon Mac through a browser;
+verify their hashes, preserve download quarantine, extract ZIP and drag-install DMG
+separately into clean locations. Confirm Developer ID/team, `codesign --verify
+--deep --strict`, app/DMG `xcrun stapler validate`, and Gatekeeper assessments. Launch
+each installed app from Finder without bypasses or removing quarantine; check
+normal renderer startup, OAuth sign-in, and bundled CLI/Git outside the checkout
+without system Git/Node/npm. Record each archive's result and OS version without
+secrets. The automatic offline proof can also be rerun on downloaded archives with
+`npm --prefix ui run verify:mac:production` and only the two identity variables;
+its synthetic quarantine checks do not replace real downloaded Finder acceptance.
+Do not claim production acceptance from deterministic tests or unsigned #53.
+Signed version-to-version updates, Phase 3.3/3.4/3.5 and Schema v2 remain separate.
 
 ## RC1 Faculty Release Package
 
@@ -488,8 +591,8 @@ open ui/release/mac-arm64/Graider.app
 ```
 
 If macOS blocks the unsigned app, use the normal local-development override for
-an unsigned app. This project does not configure Apple Developer ID signing or
-notarization yet.
+an unsigned app. The separate production signing path above requires protected
+credentials and its own acceptance; these local-development paths remain unsigned.
 
 ## External Dependencies
 
@@ -603,7 +706,8 @@ mutate GitHub/course state or start GitHub Actions workflows.
 ## Known Limitations
 
 - GitHub CLI is an external dependency for token fallback.
-- No code signing or notarization is configured.
+- macOS signing/notarization configuration is implemented separately; real signed
+  archive and clean downloaded installation/launch acceptance remain pending #54.
 - No custom app icon is configured.
 - Native Windows x64 unsigned NSIS install/reinstall and bundled-Git validation
   run in CI; signed production Windows acceptance remains pending. Linux is not validated.

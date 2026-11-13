@@ -31,7 +31,9 @@
     "pretest:watch": "npm --prefix .. run test:hygiene",
     "test:migration": "vitest run --maxWorkers=2 electron/migration electron/schemaDiscriminated electron/managedOperationBridge.integration.test.ts electron/managedRuntimeWriteSafety.test.ts electron/courseStartup.integration.test.ts electron/remoteCourseDiscovery.test.ts electron/courseSetupService.test.ts src/migration-review",
     "package:mac:archive-test": "npm run build:cli && npm run build && node scripts/package-mac-archive-test.cjs",
-    "verify:mac:archive-test": "node scripts/verify-mac-archive-test.cjs"
+    "verify:mac:archive-test": "node scripts/verify-mac-archive-test.cjs",
+    "package:mac:production": "node scripts/package-mac-production.cjs",
+    "verify:mac:production": "node scripts/verify-mac-production.cjs"
   },
   "dependencies": {
     "dompurify": "^3.4.17",

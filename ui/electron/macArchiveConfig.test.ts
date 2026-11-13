@@ -90,7 +90,12 @@ describe("macOS test-only archives", () => {
         "GH_TOKEN",
         "GITHUB_TOKEN",
         "GITHUB_RELEASE_TOKEN",
-        "GRAIDER_GITHUB_OAUTH_CLIENT_SECRET"
+        "GRAIDER_GITHUB_OAUTH_CLIENT_SECRET",
+        "GRAIDER_MAC_CERT_P12_BASE64",
+        "GRAIDER_MAC_CERT_PASSWORD",
+        "GRAIDER_APPLE_API_KEY_P8_BASE64",
+        "GRAIDER_APPLE_API_KEY_ID",
+        "GRAIDER_APPLE_API_ISSUER"
       ].map((name) => [name, "fake-sensitive-value"])
     );
     const calls: { args: string[]; options: { env: Record<string, string>; shell: boolean } }[] =

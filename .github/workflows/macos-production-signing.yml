@@ -1,0 +1,72 @@
+name: macOS production signing verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  signing:
+    if: github.repository == 'msoecsse/graider' && github.ref == 'refs/heads/remote-course-v2'
+    environment: macos-production-signing
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: arm64
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Verify native Apple Silicon
+        run: node -e "if(process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('Native macOS arm64 required');"
+      - run: npm ci
+      - run: npm ci --prefix ui
+      - run: npm run test:hygiene
+      - run: npm run typecheck
+      - run: npm --prefix ui run typecheck:prepared
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm audit --audit-level=high
+      - run: npm audit --prefix ui --audit-level=high
+      - name: Test signing and existing packaging paths without credentials
+        working-directory: ui
+        run: npx vitest run electron/macProductionSigning.test.ts electron/macArchiveConfig.test.ts electron/packagingConfig.test.ts electron/windowsInstallerConfig.test.ts
+      - run: npm --prefix ui run build:cli
+      - run: npm --prefix ui run build
+      - name: Sign, notarize and verify both archives
+        working-directory: ui
+        env:
+          GRAIDER_MAC_CERT_P12_BASE64: ${{ secrets.GRAIDER_MAC_CERT_P12_BASE64 }}
+          GRAIDER_MAC_CERT_PASSWORD: ${{ secrets.GRAIDER_MAC_CERT_PASSWORD }}
+          GRAIDER_APPLE_API_KEY_P8_BASE64: ${{ secrets.GRAIDER_APPLE_API_KEY_P8_BASE64 }}
+          GRAIDER_APPLE_API_KEY_ID: ${{ secrets.GRAIDER_APPLE_API_KEY_ID }}
+          GRAIDER_APPLE_API_ISSUER: ${{ secrets.GRAIDER_APPLE_API_ISSUER }}
+          GRAIDER_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GRAIDER_GITHUB_OAUTH_CLIENT_SECRET }}
+          GRAIDER_MAC_CERT_SHA1: ${{ vars.GRAIDER_MAC_CERT_SHA1 }}
+          GRAIDER_APPLE_TEAM_ID: ${{ vars.GRAIDER_APPLE_TEAM_ID }}
+        run: npm run package:mac:production
+      - name: Remove signing material and loose OAuth configuration
+        if: always()
+        run: node ui/scripts/cleanup-mac-production.cjs
+      - name: Upload archives for owner acceptance
+        uses: actions/upload-artifact@v7
+        with:
+          name: graider-macos-signed-verification-${{ github.sha }}
+          path: |
+            ui/release/macos-production/*-signed.dmg
+            ui/release/macos-production/*-signed.zip
+            ui/release/macos-production/*-signed.dmg.sha256
+            ui/release/macos-production/*-signed.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Record remaining acceptance
+        run: echo 'Automated signed/notarized archive checks at ${{ github.sha }}. Owner must verify downloaded DMG and ZIP installation and Finder launch on native Apple Silicon. Issue 54 remains open. No release published.' >> "$GITHUB_STEP_SUMMARY"

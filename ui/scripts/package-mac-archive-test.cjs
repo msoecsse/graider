@@ -10,7 +10,7 @@ if (process.platform !== "darwin" || process.arch !== "arm64") {
 const environment = { ...process.env };
 // Remove signing/notarization and publishing credentials, including inherited CI tokens.
 for (const name of Object.keys(environment)) {
-  if (/^(?:CSC_|WIN_CSC_|APPLE_|ASC_|GH_|GITHUB_|GRAIDER_GITHUB_)/i.test(name)) {
+  if (/^(?:CSC_|WIN_CSC_|APPLE_|ASC_|GH_|GITHUB_|GRAIDER_(?:GITHUB_|MAC_|APPLE_))/i.test(name)) {
     delete environment[name];
   }
 }
