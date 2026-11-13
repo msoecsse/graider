@@ -129,7 +129,7 @@ describe("packaging configuration", () => {
     const bundledDependencies = Object.keys(rootPackage.dependencies).filter(
       (name) => name !== "dugite"
     );
-    expect(cliConfig.noExternal.toSorted()).toEqual(bundledDependencies.toSorted());
+    expect([...cliConfig.noExternal].sort()).toEqual(bundledDependencies.sort());
     expect(cliConfig.external).toEqual(["dugite"]);
   });
 
