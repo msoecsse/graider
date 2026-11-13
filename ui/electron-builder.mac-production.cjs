@@ -3,6 +3,7 @@
 const base = require("./electron-builder.config.cjs");
 const { prepared } = require("./scripts/macos-signing-config.cjs");
 const signing = prepared(process.env);
+const { stage } = require("./scripts/mac-production-builder.cjs");
 
 /** @type {import("electron-builder").Configuration} */
 module.exports = {
@@ -26,16 +27,30 @@ module.exports = {
     preAutoEntitlements: false,
     entitlements: "build/entitlements.mac-production.plist",
     entitlementsInherit: "build/entitlements.mac-production.plist",
+    // Delegate to builder's installed signer, retaining its retry behavior and
+    // options. Builder itself awaits notarization/stapling after this resolves.
+    sign: async (options) => {
+      stage("builder-app-sign");
+      await require("app-builder-lib/out/codeSign/macCodeSign").sign(options);
+      stage("builder-app-notarize-staple");
+    },
     notarize: true
   },
   dmg: { ...base.dmg, sign: true, writeUpdateInfo: false },
+  beforePack: async (context) => {
+    stage("builder-pack");
+    await base.beforePack(context);
+  },
+  afterPack: () => stage("builder-app-sign"),
   // Builder 26 may skip notarization without credentials. Independently require
   // valid signatures and the stapled ticket before either archive is created.
   afterSign: (context) => {
+    stage("builder-app-verification");
     const { join } = require("node:path");
     require("./scripts/verify-macos-signatures.cjs").verifyApp(
       join(context.appOutDir, "Graider.app"),
       process.env
     );
+    stage("builder-archive");
   }
 };

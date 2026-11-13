@@ -38,7 +38,7 @@ jobs:
       - run: npm audit --prefix ui --audit-level=high
       - name: Test signing and existing packaging paths without credentials
         working-directory: ui
-        run: npx vitest run electron/macProductionSigning.test.ts electron/macArchiveConfig.test.ts electron/packagingConfig.test.ts electron/windowsInstallerConfig.test.ts
+        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macArchiveConfig.test.ts electron/packagingConfig.test.ts electron/windowsInstallerConfig.test.ts
       - run: npm --prefix ui run build:cli
       - run: npm --prefix ui run build
       - name: Sign, notarize and verify both archives

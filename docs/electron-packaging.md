@@ -516,8 +516,12 @@ Diagnostics report a fixed `stage` and safe `category`, never external output,
 arguments, paths, credential values, encoded secrets, key contents or raw errors.
 Command categories distinguish start/I/O failure, termination and nonzero exit;
 validation, filesystem and verification failures use fixed categories. The
-`builder-sign-notarize-archive` stage covers the complete builder subprocess;
-its internal cause cannot be inferred from this category. DMG submission,
+`builder-sign-notarize-archive` stage is the fallback for an unclassified builder
+subprocess exit. Inside builder, fixed stages distinguish initialization, packing,
+app signing, app notarization/stapling, independent app verification, and archive
+construction (including DMG signing). A dedicated pipe accepts only exact fixed
+stage/category pairs; builder stdout/stderr and caught errors remain suppressed.
+These identify the active operation, not an inferred external cause. DMG submission,
 response parsing/acceptance, stapling and validation have separate stages.
 Cleanup failures are reported separately without replacing the original failure,
 and each cleanup action is attempted independently. Cleanup-only failure still
@@ -543,6 +547,21 @@ signs the DMG; the wrapper separately requires an Accepted DMG notarization resu
 and staples/validates it. ZIP itself cannot be stapled; it contains the stapled app.
 No unsigned fallback is allowed. Actual runtime/entitlement compatibility remains
 subject to native acceptance; do not relax entitlements just to pass packaging.
+
+The second attempt at `afd2dba` failed inside builder without recoverable internal
+evidence. Inspection of installed `app-builder-lib` **26.15.3** confirms
+`MacPackager.sign` awaits `MacTargetHelper.notarizeIfProvided`; installed
+`@electron/notarize` awaits acceptance and stapling before resolving.
+`PlatformPackager.doSignAfterPack` then awaits `afterSign`, before
+`packMacTargets` constructs archives. The staple gate is correctly placed.
+Builder supplies runtime and the configured entitlements to every nested signing
+operation. A local credential-free ad hoc probe on disposable copies of Dugite
+Git and a dylib retained runtime and the JIT entitlement; it does not prove
+Developer ID or notarization acceptance. Libraries inherit host entitlements, so
+JIT is not intrinsically needed on every library, but no deterministic rejection
+by the current verifier was established. Preserve the checks until a concrete
+failure is demonstrated. Regression tests execute the installed lifecycle with
+external operations stubbed and test safe builder failure propagation.
 
 Outputs live only under `ui/release/macos-production/`:
 

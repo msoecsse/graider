@@ -7,11 +7,13 @@ const { randomBytes, createPrivateKey, createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { inputs } = require("./macos-signing-config.cjs");
 const signatures = require("./verify-macos-signatures.cjs");
+const { isDiagnostic } = require("./mac-production-builder.cjs");
 
 const MAX_COMMAND_OUTPUT = 64 * 1024 * 1024;
 const KEYCHAIN_PASSWORD_BYTES = 32;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
+const BUILDER_DIAGNOSTIC_PIPE = 3;
 // Only errors created here may reach diagnostics. Never serialize caught errors.
 const safeFailures = new WeakSet();
 const failure = (stage, category) => {
@@ -30,16 +32,26 @@ const step = (stage, category, operation) => {
 const diagnostic = (error) =>
   safeFailures.has(error) ? error.message : "stage=unknown; category=unexpected-failure";
 const run = (file, args, environment, stage) => {
+  const builder = stage === "builder-sign-notarize-archive";
   const result = spawnSync(file, args, {
     env: environment,
     encoding: "utf8",
     shell: false,
-    maxBuffer: MAX_COMMAND_OUTPUT
+    maxBuffer: MAX_COMMAND_OUTPUT,
+    ...(builder ? { stdio: ["ignore", "pipe", "pipe", "pipe"] } : {})
   });
   // Errors from security, builder and notarytool can contain secrets or argv.
   if (result.error) throw failure(stage, "command-start-or-io-failure");
   if (result.signal) throw failure(stage, "command-terminated");
-  if (result.status !== 0) throw failure(stage, "command-exit-failure");
+  if (result.status !== 0) {
+    const detail = builder ? result.output?.[BUILDER_DIAGNOSTIC_PIPE] : undefined;
+    if (typeof detail === "string" && isDiagnostic(detail)) {
+      const error = new Error(detail);
+      safeFailures.add(error);
+      throw error;
+    }
+    throw failure(stage, "command-exit-failure");
+  }
   return result.stdout;
 };
 const notarize = (artifact, environment, command = run) => {
@@ -179,15 +191,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
       throw failure("identity-match", "identity-mismatch");
     }
     execute("builder-sign-notarize-archive", process.execPath, [
-      require.resolve("electron-builder/cli.js"),
-      "--mac",
-      "dmg",
-      "zip",
-      "--arm64",
-      "--publish",
-      "never",
-      "--config",
-      "electron-builder.mac-production.cjs"
+      join(__dirname, "mac-production-builder.cjs")
     ]);
     const output = join(ui, "release/macos-production");
     const version = step(

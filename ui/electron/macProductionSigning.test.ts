@@ -40,6 +40,7 @@ const prepared = {
   APPLE_API_KEY_ID: environment.GRAIDER_APPLE_API_KEY_ID,
   APPLE_API_ISSUER: environment.GRAIDER_APPLE_API_ISSUER
 };
+const builderScript = path.resolve("scripts/mac-production-builder.cjs");
 const wrapperSource = fs.readFileSync("scripts/package-mac-production.cjs", "utf8");
 
 function harness(platform = "darwin", arch = "arm64") {
@@ -73,10 +74,12 @@ function harness(platform = "darwin", arch = "arm64") {
           readFileSync: reads
         };
       if (name === "./macos-signing-config.cjs") return helpers;
+      if (name === "./mac-production-builder.cjs")
+        return nodeRequire("./scripts/mac-production-builder.cjs");
       if (name === "./verify-macos-signatures.cjs") return verify;
       return nodeRequire(name);
     },
-    { resolve: () => "builder-cli" }
+    { resolve: () => builderScript }
   );
   runInNewContext(wrapperSource, {
     require: loader,
@@ -139,18 +142,8 @@ describe("fail-closed macOS production signing", () => {
     const test = harness();
     test.sign(environment, test.command, test.verify);
     const calls = test.command.mock.calls;
-    const builder = calls.find((call) => call[1][0] === "builder-cli");
-    expect(builder?.[1]).toEqual([
-      "builder-cli",
-      "--mac",
-      "dmg",
-      "zip",
-      "--arm64",
-      "--publish",
-      "never",
-      "--config",
-      "electron-builder.mac-production.cjs"
-    ]);
+    const builder = calls.find((call) => call[1][0] === builderScript);
+    expect(builder?.[1]).toEqual([builderScript]);
     const child = builder?.[2];
     expect(child).toMatchObject({
       CSC_IDENTITY_AUTO_DISCOVERY: "false",
@@ -175,7 +168,7 @@ describe("fail-closed macOS production signing", () => {
       child
     );
     const notaryIndex = calls.findIndex((call) => call[1][0] === "notarytool");
-    expect(notaryIndex).toBeGreaterThan(calls.findIndex((call) => call[1][0] === "builder-cli"));
+    expect(notaryIndex).toBeGreaterThan(calls.findIndex((call) => call[1][0] === builderScript));
     expect(calls[notaryIndex + 1][1].slice(0, 2)).toEqual(["stapler", "staple"]);
     expect(calls[notaryIndex + 2][1].slice(0, 2)).toEqual(["stapler", "validate"]);
     expect(calls[notaryIndex + 3][1][0]).toMatch(/verify-mac-production\.cjs$/);
@@ -196,7 +189,7 @@ describe("fail-closed macOS production signing", () => {
     "create-keychain",
     "import",
     "set-key-partition-list",
-    "builder-cli",
+    builderScript,
     "notarytool",
     "delete-keychain"
   ])("fails and cleans private files when %s fails", (stage) => {
@@ -222,7 +215,7 @@ describe("fail-closed macOS production signing", () => {
     expect(() => test.sign(environment, test.command, test.verify)).toThrow(
       "stage=identity-match; category=identity-mismatch"
     );
-    expect(test.command.mock.calls.some((call) => call[1][0] === "builder-cli")).toBe(false);
+    expect(test.command.mock.calls.some((call) => call[1][0] === builderScript)).toBe(false);
     expect(test.removes).toHaveBeenCalled();
   });
 
@@ -275,6 +268,8 @@ describe("fail-closed macOS production signing", () => {
       (name: string): unknown => {
         if (name === "node:child_process") return { spawnSync: () => result };
         if (name === "./macos-signing-config.cjs") return helpers;
+        if (name === "./mac-production-builder.cjs")
+          return nodeRequire("./scripts/mac-production-builder.cjs");
         if (name === "./verify-macos-signatures.cjs") return {};
         if (name === "node:fs")
           return {
@@ -285,7 +280,7 @@ describe("fail-closed macOS production signing", () => {
           };
         return nodeRequire(name);
       },
-      { main: module, resolve: () => "builder-cli" }
+      { main: module, resolve: () => builderScript }
     );
     runInNewContext(wrapperSource, {
       module,
@@ -307,7 +302,7 @@ describe("fail-closed macOS production signing", () => {
     ["import", "certificate-import"],
     ["set-key-partition-list", "keychain-partition-list"],
     ["find-identity", "identity-query"],
-    ["builder-cli", "builder-sign-notarize-archive"],
+    [builderScript, "builder-sign-notarize-archive"],
     ["notarytool", "dmg-notarization-submit"],
     ["staple", "dmg-stapler-staple"],
     ["validate", "dmg-stapler-validate"],
@@ -420,6 +415,87 @@ describe("fail-closed macOS production signing", () => {
       expect(test.diagnostic(error)).toBe("stage=unknown; category=unexpected-failure");
   });
 
+  it.each([
+    [
+      "stage=builder-app-verification; category=verification-failure",
+      "builder-app-verification; category=verification-failure"
+    ],
+    [
+      "stage=builder-app-sign; category=signing-failure",
+      "builder-app-sign; category=signing-failure"
+    ],
+    [
+      "stage=builder-app-notarize-staple; category=notarization-failure",
+      "builder-app-notarize-staple; category=notarization-failure"
+    ],
+    [
+      "stage=builder-archive; category=archive-failure",
+      "builder-archive; category=archive-failure"
+    ],
+    [
+      "secret path argv certificate",
+      "builder-sign-notarize-archive; category=command-exit-failure"
+    ],
+    [
+      "stage=builder-app-sign; category=signing-failure\nsecret",
+      "builder-sign-notarize-archive; category=command-exit-failure"
+    ],
+    [undefined, "builder-sign-notarize-archive; category=command-exit-failure"]
+  ])("accepts only exact diagnostics from the builder pipe: %s", (detail, expected) => {
+    const stderr = vi.fn();
+    const processMock = {
+      platform: "darwin",
+      arch: "arm64",
+      execPath: "node",
+      env: environment,
+      stderr: { write: stderr },
+      exitCode: 0
+    };
+    const spawnSync = vi.fn((_file: string, args: string[]) => {
+      if (args[0] === "find-identity")
+        return { status: 0, stdout: `${fingerprint} "Developer ID Application: Fake (${team})"` };
+      if (args[0] === builderScript)
+        return {
+          status: 1,
+          stdout: "secret",
+          stderr: "secret",
+          output: [null, "secret", "secret", detail]
+        };
+      return { status: 0, stdout: "" };
+    });
+    const module = { exports: {} };
+    const loader = Object.assign(
+      (name: string): unknown => {
+        if (name === "node:child_process") return { spawnSync };
+        if (name === "node:fs")
+          return {
+            mkdtempSync: () => "fake-temp",
+            chmodSync: vi.fn(),
+            writeFileSync: vi.fn(),
+            rmSync: vi.fn()
+          };
+        if (name.startsWith("./")) return nodeRequire(`./scripts/${name.slice(2)}`);
+        return nodeRequire(name);
+      },
+      { main: module }
+    );
+    runInNewContext(wrapperSource, {
+      module,
+      require: loader,
+      process: processMock,
+      __dirname: path.resolve("scripts")
+    });
+    expect(processMock.exitCode).toBe(1);
+    expect(stderr).toHaveBeenCalledWith(
+      `macOS production signing failed. Original failure: stage=${expected}. No acceptance recorded.\n`
+    );
+    expect(spawnSync).toHaveBeenCalledWith(
+      "node",
+      [builderScript],
+      expect.objectContaining({ shell: false, stdio: ["ignore", "pipe", "pipe", "pipe"] })
+    );
+  });
+
   it("independently checks certificate hash, Developer ID, runtime, minimal entitlements and staple", () => {
     const load = (details: string, entitlements: Record<string, boolean>, failedStage?: string) => {
       const spawnSync = vi.fn((_file: string, args: string[]) => {
@@ -443,6 +519,8 @@ describe("fail-closed macOS production signing", () => {
         require: (name: string): unknown => {
           if (name === "node:child_process") return { spawnSync };
           if (name === "./macos-signing-config.cjs") return helpers;
+          if (name === "./mac-production-builder.cjs")
+            return nodeRequire("./scripts/mac-production-builder.cjs");
           return nodeRequire(name);
         }
       });
@@ -517,6 +595,8 @@ describe("fail-closed macOS production signing", () => {
             rmSync: removes
           };
         if (name === "./macos-signing-config.cjs") return helpers;
+        if (name === "./mac-production-builder.cjs")
+          return nodeRequire("./scripts/mac-production-builder.cjs");
         if (name === "@electron/asar")
           return {
             listPackage: () => [
