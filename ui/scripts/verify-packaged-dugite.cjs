@@ -191,7 +191,7 @@ const main = async () => {
   });
   assert(
     cliHelp.error == null && cliHelp.status === 0,
-    "Packaged CLI --help failed with empty PATH."
+    `Packaged CLI --help failed with empty PATH (status=${cliHelp.status}, error=${cliHelp.error?.code ?? "none"}). ${cliHelp.stderr ?? ""}`
   );
   assert(
     cliHelp.stdout.includes("Usage: graider") && cliHelp.stdout.includes("assignment"),

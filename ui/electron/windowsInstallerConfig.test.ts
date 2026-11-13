@@ -157,6 +157,12 @@ describe("Windows NSIS installer foundation", () => {
     expect(workflowSource).toContain("verify-packaged-dugite.cjs");
     expect(workflowSource).toContain("Get-AuthenticodeSignature");
     expect(workflowSource).toContain("Uninstall Graider.exe");
+    const installedProof = job.steps.find(
+      (step: { name?: string }) =>
+        step.name === "Verify installed x64 app and bundled Git with no system Git"
+    );
+    expect(installedProof.run).toContain("cp.spawnSync(");
+    expect(installedProof.run).toContain("process.exit(r.status??1)");
   });
 
   it("fails packaging when builder fails, is terminated or cannot start", () => {

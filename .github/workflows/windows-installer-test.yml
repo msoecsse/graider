@@ -115,7 +115,8 @@ jobs:
           $app = "$env:NSIS_TEST_INSTALL\Graider.exe"
           node -e "const fs=require('node:fs');const assert=require('node:assert/strict');const b=fs.readFileSync(process.argv[1]);const o=b.readUInt32LE(0x3c);assert.equal(b.subarray(o,o+4).toString('hex'),'50450000');assert.equal(b.readUInt16LE(o+4),0x8664);" $app
           if ($LASTEXITCODE -ne 0) { throw 'Installed app is not Windows x64.' }
-          & $app "$env:GITHUB_WORKSPACE\ui\scripts\verify-packaged-dugite.cjs" --resources "$env:NSIS_TEST_INSTALL\resources"
+          # Node waits for the GUI-subsystem executable and propagates its actual exit status.
+          node -e "const cp=require('node:child_process');const r=cp.spawnSync(process.argv[1],[process.argv[2],'--resources',process.argv[3]],{env:process.env,stdio:'inherit',shell:false});if(r.error)throw r.error;process.exit(r.status??1);" $app "$env:GITHUB_WORKSPACE\ui\scripts\verify-packaged-dugite.cjs" "$env:NSIS_TEST_INSTALL\resources"
           if ($LASTEXITCODE -ne 0) { throw 'Installed bundled Git proof failed.' }
 
       - name: Uninstall test app
