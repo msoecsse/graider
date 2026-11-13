@@ -1,0 +1,58 @@
+name: macOS archive test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - remote-course-v2
+    paths:
+      - ".github/workflows/macos-archive-test.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "ui/package.json"
+      - "ui/package-lock.json"
+      - "ui/electron-builder.config.cjs"
+      - "ui/electron-builder.mac-archive-test.cjs"
+      - "ui/scripts/package-mac-archive-test.cjs"
+      - "ui/scripts/verify-mac-archive-test.cjs"
+      - "ui/scripts/verify-packaged-dugite.cjs"
+      - "ui/scripts/tsup.graider-cli.config.mjs"
+      - "ui/electron/macArchiveConfig.test.ts"
+      - "ui/electron/packagingConfig.test.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  macos-archive-test:
+    if: github.repository == 'msoecsse/graider'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: arm64
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Verify native Apple Silicon
+        run: node -e "if(process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('Native macOS arm64 required');"
+      - run: npm ci
+      - run: npm ci --prefix ui
+      - name: Test packaging safety contracts
+        working-directory: ui
+        run: npx vitest run electron/macArchiveConfig.test.ts electron/packagingConfig.test.ts electron/windowsInstallerConfig.test.ts
+      - run: npm --prefix ui run package:mac:archive-test
+      - name: Remove loose OAuth fixture
+        if: always()
+        run: node -e "require('node:fs').rmSync('ui/dist-electron/github-oauth.release.json',{force:true})"
+      - name: Verify both archives outside checkout
+        run: npm --prefix ui run verify:mac:archive-test
+      - name: Record test-only scope
+        run: echo 'Unsigned macOS arm64 DMG and ZIP verified at ${{ github.sha }}. No uploads, releases, update feed, signing or notarization. Signed production acceptance remains pending.' >> "$GITHUB_STEP_SUMMARY"

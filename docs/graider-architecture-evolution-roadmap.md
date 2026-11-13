@@ -258,6 +258,16 @@ Configure:
 - production DMG.
 - update ZIP.
 
+Foundation **3.2A** ([#53](https://github.com/msoecsse/graider/issues/53)) adds
+separate unsigned test-only arm64 DMG and ZIP outputs, deterministic safety tests,
+and native extraction/install-copy plus isolated CLI/Dugite verification. Existing
+unpacked/RC1 and Windows packaging remain unchanged. No signing, notarization,
+release publishing, update feed/runtime or Schema v2 activation is included.
+See [commands and Phase 3.2B prerequisites](electron-packaging.md#macos-arm64-archive-foundation-phase-32a).
+Full 3.2 remains pending personal Apple Developer enrollment, Developer ID and
+notarization credentials, a fail-closed signed configuration and native signed,
+notarized, quarantined-install acceptance for both archives.
+
 ## Slice 3.3 — GitHub Release pipeline
 
 Automate tagged releases with:

@@ -385,6 +385,76 @@ unsigned installer. Next is a narrow signed Windows configuration/verification
 slice once the owner's signing identity and service are available. Production
 3.1 remains incomplete until those prerequisites and signed acceptance pass.
 
+## macOS arm64 archive foundation (Phase 3.2A)
+
+Issue [#53](https://github.com/msoecsse/graider/issues/53) adds a separate unsigned,
+**test-only** DMG and ZIP. On native Apple Silicon with Node 24 and both lockfiles
+installed, run from the repository root:
+
+```bash
+npm --prefix ui run package:mac:archive-test
+npm --prefix ui run verify:mac:archive-test
+```
+
+The first command builds the CLI/app once, then builds both archives using the
+existing electron-builder toolchain. Outputs are isolated in
+`ui/release/macos-archive-test/`:
+
+```text
+Graider-<version>-mac-arm64-unsigned-test.dmg
+Graider-<version>-mac-arm64-unsigned-test.zip
+mac-arm64/Graider.app
+```
+
+Identity remains `edu.graider.ui` / `Graider`; version comes from `ui/package.json`
+(currently `0.1.0`, a development version). Existing unpacked macOS, RC1, Windows
+portable Preview and NSIS commands retain their configurations and outputs.
+The separate config explicitly sets `mac.identity: null`, `notarize: false`,
+`dmg.sign: false` and `publish: null`. The wrapper disables identity discovery,
+strips inherited certificate, Apple signing/notarization and GitHub credentials,
+and invokes builder with `--publish never`. It ignores caller OAuth configuration
+and embeds only `ci-only-nonfunctional-mac-archive-test`. It cannot sign in.
+No signing/notarization credentials, release, upload, update feed or updater runtime
+are involved. Builder diagnostic YAML and archive blockmaps may be generated;
+they are not update feeds. Electron's upstream ad-hoc signature may remain;
+no Developer ID identity is applied.
+
+The native verifier extracts the ZIP and mounts the DMG read-only, copies its app
+as for drag-to-Applications installation, and tests both outside the source tree
+in temporary paths containing spaces. It checks archive integrity, app identity,
+version, required ASAR resources, nonfunctional fixture, lack of update feed,
+arm64 executable and absence of Developer ID signing. The existing offline packaged
+proof checks native bundled Git architecture, CLI help and Dugite resolution,
+repository operations and binary patches with empty PATH and isolated Git config.
+It prints SHA-256 hashes and cleans up temporary copies/mounts. It never uses live
+GitHub credentials. Keep generated test artifacts local and outside production
+release directories; do not distribute them to faculty.
+
+`macOS archive test` CI runs on native arm64 for scoped packaging changes pushed
+to `remote-course-v2` (or manual dispatch once available on the default branch).
+It has read-only repository permission, no secrets or artifact uploads, cleans the
+loose fixture even on failure, and records exact-SHA acceptance. Ordinary source
+changes use normal comprehensive cross-platform CI without rebuilding these
+archives. No cross-platform CI checks are removed.
+
+### Remaining Phase 3.2B prerequisites
+
+The owner must enroll a **personal Apple Developer account** and provision a
+Developer ID Application certificate/private key, actual Team ID and protected
+notarization authentication (App Store Connect API key or supported Apple ID
+credentials). Repository ownership by `msoecsse` does not establish a signing
+identity. Configure secure CI storage/access and renewal/rotation procedures.
+
+A separate fail-closed signing configuration must require that identity and validate
+hardened runtime/entitlements for Electron helpers, bundled CLI and native Dugite
+payload; sign the app and DMG, notarize the supported submission, staple applicable
+artifacts, and independently verify Developer ID, notarization and Gatekeeper on
+native Apple Silicon for **both DMG and ZIP**. ZIP cannot itself be stapled: validate
+the notarized/stapled app it contains. Test clean downloaded/quarantined installation,
+launch and bundled CLI/Git, and later signed version-to-version update acceptance.
+The unsigned foundation does not prove these production criteria, satisfy Phase
+3.3 publishing/3.4 channels/3.5 updater acceptance, or activate Schema v2 migration.
+
 ## RC1 Faculty Release Package
 
 Maintainers can assemble the repeatable RC1 faculty package from the UI package:

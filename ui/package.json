@@ -29,7 +29,9 @@
     "format:check": "prettier . --check",
     "pretest": "npm --prefix .. run test:hygiene",
     "pretest:watch": "npm --prefix .. run test:hygiene",
-    "test:migration": "vitest run --maxWorkers=2 electron/migration electron/schemaDiscriminated electron/managedOperationBridge.integration.test.ts electron/managedRuntimeWriteSafety.test.ts electron/courseStartup.integration.test.ts electron/remoteCourseDiscovery.test.ts electron/courseSetupService.test.ts src/migration-review"
+    "test:migration": "vitest run --maxWorkers=2 electron/migration electron/schemaDiscriminated electron/managedOperationBridge.integration.test.ts electron/managedRuntimeWriteSafety.test.ts electron/courseStartup.integration.test.ts electron/remoteCourseDiscovery.test.ts electron/courseSetupService.test.ts src/migration-review",
+    "package:mac:archive-test": "npm run build:cli && npm run build && node scripts/package-mac-archive-test.cjs",
+    "verify:mac:archive-test": "node scripts/verify-mac-archive-test.cjs"
   },
   "dependencies": {
     "dompurify": "^3.4.17",
