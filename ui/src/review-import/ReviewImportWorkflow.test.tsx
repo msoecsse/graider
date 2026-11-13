@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImportPreview, FindingPlan, ImportResult } from "../../electron/reviewImportService";
 import { ReviewImportWorkflow } from "./ReviewImportWorkflow";
@@ -132,10 +132,32 @@ beforeEach(() => {
 const open = async (onApplied = vi.fn().mockResolvedValue(undefined)) => {
   render(<ReviewImportWorkflow request={request} onApplied={onApplied} />);
   fireEvent.click(screen.getByRole("button", { name: "Import Reviews..." }));
-  await screen.findByText("Review Import Preview");
+  // Preview markup can commit before the passive effect calls showModal().
+  await screen.findByRole("dialog", { name: "Review Import Preview" });
   return onApplied;
 };
 describe("Review Import Preview", () => {
+  it("waits for the accessible dialog when preview content precedes modal opening", async () => {
+    let pendingDialog: HTMLDialogElement | undefined;
+    vi.mocked(HTMLDialogElement.prototype.showModal).mockImplementation(function (
+      this: HTMLDialogElement
+    ) {
+      pendingDialog = this;
+    });
+    let opened = false;
+    const opening = open().then(() => {
+      opened = true;
+    });
+    await waitFor(() => expect(pendingDialog).toBeDefined());
+    expect(screen.getByText("Review Import Preview")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Review Import Preview" })).toBeNull();
+    expect(opened).toBe(false);
+    act(() => {
+      pendingDialog!.setAttribute("open", "");
+    });
+    await opening;
+    expect(screen.getByRole("dialog", { name: "Review Import Preview" })).toHaveAttribute("open");
+  });
   it("requests native selection with assignment identity and cancels without opening or applying", async () => {
     Object.assign(window.graiderUI, { chooseReviewImport: vi.fn().mockResolvedValue(null) });
     render(<ReviewImportWorkflow request={request} onApplied={vi.fn()} />);
