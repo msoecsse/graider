@@ -1,13 +1,14 @@
 /* global process, __dirname */
 "use strict";
 const fs = require("node:fs");
-const { join, resolve } = require("node:path");
+const { basename, join, resolve } = require("node:path");
 const { tmpdir } = require("node:os");
 const { randomBytes, createPrivateKey, createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { inputs } = require("./macos-signing-config.cjs");
 const signatures = require("./verify-macos-signatures.cjs");
 const { isDiagnostic } = require("./mac-production-builder.cjs");
+const { signingCategory, signingArguments } = require("./mac-dmg-signing.cjs");
 
 const MAX_COMMAND_OUTPUT = 64 * 1024 * 1024;
 const KEYCHAIN_PASSWORD_BYTES = 32;
@@ -33,8 +34,9 @@ const diagnostic = (error) =>
   safeFailures.has(error) ? error.message : "stage=unknown; category=unexpected-failure";
 const run = (file, args, environment, stage) => {
   const builder = stage === "builder-sign-notarize-archive";
+  const dmgSigning = stage === "dmg-sign" || stage === "dmg-preflight-sign";
   const result = spawnSync(file, args, {
-    env: environment,
+    env: { ...environment, LC_ALL: "C", LANG: "C" },
     encoding: "utf8",
     shell: false,
     maxBuffer: MAX_COMMAND_OUTPUT,
@@ -44,6 +46,14 @@ const run = (file, args, environment, stage) => {
   if (result.error) throw failure(stage, "command-start-or-io-failure");
   if (result.signal) throw failure(stage, "command-terminated");
   if (result.status !== 0) {
+    if (dmgSigning) throw failure(stage, signingCategory(result));
+    if (stage === "dmg-format-inspection") {
+      const category = signingCategory(result);
+      throw failure(
+        stage,
+        category === "unrecognized-native-signing-error" ? "image-inspection-failure" : category
+      );
+    }
     const detail = builder ? result.output?.[BUILDER_DIAGNOSTIC_PIPE] : undefined;
     if (typeof detail === "string" && isDiagnostic(detail)) {
       const error = new Error(detail);
@@ -115,6 +125,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
   let child;
   let keychainAttempted = false;
   let originalFailure;
+  let preflightDiagnostic;
   const cleanupFailures = [];
   const execute = (stage, file, args) =>
     step(stage, "command-failure", () => command(file, args, child, stage));
@@ -200,16 +211,61 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
       () => require(join(ui, "package.json")).version
     );
     const dmg = join(output, `Graider-${version}-mac-arm64-signed.dmg`);
-    // Builder's DMG signer can silently skip. Own this operation explicitly,
-    // using only the identity already verified in our temporary keychain.
-    execute("dmg-sign", "/usr/bin/codesign", [
-      "--sign",
-      configuration.fingerprint,
-      "--keychain",
-      keychain,
-      "--timestamp",
+    const format = execute("dmg-format-inspection", "/usr/bin/hdiutil", [
+      "imageinfo",
+      "-format",
       dmg
     ]);
+    if (format.trim() !== "UDZO") {
+      throw failure("dmg-format-inspection", "unexpected-dmg-format");
+    }
+    // Builder's DMG signer can silently skip. Own this operation explicitly,
+    // using only the identity already verified in our temporary keychain.
+    try {
+      execute(
+        "dmg-sign",
+        "/usr/bin/codesign",
+        signingArguments(dmg, configuration.fingerprint, keychain)
+      );
+    } catch (error) {
+      // Diagnose a failed operation without retrying or replacing its artifact.
+      // Same identity/keychain/timestamp options, fresh private UDZO image.
+      try {
+        const source = join(root, "dmg-preflight-source");
+        // Keep the basename too: codesign derives an implicit identifier from it.
+        const image = join(root, basename(dmg));
+        step("dmg-preflight-source", "filesystem-failure", () => {
+          fs.mkdirSync(source, { mode: PRIVATE_DIRECTORY_MODE });
+          fs.writeFileSync(join(source, "fixture.txt"), "Graider signing preflight\n", {
+            mode: PRIVATE_FILE_MODE
+          });
+        });
+        execute("dmg-preflight-create", "/usr/bin/hdiutil", [
+          "create",
+          "-quiet",
+          "-format",
+          "UDZO",
+          "-srcfolder",
+          source,
+          image
+        ]);
+        step("dmg-preflight-permissions", "filesystem-failure", () =>
+          fs.chmodSync(image, PRIVATE_FILE_MODE)
+        );
+        execute(
+          "dmg-preflight-sign",
+          "/usr/bin/codesign",
+          signingArguments(image, configuration.fingerprint, keychain)
+        );
+        step("dmg-preflight-verification", "verification-failure", () =>
+          verify.verifySignature(image, child)
+        );
+        preflightDiagnostic = "stage=dmg-preflight-verification; category=passed";
+      } catch (preflightError) {
+        preflightDiagnostic = diagnostic(preflightError);
+      }
+      throw error;
+    }
     step("dmg-signature-verification", "verification-failure", () =>
       verify.verifySignature(dmg, child)
     );
@@ -253,6 +309,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
         originalFailure
           ? `Original failure: ${diagnostic(originalFailure)}.`
           : "Signing stages completed.",
+        ...(preflightDiagnostic ? [`DMG preflight: ${preflightDiagnostic}.`] : []),
         ...cleanupFailures.map((message) => `Cleanup failure: ${message}.`)
       ].join("\n")
     );
@@ -260,7 +317,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
     throw error;
   }
 };
-module.exports = { sign, notarize, diagnostic };
+module.exports = { sign, notarize, diagnostic, run };
 if (require.main === module) {
   try {
     sign();

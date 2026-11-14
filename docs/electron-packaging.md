@@ -639,6 +639,86 @@ the failing signing or verification operation, or proceed to mandatory DMG
 notarization/stapling and both installation proofs. Native downloaded/quarantined
 DMG and ZIP acceptance remains mandatory before closing #54.
 
+#### Actual DMG signing investigation (run 43556223888)
+
+[Run 43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888)
+checked out `79cbf768dbe2e3ed799b96b0193ff411d80d9637`, completed builder, and
+failed at `dmg-sign; category=command-exit-failure`. Cleanup passed and uploads
+were skipped. The wrapper discarded native stderr, and the failed DMG was not
+uploaded. That historical failure cannot establish a specific native cause.
+
+Apple's [disk-image procedure](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution)
+specifies a Developer ID Application identity, `--timestamp`, an explicit unique
+`-i` identifier, and UDZO for images made with third-party tools. The wrapper
+already uses the verified Developer ID fingerprint, private keychain and secure
+timestamp; it omits `-i`. Native credential-free UDZO fixtures sign and pass strict
+verification both with and without `-i`. Thus omission alone is not demonstrated
+to cause this failure; these ad hoc fixtures do not prove Developer ID behavior.
+No signing arguments were changed in this investigation.
+
+Tests execute installed dmg-builder 26.15.3's option computation and customization
+settings generation: the production defaults select UDZO and HFS+, passed to the
+vendor dmgbuild tool. This is evidence of the generator's configuration, not an
+inspection of the unavailable failed production image. The wrapper now requires
+native `hdiutil imageinfo -format` to report exactly UDZO before signing; other
+formats fail at `dmg-format-inspection; category=unexpected-dmg-format`. A native
+inspection failure reports recognized format/filesystem markers or
+`image-inspection-failure` without exposing the response.
+
+The native `codesign(1)` manual states that `--keychain` restricts identity lookup
+to that keychain, while the normal search list is still used for certificate-chain
+construction. The wrapper does not change the default keychain, search list or
+trust settings. An identity-query match does not by itself prove private-key
+access. The same identity already signed the app in this run, which makes a
+permanent global credential defect less likely but does not eliminate keychain,
+trust, timing or timestamp failures. Apple's [timestamp guidance](https://developer.apple.com/documentation/security/resolving-common-notarization-issues)
+requires Internet access to its timestamp service; explicitly requesting a secure
+timestamp can fail the signing operation. Timestamping remains mandatory.
+
+Actual signing errors now use fixed native-marker categories at `dmg-sign` and
+`dmg-preflight-sign`. Native output stays private in memory and is discarded:
+
+| Condition reported by native tools                              | Safe category                                                                                                                  |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Identity missing or ambiguous                                   | `identity-not-found`, `identity-ambiguous`                                                                                     |
+| Key authorization/interaction denied or private key unavailable | `private-key-access-denied`, `private-key-unavailable`                                                                         |
+| Invalid/missing keychain                                        | `keychain-unavailable`                                                                                                         |
+| Certificate chain/trust/validity failure                        | `certificate-trust-failure`                                                                                                    |
+| Timestamp failure                                               | `timestamp-service-failure`                                                                                                    |
+| Existing image signature                                        | `already-signed-dmg`                                                                                                           |
+| Invalid/unsupported image                                       | `invalid-or-unsupported-dmg`                                                                                                   |
+| Filesystem access, missing file, space or I/O failure           | `filesystem-permission-denied`, `filesystem-read-only`, `filesystem-not-found`, `filesystem-no-space`, `filesystem-io-failure` |
+| Disallowed metadata or missing identifier                       | `resource-fork-or-finder-info`, `identifier-required`                                                                          |
+| Security subsystem internal error                               | `native-security-internal-error`                                                                                               |
+| Unrecognized native failure                                     | `unrecognized-native-signing-error`                                                                                            |
+
+Start/I/O failures and process termination retain their existing categories and
+take precedence over stderr markers. `errSecInternalComponent` is deliberately
+not translated into a claim about key permissions. Unknown errors remain unknown;
+no raw output, paths, arguments, certificate details or credentials are printed.
+Locale is fixed to C for native marker interpretation. Deterministic tests cover
+all categories and redaction. Native macOS fixtures cover UDZO signing with/without
+an identifier, strict integrity, duplicate-signing rejection, missing files and
+an unavailable identity/keychain. Timestamp and private-key authorization errors
+are simulated; no fixture uses real credentials or changes trust settings.
+
+If actual signing fails, a diagnostic preflight creates a tiny private UDZO image
+inside the existing mode-0700 signing directory and signs it using the same
+identity, temporary keychain, basename and unchanged timestamp options. It independently
+verifies that image's exact fingerprint and Developer ID/team requirements. A
+fixed preflight result is appended to the original failure. Source/image files
+remain private and are removed with the signing directory on every normal exit.
+Preflight failures and cleanup failures cannot replace the original signing
+failure. The failed Graider artifact is never retried, notarized or accepted.
+
+A passing preflight proves that these credentials and timestamp options worked
+for the disposable image at that moment. It points toward image-specific or
+transient differences, but cannot rule out a transient timestamp/keychain problem
+or other image-specific behavior. Matching preflight/actual failure
+categories support a shared condition without proving its underlying cause.
+Real signed/notarized artifacts and downloaded native acceptance remain pending;
+#54 stays open. This investigation dispatches no production workflow or release.
+
 Outputs live only under `ui/release/macos-production/`:
 
 ```text

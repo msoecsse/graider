@@ -63,6 +63,60 @@ function harness() {
 }
 
 describe("safe diagnostics inside the production builder", () => {
+  it("installed DMG builder selects UDZO and HFS+ for the production defaults", async () => {
+    nodeRequire("electron-builder");
+    const { DmgTarget } = nodeRequire("dmg-builder/out/dmg");
+    const target = new DmgTarget(
+      {
+        config: { dmg: { sign: false, writeUpdateInfo: false } },
+        compression: "normal",
+        appInfo: { productFilename: "Graider" },
+        getIconPath: async () => null,
+        resourceList: []
+      },
+      "fixture-output"
+    );
+    const options = await target.computeDmgOptions("fixture.app");
+    expect(options.format).toBe("UDZO");
+    expect(options.filesystem).toBeUndefined();
+    const file = nodeRequire.resolve("dmg-builder/out/dmgUtil");
+    const localRequire = createRequire(file);
+    const exports = {} as any;
+    const writeFile = vi.fn(async (_file: string, _data: string) => {});
+    const execute = vi.fn(async () => "");
+    runInNewContext(fs.readFileSync(file, "utf8"), {
+      exports,
+      __dirname: path.dirname(file),
+      process: { ...process, env: {} },
+      require: (name: string) => {
+        if (name === "builder-util") return { ...localRequire(name), exec: execute };
+        if (name === "fs-extra") return { ...localRequire(name), writeFile };
+        if (name === "app-builder-lib/out/util/electronGet")
+          return { downloadBuilderToolset: async () => "fixture-toolset" };
+        if (name === "app-builder-lib/out/util/toolsetLock")
+          return { withToolsetLock: (operation: () => Promise<unknown>) => operation() };
+        return localRequire(name);
+      }
+    });
+    await exports.customizeDmg({
+      appPath: "fixture.app",
+      artifactPath: "fixture.dmg",
+      volumeName: "Fixture",
+      specification: { ...options, background: null },
+      packager: {
+        getResource: async () => null,
+        getTempFile: async () => "fixture-settings.json",
+        info: { getWorkspaceRoot: async () => "fixture-workspace" },
+        packagerOptions: {}
+      }
+    });
+    expect(JSON.parse(writeFile.mock.calls[0][1])).toMatchObject({
+      format: "UDZO",
+      filesystem: "HFS+"
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["signed", "disallowed", "missing-identity", "disabled"])(
     "installed DMG signer behavior: %s",
     async (scenario) => {

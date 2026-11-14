@@ -55,6 +55,7 @@ function harness(platform = "darwin", arch = "arm64") {
     if (args[0] === "find-identity")
       return `1) ${fingerprint} "Developer ID Application: Fake Owner (${team})"\n`;
     if (args[0] === "notarytool") return JSON.stringify({ status: "Accepted" });
+    if (args[0] === "imageinfo") return "UDZO\n";
     return "";
   });
   const module = {
@@ -69,12 +70,14 @@ function harness(platform = "darwin", arch = "arm64") {
       if (name === "node:fs")
         return {
           mkdtempSync: directories,
+          mkdirSync: vi.fn(),
           chmodSync: permissions,
           writeFileSync: writes,
           rmSync: removes,
           readFileSync: reads
         };
       if (name === "./macos-signing-config.cjs") return helpers;
+      if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
       if (name === "./mac-production-builder.cjs")
         return nodeRequire("./scripts/mac-production-builder.cjs");
       if (name === "./verify-macos-signatures.cjs") return verify;
@@ -196,6 +199,84 @@ describe("fail-closed macOS production signing", () => {
     expect(environment.CSC_LINK).toBe("fake-alternate-certificate");
   });
 
+  it.each(["passed", "source", "create", "sign", "verification"])(
+    "retains the actual signing failure and private cleanup when preflight=%s",
+    (outcome) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      test.command.mockImplementation((file, args, env) => {
+        if (args[0] === "--sign" && args.at(-1)?.includes(path.join("release", "macos-production")))
+          throw new Error("private original signing failure");
+        if (
+          (outcome === "create" && args[0] === "create") ||
+          (outcome === "sign" && args[0] === "--sign")
+        )
+          throw new Error("private preflight failure");
+        return successful(file, args, env);
+      });
+      if (outcome === "source")
+        test.writes
+          .mockImplementationOnce(() => {})
+          .mockImplementationOnce(() => {})
+          .mockImplementationOnce(() => {
+            throw new Error("private path");
+          });
+      if (outcome === "verification")
+        test.verify.verifySignature.mockImplementation(() => {
+          throw new Error("private certificate");
+        });
+      let message = "";
+      try {
+        test.sign(environment, test.command, test.verify);
+      } catch (error) {
+        message = test.diagnostic(error);
+      }
+      expect(
+        message.startsWith(
+          "Original failure: stage=dmg-sign; category=command-failure.\nDMG preflight: stage=dmg-preflight-"
+        )
+      ).toBe(true);
+      expect(message.includes("private")).toBe(false);
+      expect(
+        message.endsWith(
+          outcome === "passed"
+            ? "category=passed."
+            : outcome === "source"
+              ? "category=filesystem-failure."
+              : outcome === "verification"
+                ? "category=verification-failure."
+                : "category=command-failure."
+        )
+      ).toBe(true);
+      const signatures = test.command.mock.calls.filter((call) => call[1][0] === "--sign");
+      if (["passed", "sign", "verification"].includes(outcome)) {
+        expect(signatures).toHaveLength(2);
+        expect(signatures[0][1].slice(0, -1)).toEqual(signatures[1][1].slice(0, -1));
+        expect(signatures[0][2]).toEqual(signatures[1][2]);
+      }
+      expect(test.command.mock.calls.some((call) => call[1][0] === "notarytool")).toBe(false);
+      expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(false);
+      expect(test.command.mock.calls.at(-1)?.[1][0]).toBe("delete-keychain");
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(["UDRW", "UDBZ", "", "UDZO\nprivate path"])(
+    "rejects unexpected generated DMG format %s",
+    (format) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      test.command.mockImplementation((file, args, env) =>
+        args[0] === "imageinfo" ? format : successful(file, args, env)
+      );
+      expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+        "stage=dmg-format-inspection; category=unexpected-dmg-format"
+      );
+      expect(test.command.mock.calls.some((call) => call[1][0] === "--sign")).toBe(false);
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it.each([
     "create-keychain",
     "import",
@@ -279,6 +360,7 @@ describe("fail-closed macOS production signing", () => {
       (name: string): unknown => {
         if (name === "node:child_process") return { spawnSync: () => result };
         if (name === "./macos-signing-config.cjs") return helpers;
+        if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
         if (name === "./mac-production-builder.cjs")
           return nodeRequire("./scripts/mac-production-builder.cjs");
         if (name === "./verify-macos-signatures.cjs") return {};
@@ -341,7 +423,7 @@ describe("fail-closed macOS production signing", () => {
     expect(message).toBe(
       operation === "delete-keychain"
         ? "Signing stages completed.\nCleanup failure: stage=cleanup-keychain; category=command-failure."
-        : `Original failure: stage=${stage}; category=command-failure.`
+        : `Original failure: stage=${stage}; category=command-failure.${operation === "--sign" ? "\nDMG preflight: stage=dmg-preflight-sign; category=command-failure." : ""}`
     );
     expect(test.removes).toHaveBeenCalledTimes(2);
     expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(
@@ -532,6 +614,7 @@ describe("fail-closed macOS production signing", () => {
         require: (name: string): unknown => {
           if (name === "node:child_process") return { spawnSync };
           if (name === "./macos-signing-config.cjs") return helpers;
+          if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
           if (name === "./mac-production-builder.cjs")
             return nodeRequire("./scripts/mac-production-builder.cjs");
           return nodeRequire(name);
@@ -737,6 +820,7 @@ describe("fail-closed macOS production signing", () => {
             rmSync: removes
           };
         if (name === "./macos-signing-config.cjs") return helpers;
+        if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
         if (name === "./mac-production-builder.cjs")
           return nodeRequire("./scripts/mac-production-builder.cjs");
         if (name === "@electron/asar")
