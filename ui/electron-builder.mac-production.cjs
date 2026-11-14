@@ -3,7 +3,7 @@
 const base = require("./electron-builder.config.cjs");
 const { prepared } = require("./scripts/macos-signing-config.cjs");
 const signing = prepared(process.env);
-const { stage } = require("./scripts/mac-production-builder.cjs");
+const { stage, artifactCompleted } = require("./scripts/mac-production-builder.cjs");
 
 /** @type {import("electron-builder").Configuration} */
 module.exports = {
@@ -13,6 +13,7 @@ module.exports = {
   publish: null,
   forceCodeSigning: true,
   generateUpdatesFilesForAllChannels: false,
+  artifactBuildCompleted: artifactCompleted,
   mac: {
     ...base.mac,
     target: [

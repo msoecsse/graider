@@ -790,6 +790,56 @@ It is a hypothesis, not a demonstrated shared root cause: that run also retained
 neither the archive list nor native error. No certificate, keychain, signing
 argument, notarization or acceptance check changes are justified by this evidence.
 
+#### Builder lifecycle investigation (run 43564657085)
+
+[Run 43564657085](https://github.com/msoecsse/graider/actions/runs/43564657085)
+checked out `202e1206fc8f17471a03cadf672ff0970433fe27`. The builder returned
+zero without the exact FD3 completion record. The old worker wrote records only
+after `await builder.build()` resolved or rejected. Its logs cannot distinguish
+an unresolved promise at event-loop quiescence, explicit termination, or a lost
+record. The elapsed time establishes none of those causes.
+
+Real Node 24 subprocess tests independently verify the original four-descriptor
+`spawnSync` arrangement: child `fs.writeSync(3, record)` reaches parent
+`result.output[3]` exactly for both fixed success and failure records. Another real
+subprocess reproduces a pending promise with no handles exiting zero before its
+continuation runs. An awaited promise alone does not keep Node alive; see
+[Node's beforeExit contract](https://nodejs.org/docs/latest-v24.x/api/process.html#event-beforeexit).
+The worker now guards this demonstrated lifecycle hole: guarded synchronous
+`beforeExit` and `exit` observations produce a fixed failure and nonzero status.
+It schedules no keepalive or retry. `uncaughtExceptionMonitor` observes fatal
+exceptions without replacing Node's default handling. An exit without the
+quiescence observation is classified as premature, not necessarily an explicit
+`process.exit` call. Signals and start/I/O failures retain their parent categories.
+
+FD3 still carries one exact terminal record. An independent FD4 observation pipe
+reports only allowlisted stage/category identifiers: stage entry, promise
+resolution/rejection, artifact completion hooks, validation, record write attempts
+and results, and process exit. This separation can distinguish a successful FD3
+write followed by a missing parent record. Missing, truncated or malformed
+observation streams are discarded as a whole. Neither observations nor a zero
+exit can establish success; the resolved builder result, exact expected filenames
+and directories, nonempty regular DMG/ZIP files, and exact FD3 success record
+remain mandatory. Error objects, native output, paths, arguments, certificate
+information and credentials never cross either diagnostic channel.
+
+Credential-free local probes with installed electron-builder **26.15.3** completed
+real app packaging, DMG and ZIP creation, including the default Electron download
+and extraction path. `builder.build()` resolved in those probes. A permanent
+native macOS integration test runs the actual worker against an isolated unsigned
+fixture and installed Electron distribution, observing both real artifact hooks,
+the resolved promise and exact FD3 success. It performs no signing/notarization
+and uses no credentials. The subprocess regression also covers rejection,
+explicit exit, uncaught exception, missing/empty artifacts, closed pipes,
+malformed observations and wrapper acceptance. These probes do not reproduce the
+historical stall or establish its internal root cause. No speculative builder,
+signing, certificate or notarization change is justified by the evidence.
+
+The next investigation should use the exact-SHA credential-free macOS CI evidence
+and review these fixed observations before any separately owner-authorized
+production attempt. No production workflow is dispatched by this investigation;
+#54 stays open and signed/downloaded native acceptance remains pending.
+
 #### Temporary Windows CI pause during #54
 
 During macOS signing diagnosis, main CI excludes Windows x64 matrix entries

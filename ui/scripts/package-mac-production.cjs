@@ -7,7 +7,7 @@ const { randomBytes, createPrivateKey, createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { inputs } = require("./macos-signing-config.cjs");
 const signatures = require("./verify-macos-signatures.cjs");
-const { isDiagnostic, completion } = require("./mac-production-builder.cjs");
+const { isDiagnostic, isLifecycle, completion } = require("./mac-production-builder.cjs");
 const { signingCategory, signingArguments } = require("./mac-dmg-signing.cjs");
 const { expectedArtifacts, fileCategory } = require("./mac-production-artifacts.cjs");
 
@@ -16,6 +16,7 @@ const KEYCHAIN_PASSWORD_BYTES = 32;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const BUILDER_DIAGNOSTIC_PIPE = 3;
+const BUILDER_LIFECYCLE_PIPE = 4;
 // Only errors created here may reach diagnostics. Never serialize caught errors.
 const safeFailures = new WeakSet();
 const failure = (stage, category) => {
@@ -41,11 +42,39 @@ const run = (file, args, environment, stage) => {
     encoding: "utf8",
     shell: false,
     maxBuffer: MAX_COMMAND_OUTPUT,
-    ...(builder ? { stdio: ["ignore", "pipe", "pipe", "pipe"] } : {})
+    ...(builder ? { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"] } : {})
   });
+  const builderFailure = (category) => {
+    const detail = result.output?.[BUILDER_DIAGNOSTIC_PIPE];
+    const observations = result.output?.[BUILDER_LIFECYCLE_PIPE];
+    const lines = typeof observations === "string" ? observations.split("\n") : [];
+    const valid = lines.pop() === "" && lines.length > 0 && lines.every(isLifecycle);
+    const message =
+      !result.error && !result.signal && typeof detail === "string" && isDiagnostic(detail)
+        ? detail
+        : undefined;
+    const error = message ? new Error(message) : failure(stage, category);
+    if (valid) {
+      error.message += `\nBuilder lifecycle: ${lines.join(". ")}.`;
+      if (
+        !message &&
+        detail !== completion &&
+        lines.some((line) => line.endsWith("category=completion-written"))
+      ) {
+        error.message +=
+          "\nstage=builder-sign-notarize-archive; category=completion-record-not-received";
+      }
+    }
+    safeFailures.add(error);
+    return error;
+  };
   // Errors from security, builder and notarytool can contain secrets or argv.
-  if (result.error) throw failure(stage, "command-start-or-io-failure");
-  if (result.signal) throw failure(stage, "command-terminated");
+  if (result.error)
+    throw builder
+      ? builderFailure("command-start-or-io-failure")
+      : failure(stage, "command-start-or-io-failure");
+  if (result.signal)
+    throw builder ? builderFailure("command-terminated") : failure(stage, "command-terminated");
   if (result.status !== 0) {
     if (dmgSigning) throw failure(stage, signingCategory(result));
     if (stage === "dmg-format-inspection") {
@@ -53,16 +82,11 @@ const run = (file, args, environment, stage) => {
       // cannot establish that the image itself is missing.
       throw failure(stage, "image-inspection-failure");
     }
-    const detail = builder ? result.output?.[BUILDER_DIAGNOSTIC_PIPE] : undefined;
-    if (typeof detail === "string" && isDiagnostic(detail)) {
-      const error = new Error(detail);
-      safeFailures.add(error);
-      throw error;
-    }
+    if (builder) throw builderFailure("command-exit-failure");
     throw failure(stage, "command-exit-failure");
   }
   if (builder && result.output?.[BUILDER_DIAGNOSTIC_PIPE] !== completion) {
-    throw failure(stage, "missing-completion-evidence");
+    throw builderFailure("missing-completion-evidence");
   }
   return result.stdout;
 };

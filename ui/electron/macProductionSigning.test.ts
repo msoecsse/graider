@@ -650,7 +650,7 @@ describe("fail-closed macOS production signing", () => {
     expect(spawnSync).toHaveBeenCalledWith(
       "node",
       [builderScript],
-      expect.objectContaining({ shell: false, stdio: ["ignore", "pipe", "pipe", "pipe"] })
+      expect.objectContaining({ shell: false, stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"] })
     );
   });
 

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
@@ -17,9 +18,9 @@ const environment = {
 };
 
 function harness() {
-  const writeSync = vi.fn();
+  const writeSync = vi.fn((_fd: number, value: string) => Buffer.byteLength(value));
   const lstatSync = vi.fn(() => ({ isFile: () => true, size: 1 }));
-  const processMock = { exitCode: 0 };
+  const processMock = Object.assign(new EventEmitter(), { exitCode: 0 });
   const execute = vi.fn(
     async (_options: unknown): Promise<string[]> =>
       nodeRequire("./scripts/mac-production-artifacts.cjs")
@@ -30,6 +31,7 @@ function harness() {
   const module = { exports: {} as any };
   runInNewContext(fs.readFileSync("scripts/mac-production-builder.cjs", "utf8"), {
     module,
+    Buffer,
     __dirname: path.resolve("scripts"),
     process: processMock,
     require: (name: string): unknown => {
@@ -289,7 +291,9 @@ describe("safe diagnostics inside the production builder", () => {
     });
     await test.worker.build();
     expect(test.processMock.exitCode).toBe(1);
-    expect(test.writeSync.mock.calls).toEqual([[3, `stage=${stage}; category=${category}`]]);
+    expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([
+      [3, `stage=${stage}; category=${category}`]
+    ]);
     expect(test.worker.isDiagnostic(`stage=${stage}; category=${category}`)).toBe(true);
     expect(test.worker.isDiagnostic(`stage=${stage}; category=${category}\nsecret`)).toBe(false);
     expect(() => test.worker.stage("secret")).toThrow("Invalid builder stage");
@@ -308,7 +312,7 @@ describe("safe diagnostics inside the production builder", () => {
       await test.worker.build();
       expect(test.processMock.exitCode).toBe(1);
       const detail = `stage=builder-artifact-dmg; category=${category}`;
-      expect(test.writeSync.mock.calls).toEqual([[3, detail]]);
+      expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([[3, detail]]);
       expect(test.worker.isDiagnostic(detail)).toBe(true);
       expect(test.worker.isDiagnostic(detail + "\nprivate path")).toBe(false);
     }
@@ -322,7 +326,7 @@ describe("safe diagnostics inside the production builder", () => {
       if (extension === "zip") test.lstatSync.mockReturnValueOnce({ isFile: () => true, size: 1 });
       await test.worker.build();
       expect(test.processMock.exitCode).toBe(1);
-      expect(test.writeSync.mock.calls).toEqual([
+      expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([
         [3, `stage=builder-artifact-${extension}; category=empty-artifact`]
       ]);
     }
@@ -337,7 +341,9 @@ describe("safe diagnostics inside the production builder", () => {
       publish: "never",
       config: path.join(path.resolve("scripts"), "../electron-builder.mac-production.cjs")
     });
-    expect(test.writeSync.mock.calls).toEqual([[3, "stage=builder-artifacts; category=validated"]]);
+    expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([
+      [3, "stage=builder-artifacts; category=validated"]
+    ]);
     expect(test.processMock.exitCode).toBe(0);
   });
 

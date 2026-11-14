@@ -124,7 +124,7 @@ jobs:
 
       - name: Test production signing verification without credentials
         working-directory: ui
-        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macProductionArtifacts.test.ts electron/macDmgSigning.test.ts
+        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macProductionArtifacts.test.ts electron/macBuilderLifecycle.integration.test.ts electron/macDmgSigning.test.ts
 
       - name: Test local grading, cache leases, account invalidation and publication safeguards
         working-directory: ui
