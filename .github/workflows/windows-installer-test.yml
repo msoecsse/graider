@@ -4,7 +4,23 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - remote-course-v2
+      # Temporary #54: no automatic NSIS builds on remote-course-v2 pushes.
+      - master
+      - "release/**"
+    paths:
+      - ".github/workflows/windows-installer-test.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "ui/package.json"
+      - "ui/package-lock.json"
+      - "ui/electron-builder*.cjs"
+      - "ui/scripts/**"
+      - "ui/electron/windowsInstallerConfig.test.ts"
+      - "ui/electron/packagingConfig.test.ts"
+  pull_request:
+    branches:
+      - master
+      - "release/**"
     paths:
       - ".github/workflows/windows-installer-test.yml"
       - "package.json"

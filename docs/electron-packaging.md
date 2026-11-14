@@ -316,14 +316,17 @@ and end-to-end update validation. See the versioned
 [NSIS documentation](https://www.electron.build/v26/docs/nsis/).
 
 `Windows NSIS installer test` runs automatically for scoped packaging changes on
-`remote-course-v2`, and supports manual dispatch once available on the default
-branch. On a clean native Windows x64 runner it runs deterministic packaging
+`master` and `release/**` pushes and pull requests targeting those branches.
+It supports manual dispatch once available on the default branch. Automatic
+`remote-course-v2` pushes are temporarily excluded during #54; see the
+[restoration requirement](#temporary-windows-ci-pause-during-54). On a clean native Windows x64 runner it runs deterministic packaging
 tests, builds with no real credentials, checks the unsigned installer and its
 blockmap, verifies no update feed/metadata, silently installs and reinstalls to
 a temporary path with spaces, checks installed Electron x64 and bundled Git using
 the existing offline packaged proof, then uninstalls. It records the commit and
 SHA-256 but uploads no test package and publishes no release. Normal CI retains
-macOS arm64 and Windows x64 regression coverage. This proves installer construction
+macOS arm64 coverage and Windows x64 coverage outside the temporary branch-push
+exception below. This proves installer construction
 and local installation, not signed version-to-version updates or faculty UI acceptance.
 
 ### Personal owner signing and external prerequisites
@@ -662,8 +665,9 @@ vendor dmgbuild tool. This is evidence of the generator's configuration, not an
 inspection of the unavailable failed production image. The wrapper now requires
 native `hdiutil imageinfo -format` to report exactly UDZO before signing; other
 formats fail at `dmg-format-inspection; category=unexpected-dmg-format`. A native
-inspection failure reports recognized format/filesystem markers or
-`image-inspection-failure` without exposing the response.
+inspection failure at that commit reported recognized format/filesystem markers or
+`image-inspection-failure` without exposing the response. The provenance gate below
+now separates filesystem evidence from native inspection failure.
 
 The native `codesign(1)` manual states that `--keychain` restricts identity lookup
 to that keychain, while the normal search list is still used for certificate-chain
@@ -718,6 +722,98 @@ or other image-specific behavior. Matching preflight/actual failure
 categories support a shared condition without proving its underlying cause.
 Real signed/notarized artifacts and downloaded native acceptance remain pending;
 #54 stays open. This investigation dispatches no production workflow or release.
+
+#### Artifact provenance investigation (run 43560982686)
+
+[Run 43560982686](https://github.com/msoecsse/graider/actions/runs/43560982686)
+at `4f9d89ab738321950d552c291c07e49bde483385` returned zero from the builder
+subprocess, then failed at `dmg-format-inspection; category=filesystem-not-found`.
+The run has no uploaded artifacts. The wrapper discarded builder's returned
+artifact list and suppressed stdout/stderr. Consequently the historical archive
+names, locations and completion state cannot be recovered. A native “not found”
+marker alone does not prove which filesystem object was unavailable.
+
+Installed electron-builder/app-builder-lib/dmg-builder **26.15.3** evidence:
+
+- `Platform.MAC.createTarget(["dmg", "zip"], Arch.arm64)` creates one explicit
+  arm64 target map; installed target selection preserves it rather than using
+  the base unpacked `dir` target.
+- `Packager.doBuild` resolves `directories.output` against `projectDir`, which
+  defaults to the working directory. The workflow runs the wrapper from `ui`.
+  Therefore the configured output is `ui/release/macos-production`.
+- Both `DmgTarget.build` and `ArchiveTarget.build` join their output directory
+  with `PlatformPackager.expandArtifactNamePattern`. Precedence is target
+  `artifactName`, macOS `artifactName`, global `artifactName`, then the default.
+  Production has no target-specific naming override. Its explicit macOS pattern
+  retains arm64 even when it is the default architecture and expands to the
+  exact DMG/ZIP basenames listed below.
+- Both targets emit `artifactBuildCompleted` with `file`, target and architecture.
+  `Packager.emitArtifactBuildCompleted` also emits `artifactCreated`, collected
+  into `artifactPaths`; the public `build` resolves to that list.
+  A credential-free regression executes installed configuration loading, target
+  selection, path expansion, target builds, completion emission and public
+  result mapping with native packing/archive operations replaced. It reports
+  both expected paths. It does not prove that the historical vendor subprocess
+  created either archive.
+
+**Proven defect:** no artifact completion or filesystem gate existed between
+builder exit and native DMG operations. No deterministic naming, output-path or
+target-selection defect was reproduced, so those rules are unchanged. The actual
+cause of the historical native failure remains unknown.
+
+The builder subprocess now consumes its returned artifact list and requires both
+expected paths and nonempty regular files. Only exact fixed diagnostics cross the
+private pipe. Missing completion evidence fails closed even on a zero subprocess
+exit, preventing an incomplete build from passing via stale files. The wrapper
+independently uses `lstat` on both expected archives before `hdiutil` or DMG
+`codesign`; symlinks, directories and empty files fail. It never searches for or
+substitutes a different archive.
+
+Builder stages `builder-artifact-dmg` / `builder-artifact-zip` distinguish
+`missing-artifact`, `unexpected-artifact-filename`,
+`unexpected-output-directory`, `invalid-artifact-result`,
+`artifact-not-regular-file`, `empty-artifact`, and
+`artifact-filesystem-failure`. If directory and filename both differ, directory
+takes precedence. The wrapper's independent `artifact-validation-dmg` /
+`artifact-validation-zip` gates use the filesystem categories. An exact private
+`builder-artifacts; category=validated` completion record is required; absent or
+malformed completion reports `missing-completion-evidence`. A subsequent nonzero
+`hdiutil` exit reports `dmg-format-inspection; category=image-inspection-failure`;
+start/I/O and termination categories remain distinct. No diagnostic exposes
+paths, filenames supplied by subprocesses, raw output or credentials.
+
+The builder entry point, production/base configs and UI lockfile are identical at
+`79cbf768dbe2e3ed799b96b0193ff411d80d9637` and `4f9d89a`. Thus an unavailable
+archive could plausibly explain the earlier `dmg-sign; category=command-exit-failure`
+in [run 43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888).
+It is a hypothesis, not a demonstrated shared root cause: that run also retained
+neither the archive list nor native error. No certificate, keychain, signing
+argument, notarization or acceptance check changes are justified by this evidence.
+
+#### Temporary Windows CI pause during #54
+
+During macOS signing diagnosis, main CI excludes Windows x64 matrix entries
+**only for pushes to `remote-course-v2`**. macOS arm64 boundary and migration jobs,
+normal root/UI checks, audits and all security coverage remain. The Windows NSIS
+workflow does not automatically run for those pushes; its workflow and tests
+remain in the repository and manual dispatch is retained. Windows-only portable
+test cases now live in the Windows packaging suite, which is excluded from the
+production macOS workflow's focused command. Shared/macOS packaging checks remain.
+
+Every pull request retains both native main-CI platforms, including PRs from this
+branch into `master` or release branches. `master` and `release/**` pushes keep
+both native CI jobs; scoped NSIS validation runs on those pushes and PRs targeting
+them. Matrix entries are omitted before scheduling; no macOS job depends on an
+omitted Windows job.
+
+**Before release:** remove the branch-push condition from both main-CI matrices,
+restore `remote-course-v2` to the NSIS push list, and restore the Windows suite
+to the macOS production workflow's focused command. Keep the master/release/PR
+gates. Update the workflow regression assertions and this temporary note, then
+require green exact-SHA Windows x64 boundary/migration and native NSIS installation
+validation alongside macOS checks. This temporary exception is not cross-platform
+release acceptance. #54 remains open until real signing/notarization and downloaded
+native DMG/ZIP acceptance succeed. No production signing run is dispatched here.
 
 Outputs live only under `ui/release/macos-production/`:
 

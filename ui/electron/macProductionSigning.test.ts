@@ -49,6 +49,7 @@ function harness(platform = "darwin", arch = "arm64") {
   const removes = vi.fn();
   const permissions = vi.fn();
   const reads = vi.fn(() => Buffer.from("fake-archive"));
+  const lstat = vi.fn(() => ({ isFile: (): boolean => true, size: 1 }));
   const directories = vi.fn((prefix: string) => `${prefix}test`);
   const verify = { verifySignature: vi.fn() };
   const command = vi.fn((file: string, args: string[], _env: Record<string, string>): string => {
@@ -74,14 +75,17 @@ function harness(platform = "darwin", arch = "arm64") {
           chmodSync: permissions,
           writeFileSync: writes,
           rmSync: removes,
-          readFileSync: reads
+          readFileSync: reads,
+          lstatSync: lstat
         };
       if (name === "./macos-signing-config.cjs") return helpers;
       if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
       if (name === "./mac-production-builder.cjs")
         return nodeRequire("./scripts/mac-production-builder.cjs");
       if (name === "./verify-macos-signatures.cjs") return verify;
-      return nodeRequire(name);
+      return nodeRequire(
+        name === "./mac-production-artifacts.cjs" ? "./scripts/mac-production-artifacts.cjs" : name
+      );
     },
     { resolve: () => builderScript }
   );
@@ -91,7 +95,17 @@ function harness(platform = "darwin", arch = "arm64") {
     __dirname: path.resolve("scripts"),
     process: { platform, arch, execPath: "node", env: {} }
   });
-  return { ...module.exports, writes, removes, permissions, reads, directories, verify, command };
+  return {
+    ...module.exports,
+    writes,
+    removes,
+    permissions,
+    reads,
+    directories,
+    verify,
+    command,
+    lstat
+  };
 }
 
 describe("fail-closed macOS production signing", () => {
@@ -261,6 +275,44 @@ describe("fail-closed macOS production signing", () => {
     }
   );
 
+  it.each(["dmg", "zip"])(
+    "rejects missing %s before inspecting or signing either archive",
+    (extension) => {
+      const test = harness();
+      test.lstat.mockImplementation(() => {
+        throw Object.assign(new Error("private path"), { code: "ENOENT" });
+      });
+      if (extension === "zip")
+        test.lstat.mockImplementationOnce(() => ({ isFile: () => true, size: 1 }));
+      expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+        `stage=artifact-validation-${extension}; category=missing-artifact`
+      );
+      expect(
+        test.command.mock.calls.some((call) =>
+          ["imageinfo", "--sign", "notarytool"].includes(call[1][0])
+        )
+      ).toBe(false);
+      expect(test.verify.verifySignature).not.toHaveBeenCalled();
+      expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(false);
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([
+    [false, 1, "artifact-not-regular-file"],
+    [true, 0, "empty-artifact"]
+  ] as const)(
+    "rejects unusable archives before native inspection: %s/%s",
+    (isFile, size, category) => {
+      const test = harness();
+      test.lstat.mockReturnValue({ isFile: () => isFile, size });
+      expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+        `stage=artifact-validation-dmg; category=${category}`
+      );
+      expect(test.command.mock.calls.some((call) => call[1][0] === "imageinfo")).toBe(false);
+    }
+  );
+
   it.each(["UDRW", "UDBZ", "", "UDZO\nprivate path"])(
     "rejects unexpected generated DMG format %s",
     (format) => {
@@ -371,7 +423,11 @@ describe("fail-closed macOS production signing", () => {
             writeFileSync: vi.fn(),
             rmSync: vi.fn()
           };
-        return nodeRequire(name);
+        return nodeRequire(
+          name === "./mac-production-artifacts.cjs"
+            ? "./scripts/mac-production-artifacts.cjs"
+            : name
+        );
       },
       { main: module, resolve: () => builderScript }
     );
@@ -511,6 +567,10 @@ describe("fail-closed macOS production signing", () => {
 
   it.each([
     [
+      "stage=builder-artifact-dmg; category=unexpected-output-directory",
+      "builder-artifact-dmg; category=unexpected-output-directory"
+    ],
+    [
       "stage=builder-app-verification; category=verification-failure",
       "builder-app-verification; category=verification-failure"
     ],
@@ -569,7 +629,11 @@ describe("fail-closed macOS production signing", () => {
             rmSync: vi.fn()
           };
         if (name.startsWith("./")) return nodeRequire(`./scripts/${name.slice(2)}`);
-        return nodeRequire(name);
+        return nodeRequire(
+          name === "./mac-production-artifacts.cjs"
+            ? "./scripts/mac-production-artifacts.cjs"
+            : name
+        );
       },
       { main: module }
     );
@@ -617,7 +681,11 @@ describe("fail-closed macOS production signing", () => {
           if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
           if (name === "./mac-production-builder.cjs")
             return nodeRequire("./scripts/mac-production-builder.cjs");
-          return nodeRequire(name);
+          return nodeRequire(
+            name === "./mac-production-artifacts.cjs"
+              ? "./scripts/mac-production-artifacts.cjs"
+              : name
+          );
         }
       });
       return { ...module.exports, spawnSync };
@@ -847,7 +915,11 @@ describe("fail-closed macOS production signing", () => {
               return "";
             }
           };
-        return nodeRequire(name);
+        return nodeRequire(
+          name === "./mac-production-artifacts.cjs"
+            ? "./scripts/mac-production-artifacts.cjs"
+            : name
+        );
       };
       const execute = () =>
         runInNewContext(fs.readFileSync("scripts/verify-mac-production.cjs", "utf8"), {
@@ -889,7 +961,11 @@ describe("fail-closed macOS production signing", () => {
       module,
       require: (name: string): unknown => {
         if (name === "./scripts/verify-macos-signatures.cjs") return { verifyApp };
-        return nodeRequire(name);
+        return nodeRequire(
+          name === "./mac-production-artifacts.cjs"
+            ? "./scripts/mac-production-artifacts.cjs"
+            : name
+        );
       }
     });
     const config = module.exports;

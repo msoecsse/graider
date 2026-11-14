@@ -6,16 +6,6 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
-const { getConfig, validateConfiguration } = nodeRequire(
-  "app-builder-lib/out/util/config/config"
-) as {
-  getConfig: (
-    projectDir: string,
-    configPath: string,
-    configFromOptions: Record<string, unknown>
-  ) => Promise<{ win?: { signExecutable?: boolean } }>;
-  validateConfiguration: (configuration: object) => Promise<void>;
-};
 
 describe("packaging configuration", () => {
   it("scopes nonfunctional OAuth configuration to the CI proof packaging step", () => {
@@ -209,34 +199,5 @@ describe("packaging configuration", () => {
     expect(packagingConfigSource).toContain('artifactName: "Graider.${ext}"');
     expect(packagingConfigSource).toContain("signExecutable: false");
     expect(packagingConfigSource).not.toContain("signAndEditExecutable: false");
-  });
-
-  it("resolves the CLI Windows signing override as false", async () => {
-    const configuration = await getConfig(process.cwd(), "electron-builder.config.cjs", {
-      win: { signExecutable: "false" }
-    });
-
-    await validateConfiguration(configuration);
-    expect(configuration.win?.signExecutable).toBe(false);
-  });
-
-  it("runs the Windows portable build unsigned even when the shell has signing credentials", () => {
-    const packageWindowsSource = fs.readFileSync(
-      path.join(process.cwd(), "scripts", "package-win.cjs"),
-      "utf8"
-    );
-
-    expect(packageWindowsSource).toContain("delete environment[name]");
-    expect(packageWindowsSource).toContain('"CSC_LINK"');
-    expect(packageWindowsSource).toContain('"WIN_CSC_LINK"');
-    expect(packageWindowsSource).toContain('"CSC_KEY_PASSWORD"');
-    expect(packageWindowsSource).toContain('"WIN_CSC_KEY_PASSWORD"');
-    expect(packageWindowsSource).toContain('"--win"');
-    expect(packageWindowsSource).toContain('"portable"');
-    expect(packageWindowsSource).toContain('"--x64"');
-    expect(packageWindowsSource).toContain('"--publish"');
-    expect(packageWindowsSource).toContain('"never"');
-    expect(packageWindowsSource).toContain('"--config.win.signExecutable=false"');
-    expect(packageWindowsSource).not.toContain("signAndEditExecutable");
   });
 });

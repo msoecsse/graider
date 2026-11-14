@@ -5,6 +5,7 @@ on:
       - master
       - ui-redesign
       - remote-course-v2
+      - "release/**"
   pull_request:
 
 jobs:
@@ -81,13 +82,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-latest
-            architecture: x64
-            target: Windows x64
-          - runner: macos-15
-            architecture: arm64
-            target: macOS arm64
+        # Temporary #54 pause for branch pushes only; every PR keeps both platforms.
+        include: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/remote-course-v2' && '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"}]' || '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"},{"runner":"windows-latest","architecture":"x64","target":"Windows x64"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -128,7 +124,7 @@ jobs:
 
       - name: Test production signing verification without credentials
         working-directory: ui
-        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macDmgSigning.test.ts
+        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macProductionArtifacts.test.ts electron/macDmgSigning.test.ts
 
       - name: Test local grading, cache leases, account invalidation and publication safeguards
         working-directory: ui
@@ -175,13 +171,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-15
-            architecture: arm64
-            target: macOS arm64
-          - runner: windows-latest
-            architecture: x64
-            target: Windows x64
+        # Temporary #54 pause for branch pushes only; every PR keeps both platforms.
+        include: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/remote-course-v2' && '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"}]' || '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"},{"runner":"windows-latest","architecture":"x64","target":"Windows x64"}]') }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read

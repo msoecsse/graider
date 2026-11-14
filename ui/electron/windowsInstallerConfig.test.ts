@@ -9,6 +9,38 @@ const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 const configFile = "electron-builder.windows-installer-test.cjs";
 
 describe("Windows NSIS installer foundation", () => {
+  it("resolves the CLI Windows signing override as false", async () => {
+    const { getConfig, validateConfiguration } = nodeRequire(
+      "app-builder-lib/out/util/config/config"
+    );
+    const configuration = await getConfig(process.cwd(), "electron-builder.config.cjs", {
+      win: { signExecutable: "false" }
+    });
+
+    await validateConfiguration(configuration);
+    expect(configuration.win?.signExecutable).toBe(false);
+  });
+
+  it("runs the Windows portable build unsigned even when the shell has signing credentials", () => {
+    const packageWindowsSource = fs.readFileSync(
+      path.join(process.cwd(), "scripts", "package-win.cjs"),
+      "utf8"
+    );
+
+    expect(packageWindowsSource).toContain("delete environment[name]");
+    expect(packageWindowsSource).toContain('"CSC_LINK"');
+    expect(packageWindowsSource).toContain('"WIN_CSC_LINK"');
+    expect(packageWindowsSource).toContain('"CSC_KEY_PASSWORD"');
+    expect(packageWindowsSource).toContain('"WIN_CSC_KEY_PASSWORD"');
+    expect(packageWindowsSource).toContain('"--win"');
+    expect(packageWindowsSource).toContain('"portable"');
+    expect(packageWindowsSource).toContain('"--x64"');
+    expect(packageWindowsSource).toContain('"--publish"');
+    expect(packageWindowsSource).toContain('"never"');
+    expect(packageWindowsSource).toContain('"--config.win.signExecutable=false"');
+    expect(packageWindowsSource).not.toContain("signAndEditExecutable");
+  });
+
   it("validates the NSIS configuration while preserving portable and macOS defaults", async () => {
     const { getConfig, validateConfiguration } = nodeRequire(
       "app-builder-lib/out/util/config/config"
@@ -135,7 +167,8 @@ describe("Windows NSIS installer foundation", () => {
       )
     );
     expect(workflow.permissions).toEqual({ contents: "read" });
-    expect(workflow.on.push.branches).toEqual(["remote-course-v2"]);
+    expect(workflow.on.push.branches).toEqual(["master", "release/**"]);
+    expect(workflow.on.pull_request.branches).toEqual(["master", "release/**"]);
     const job = workflow.jobs["windows-installer-test"];
     expect(job["runs-on"]).toBe("windows-latest");
     // Runner context is unavailable in job-level env during workflow validation.

@@ -7,8 +7,9 @@ const { randomBytes, createPrivateKey, createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { inputs } = require("./macos-signing-config.cjs");
 const signatures = require("./verify-macos-signatures.cjs");
-const { isDiagnostic } = require("./mac-production-builder.cjs");
+const { isDiagnostic, completion } = require("./mac-production-builder.cjs");
 const { signingCategory, signingArguments } = require("./mac-dmg-signing.cjs");
+const { expectedArtifacts, fileCategory } = require("./mac-production-artifacts.cjs");
 
 const MAX_COMMAND_OUTPUT = 64 * 1024 * 1024;
 const KEYCHAIN_PASSWORD_BYTES = 32;
@@ -48,11 +49,9 @@ const run = (file, args, environment, stage) => {
   if (result.status !== 0) {
     if (dmgSigning) throw failure(stage, signingCategory(result));
     if (stage === "dmg-format-inspection") {
-      const category = signingCategory(result);
-      throw failure(
-        stage,
-        category === "unrecognized-native-signing-error" ? "image-inspection-failure" : category
-      );
+      // The artifact already passed filesystem validation. Native output alone
+      // cannot establish that the image itself is missing.
+      throw failure(stage, "image-inspection-failure");
     }
     const detail = builder ? result.output?.[BUILDER_DIAGNOSTIC_PIPE] : undefined;
     if (typeof detail === "string" && isDiagnostic(detail)) {
@@ -61,6 +60,9 @@ const run = (file, args, environment, stage) => {
       throw error;
     }
     throw failure(stage, "command-exit-failure");
+  }
+  if (builder && result.output?.[BUILDER_DIAGNOSTIC_PIPE] !== completion) {
+    throw failure(stage, "missing-completion-evidence");
   }
   return result.stdout;
 };
@@ -210,7 +212,14 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
       "configuration-failure",
       () => require(join(ui, "package.json")).version
     );
-    const dmg = join(output, `Graider-${version}-mac-arm64-signed.dmg`);
+    const artifacts = step("artifact-metadata", "configuration-failure", () =>
+      expectedArtifacts(ui)
+    );
+    for (const { extension, file } of artifacts) {
+      const category = fileCategory(file, fs);
+      if (category) throw failure(`artifact-validation-${extension}`, category);
+    }
+    const dmg = artifacts.find(({ extension }) => extension === "dmg").file;
     const format = execute("dmg-format-inspection", "/usr/bin/hdiutil", [
       "imageinfo",
       "-format",

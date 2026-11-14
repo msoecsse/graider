@@ -18,8 +18,14 @@ const environment = {
 
 function harness() {
   const writeSync = vi.fn();
+  const lstatSync = vi.fn(() => ({ isFile: () => true, size: 1 }));
   const processMock = { exitCode: 0 };
-  const execute = vi.fn(async (_options: unknown) => {});
+  const execute = vi.fn(
+    async (_options: unknown): Promise<string[]> =>
+      nodeRequire("./scripts/mac-production-artifacts.cjs")
+        .expectedArtifacts(process.cwd())
+        .map(({ file }: { file: string }) => file)
+  );
   const createTarget = vi.fn(() => "arm64-targets");
   const module = { exports: {} as any };
   runInNewContext(fs.readFileSync("scripts/mac-production-builder.cjs", "utf8"), {
@@ -27,10 +33,12 @@ function harness() {
     __dirname: path.resolve("scripts"),
     process: processMock,
     require: (name: string): unknown => {
-      if (name === "node:fs") return { writeSync };
+      if (name === "node:fs") return { writeSync, lstatSync };
       if (name === "electron-builder")
         return { build: execute, Platform: { MAC: { createTarget } }, Arch: { arm64: 1 } };
-      return nodeRequire(name);
+      return nodeRequire(
+        name === "./mac-production-artifacts.cjs" ? "./scripts/mac-production-artifacts.cjs" : name
+      );
     }
   });
   const worker = module.exports;
@@ -46,7 +54,9 @@ function harness() {
       if (name === "./scripts/verify-macos-signatures.cjs") return { verifyApp };
       if (name === "app-builder-lib/out/codeSign/macCodeSign") return { sign: signer };
       if (name === "./electron-builder.config.cjs") return { ...nodeRequire(name), beforePack };
-      return nodeRequire(name);
+      return nodeRequire(
+        name === "./mac-production-artifacts.cjs" ? "./scripts/mac-production-artifacts.cjs" : name
+      );
     }
   });
   return {
@@ -55,6 +65,7 @@ function harness() {
     execute,
     createTarget,
     writeSync,
+    lstatSync,
     processMock,
     signer,
     verifyApp,
@@ -284,6 +295,39 @@ describe("safe diagnostics inside the production builder", () => {
     expect(() => test.worker.stage("secret")).toThrow("Invalid builder stage");
   });
 
+  it.each([
+    [[], "missing-artifact"],
+    [["other.dmg"], "unexpected-output-directory"],
+    [["release/macos-production/other.dmg"], "unexpected-artifact-filename"],
+    [undefined, "invalid-artifact-result"]
+  ])(
+    "rejects inconsistent build results without exposing paths: %s",
+    async (produced, category) => {
+      const test = harness();
+      test.execute.mockResolvedValue(produced as string[]);
+      await test.worker.build();
+      expect(test.processMock.exitCode).toBe(1);
+      const detail = `stage=builder-artifact-dmg; category=${category}`;
+      expect(test.writeSync.mock.calls).toEqual([[3, detail]]);
+      expect(test.worker.isDiagnostic(detail)).toBe(true);
+      expect(test.worker.isDiagnostic(detail + "\nprivate path")).toBe(false);
+    }
+  );
+
+  it.each(["dmg", "zip"])(
+    "requires a nonempty regular %s in addition to the build result",
+    async (extension) => {
+      const test = harness();
+      test.lstatSync.mockReturnValue({ isFile: () => true, size: 0 });
+      if (extension === "zip") test.lstatSync.mockReturnValueOnce({ isFile: () => true, size: 1 });
+      await test.worker.build();
+      expect(test.processMock.exitCode).toBe(1);
+      expect(test.writeSync.mock.calls).toEqual([
+        [3, `stage=builder-artifact-${extension}; category=empty-artifact`]
+      ]);
+    }
+  );
+
   it("preserves arm64 targets, publish never and the production config", async () => {
     const test = harness();
     await test.worker.build();
@@ -293,7 +337,7 @@ describe("safe diagnostics inside the production builder", () => {
       publish: "never",
       config: path.join(path.resolve("scripts"), "../electron-builder.mac-production.cjs")
     });
-    expect(test.writeSync).not.toHaveBeenCalled();
+    expect(test.writeSync.mock.calls).toEqual([[3, "stage=builder-artifacts; category=validated"]]);
     expect(test.processMock.exitCode).toBe(0);
   });
 
@@ -317,6 +361,7 @@ describe("safe diagnostics inside the production builder", () => {
         await test.config.mac.sign(options);
         test.config.afterSign({ appOutDir: "signed-output" });
         if (failed === "archive") throw secret;
+        return [];
       });
       await test.worker.build();
       expect(test.processMock.exitCode).toBe(1);
