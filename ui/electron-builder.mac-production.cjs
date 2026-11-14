@@ -36,7 +36,8 @@ module.exports = {
     },
     notarize: true
   },
-  dmg: { ...base.dmg, sign: true, writeUpdateInfo: false },
+  // The wrapper signs the completed DMG explicitly; builder may silently skip.
+  dmg: { ...base.dmg, sign: false, writeUpdateInfo: false },
   beforePack: async (context) => {
     stage("builder-pack");
     await base.beforePack(context);

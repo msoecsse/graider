@@ -26,7 +26,7 @@ const step = (stage, category, operation) => {
     return operation();
   } catch (error) {
     if (safeFailures.has(error)) throw error;
-    throw failure(stage, category);
+    throw failure(stage, signatures.signatureCategory?.(error) || category);
   }
 };
 const diagnostic = (error) =>
@@ -200,6 +200,16 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
       () => require(join(ui, "package.json")).version
     );
     const dmg = join(output, `Graider-${version}-mac-arm64-signed.dmg`);
+    // Builder's DMG signer can silently skip. Own this operation explicitly,
+    // using only the identity already verified in our temporary keychain.
+    execute("dmg-sign", "/usr/bin/codesign", [
+      "--sign",
+      configuration.fingerprint,
+      "--keychain",
+      keychain,
+      "--timestamp",
+      dmg
+    ]);
     step("dmg-signature-verification", "verification-failure", () =>
       verify.verifySignature(dmg, child)
     );

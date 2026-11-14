@@ -168,8 +168,18 @@ describe("fail-closed macOS production signing", () => {
       expect.stringMatching(/-signed\.dmg$/),
       child
     );
+    const dmgSignIndex = calls.findIndex((call) => call[1][0] === "--sign");
+    expect(calls[dmgSignIndex][1]).toEqual([
+      "--sign",
+      fingerprint,
+      "--keychain",
+      child?.CSC_KEYCHAIN,
+      "--timestamp",
+      expect.stringMatching(/-signed\.dmg$/)
+    ]);
+    expect(dmgSignIndex).toBeGreaterThan(calls.findIndex((call) => call[1][0] === builderScript));
     const notaryIndex = calls.findIndex((call) => call[1][0] === "notarytool");
-    expect(notaryIndex).toBeGreaterThan(calls.findIndex((call) => call[1][0] === builderScript));
+    expect(notaryIndex).toBeGreaterThan(dmgSignIndex);
     expect(calls[notaryIndex + 1][1].slice(0, 2)).toEqual(["stapler", "staple"]);
     expect(calls[notaryIndex + 2][1].slice(0, 2)).toEqual(["stapler", "validate"]);
     expect(calls[notaryIndex + 3][1][0]).toMatch(/verify-mac-production\.cjs$/);
@@ -304,6 +314,7 @@ describe("fail-closed macOS production signing", () => {
     ["set-key-partition-list", "keychain-partition-list"],
     ["find-identity", "identity-query"],
     [builderScript, "builder-sign-notarize-archive"],
+    ["--sign", "dmg-sign"],
     ["notarytool", "dmg-notarization-submit"],
     ["staple", "dmg-stapler-staple"],
     ["validate", "dmg-stapler-validate"],
@@ -517,6 +528,7 @@ describe("fail-closed macOS production signing", () => {
       runInNewContext(fs.readFileSync("scripts/verify-macos-signatures.cjs", "utf8"), {
         module,
         Buffer,
+        process,
         require: (name: string): unknown => {
           if (name === "node:child_process") return { spawnSync };
           if (name === "./macos-signing-config.cjs") return helpers;
@@ -554,10 +566,17 @@ describe("fail-closed macOS production signing", () => {
     expect(valid.spawnSync.mock.calls.at(-1)?.[1]).toEqual(["stapler", "validate", "app"]);
     const diskImage = load(details, entitlements);
     diskImage.verifySignature("signed.dmg", environment, false);
-    expect(diskImage.spawnSync.mock.calls.map((call) => call[1])).toEqual([
-      ["--verify", "--strict", "-R", requirement, "signed.dmg"],
-      ["--display", "--verbose=4", "signed.dmg"]
+    const dmgCalls = diskImage.spawnSync.mock.calls.map((call) => call[1]);
+    expect(dmgCalls.slice(0, 3)).toEqual([
+      ["--display", "--verbose=4", "signed.dmg"],
+      ["--verify", "--strict", "signed.dmg"],
+      ["--verify", "--strict", "-R", requirement, "signed.dmg"]
     ]);
+    expect(dmgCalls[3][3]).toBe(
+      `=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "${team}"`
+    );
+    if (process.platform === "darwin")
+      expect(spawnSync("/usr/bin/csreq", ["-r", dmgCalls[3][3], "-t"]).status).toBe(0);
     for (const invalid of [
       details
         .replace(team, "WRONGTEAM0")
@@ -567,16 +586,15 @@ describe("fail-closed macOS production signing", () => {
     ]) {
       expect(() => load(invalid, entitlements).verifySignature("app", environment, true)).toThrow();
     }
-    for (const invalid of [
-      details.replace(`TeamIdentifier=${team}`, "TeamIdentifier=WRONGTEAM0"),
-      details.replace("Developer ID Application:", "Apple Development:")
-    ])
-      expect(() =>
-        load(invalid, entitlements).verifySignature("signed.dmg", environment, false)
-      ).toThrow();
+    // Display text is not an identity gate for DMGs; native requirements are.
+    load("TeamIdentifier=not set\n", entitlements).verifySignature(
+      "signed.dmg",
+      environment,
+      false
+    );
     expect(() =>
       load(details, entitlements, "--verify").verifySignature("signed.dmg", environment, false)
-    ).toThrow("verification failed");
+    ).toThrow("invalid-signature");
     expect(() =>
       load(details, {
         ...entitlements,
@@ -590,6 +608,95 @@ describe("fail-closed macOS production signing", () => {
       "verification failed"
     );
   });
+
+  it.each([
+    [0, "unsigned-dmg"],
+    [1, "invalid-signature"],
+    [2, "certificate-requirement-mismatch"],
+    [3, "developer-id-team-requirement-mismatch"]
+  ])("distinguishes native DMG failure operation %s with safe diagnostics", (failed, category) => {
+    let operation = 0;
+    const module = { exports: {} as any };
+    runInNewContext(fs.readFileSync("scripts/verify-macos-signatures.cjs", "utf8"), {
+      module,
+      Buffer,
+      process,
+      require: (name: string): unknown =>
+        name === "node:child_process"
+          ? {
+              spawnSync: () => ({
+                status: operation++ === failed ? 1 : 0,
+                stderr:
+                  failed === 0 ? "private-path: code object is not signed at all" : "fake-secret"
+              })
+            }
+          : name === "./macos-signing-config.cjs"
+            ? helpers
+            : nodeRequire(name)
+    });
+    const verifier = module.exports;
+    const test = harness();
+    test.verify.verifySignature.mockImplementation(() =>
+      verifier.verifyDmgSignature("private-path", environment)
+    );
+    Object.assign(test.verify, { signatureCategory: verifier.signatureCategory });
+    // The wrapper loads this exact verifier instance, whose WeakMap rejects forged errors.
+    expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+      `stage=dmg-signature-verification; category=${category}`
+    );
+    expect(verifier.signatureCategory(new Error("unsigned-dmg"))).toBeUndefined();
+    expect(test.command.mock.calls.some((call) => call[1][0] === "notarytool")).toBe(false);
+    expect(test.removes).toHaveBeenCalled();
+  });
+
+  // hdiutil and codesign exist only on macOS; mocks above run on every CI host.
+  it.runIf(process.platform === "darwin")(
+    "checks unsigned, ad hoc and damaged DMGs with native tools",
+    () => {
+      const directory = fs.mkdtempSync(path.join(tmpdir(), "graider-native-dmg-"));
+      const dmg = path.join(directory, "fixture.dmg");
+      const native = (file: string, args: string[]) => {
+        const result = spawnSync(file, args, { encoding: "utf8", shell: false });
+        // Never put fixture output or paths in assertion messages.
+        expect(result.error === undefined).toBe(true);
+        expect(result.status === 0).toBe(true);
+        return `${result.stdout}${result.stderr}`;
+      };
+      const verifier = nodeRequire("./scripts/verify-macos-signatures.cjs");
+      try {
+        native("/usr/bin/hdiutil", [
+          "create",
+          "-size",
+          "1m",
+          "-fs",
+          "HFS+",
+          "-volname",
+          "Fixture",
+          dmg
+        ]);
+        expect(() => verifier.verifyDmgSignature(dmg, environment)).toThrow("unsigned-dmg");
+        native("/usr/bin/xattr", ["-c", dmg]);
+        native("/usr/bin/codesign", ["--sign", "-", dmg]);
+        native("/usr/bin/codesign", ["--verify", "--strict", dmg]);
+        expect(
+          native("/usr/bin/codesign", ["--display", "--verbose=4", dmg]).includes(
+            "TeamIdentifier=not set"
+          )
+        ).toBe(true);
+        expect(() => verifier.verifyDmgSignature(dmg, environment)).toThrow(
+          "certificate-requirement-mismatch"
+        );
+        const bytes = fs.readFileSync(dmg);
+        const firstByte = 0;
+        bytes[firstByte] ^= 1;
+        fs.writeFileSync(dmg, bytes);
+        expect(() => verifier.verifyDmgSignature(dmg, environment)).toThrow("invalid-signature");
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    30_000
+  );
 
   it("discovers extensionless and nested native payloads without treating CLI JavaScript as signed code", () => {
     const directory = fs.mkdtempSync(path.join(tmpdir(), "graider-signature-fixture-"));
@@ -715,7 +822,7 @@ describe("fail-closed macOS production signing", () => {
         notarize: true,
         type: "distribution"
       },
-      dmg: { sign: true, writeUpdateInfo: false }
+      dmg: { sign: false, writeUpdateInfo: false }
     });
     expect(config.mac.target).toEqual([
       { target: "dmg", arch: ["arm64"] },

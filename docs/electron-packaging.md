@@ -543,7 +543,8 @@ Builder 26 signs nested Electron/native code with hardened runtime and only the
 An `afterSign` gate independently checks the certificate fingerprint, Developer ID,
 Team ID, hardened runtime and entitlements on every real Mach-O, including Dugite
 executables/dylibs under `app.asar.unpacked`, plus the app's stapled ticket. Builder
-signs the DMG; the wrapper separately requires an Accepted DMG notarization result
+creates the DMG; the wrapper explicitly signs it with the verified fingerprint,
+temporary keychain and secure timestamp, then separately requires an Accepted DMG notarization result
 and staples/validates it. ZIP itself cannot be stapled; it contains the stapled app.
 No unsigned fallback is allowed. Actual runtime/entitlement compatibility remains
 subject to native acceptance; do not relax entitlements just to pass packaging.
@@ -582,30 +583,61 @@ the exact argv on all platforms and compile that actual argument with Apple's
 
 Apple [supports Developer ID Application signing of disk images](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 Strict signature verification and an exact leaf certificate constraint apply to
-disk images. The existing Developer ID authority and TeamIdentifier checks remain;
-no evidence establishes a DMG-specific false rejection by those display checks.
-The archived run discarded the underlying error, so the command defect is proven,
-but it cannot establish the artifact's actual signing state or the sole run cause:
+DMGs. The fourth attempt, [run 43550080038](https://github.com/msoecsse/graider/actions/runs/43550080038)
+at `fd2bfb3`, still failed the outer DMG gate after the inline requirement fix.
+Its discarded native output cannot establish which verification operation failed.
 
-- A missing signature must be established by native signature inspection, not
-  builder completion or this failed requirement invocation.
-- An invalid signature must be established by integrity verification using
-  `codesign --verify --strict <dmg>` independently of the identity requirement.
-- A wrong certificate is distinguished by applying the corrected `-R` constraint
-  after integrity succeeds; a wrong Team ID or authority by inspecting the signed
-  identity. Apple's [certificate requirement documentation](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/RequirementLang/RequirementLang.html)
-  identifies certificate `subject.OU` as the developer Team ID.
-- A verifier invocation/parsing failure can reject otherwise valid signatures;
-  the reproduced missing `=` is such a defect. This is not permission to accept
-  an unverified artifact or relax strictness or identity checks.
+The wrapper now explicitly signs the completed DMG with `codesign --sign` using
+the already verified Developer ID fingerprint, `--keychain` pointing to its
+private temporary keychain, and `--timestamp`. Production builder has `dmg.sign:
+false` so there is one signing owner, with no silent builder lookup/fallback.
+The separate `dmg-sign` stage distinguishes start/I/O, termination and exit failure.
+Notarization runs only after all independent DMG checks pass.
 
-The next owner-authorized signing run must pass the corrected gate, DMG
-notarization/stapling and both archive installation proofs. If the same outer gate
-still fails, its generic category alone cannot distinguish integrity, identity or
-display parsing; independently collect those native pass/fail results using fixed
-identifiers without disclosing command output, certificate details or credentials.
-No production signing workflow was dispatched for this investigation. Native
-downloaded/quarantined DMG and ZIP acceptance remains mandatory before closing #54.
+Installed 26.15.3 implementation tests confirm that an explicit fingerprint
+bypasses `CSC_IDENTITY_AUTO_DISCOVERY=false` suppression, both native identity
+queries receive the supplied keychain, and unmatched fingerprints return null.
+`MacPackager.codeSigningInfo` uses `CSC_KEYCHAIN` when no CSC link is supplied;
+the wrapper excludes alternate CSC inputs. This proves the installed lookup
+behavior, not whether the historical run actually signed its image.
+
+The DMG verifier reports these fixed categories at `dmg-signature-verification`:
+
+| Category                                             | Failing native operation                                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `unsigned-dmg`                                       | Signature display reports Apple's unsigned marker.                                                                               |
+| `signature-inspection-failure`                       | Display fails without the unsigned marker.                                                                                       |
+| `invalid-signature`                                  | Independent `codesign --verify --strict` fails.                                                                                  |
+| `certificate-requirement-mismatch`                   | Integrity passed; exact leaf SHA-1 requirement fails.                                                                            |
+| `developer-id-team-requirement-mismatch`             | Integrity and leaf passed; native Apple anchor, Developer ID certificate extensions or certificate subject OU requirement fails. |
+| `command-start-or-io-failure` / `command-terminated` | Native verification could not complete.                                                                                          |
+
+Native output, certificate information, arguments and paths are never rendered.
+Only errors held in the verifier's private WeakMap carry these categories through
+the wrapper; forged error properties/messages remain generic failures.
+
+A credential-free native DMG fixture passes strict verification after ad hoc
+signing while displaying `TeamIdentifier=not set` and no Authority. Display text
+is not a universal signed-DMG identity contract. This fixture does **not** prove
+what a Developer ID DMG displays. A disposable self-signed certificate probe was
+not accepted as a native signing identity; no trust settings were changed and
+no Developer ID fixture coverage is claimed. The production DMG gate instead
+uses Apple's native certificate requirement evaluator: the same exact leaf plus
+`anchor apple generic`, Developer ID intermediate OID `1.2.840.113635.100.6.2.6`,
+Developer ID Application leaf OID `1.2.840.113635.100.6.1.13`, and the configured
+`certificate leaf[subject.OU]`. This is stronger than parsing Authority names.
+See [Apple's Developer ID requirement example](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
+App and nested Mach-O display/runtime/entitlement checks remain unchanged.
+
+Native regression fixtures distinguish unsigned images, strict-integrity damage,
+and ad hoc signatures failing the exact certificate requirement. Native `csreq`
+compiles the actual production requirement. Mocked operations separately exercise
+every category and its propagation through cleanup, without real credentials.
+No fixture proves real Developer ID/notarization acceptance. No production signing
+workflow was dispatched. The next reviewed owner-authorized attempt will identify
+the failing signing or verification operation, or proceed to mandatory DMG
+notarization/stapling and both installation proofs. Native downloaded/quarantined
+DMG and ZIP acceptance remains mandatory before closing #54.
 
 Outputs live only under `ui/release/macos-production/`:
 

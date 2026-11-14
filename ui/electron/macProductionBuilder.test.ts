@@ -113,6 +113,80 @@ describe("safe diagnostics inside the production builder", () => {
     }
   );
 
+  it("installed identity lookup honors explicit fingerprints with discovery disabled and scopes both queries", async () => {
+    nodeRequire("electron-builder");
+    const file = nodeRequire.resolve("app-builder-lib/out/codeSign/macCodeSign");
+    const localRequire = createRequire(file);
+    const exec = vi.fn(
+      async (_file: string, _args: string[]) =>
+        `1) ${fingerprint} "Developer ID Application: Fixture (FAKETEAM01)"\n`
+    );
+    const exports = {} as any;
+    const flags = {} as any;
+    runInNewContext(fs.readFileSync(localRequire.resolve("../util/flags"), "utf8"), {
+      exports: flags,
+      require: createRequire(localRequire.resolve("../util/flags")),
+      process: { env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" } }
+    });
+    runInNewContext(fs.readFileSync(file, "utf8"), {
+      exports,
+      process: { env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" } },
+      require: (dependency: string): unknown => {
+        if (dependency === "builder-util") return { ...localRequire(dependency), exec };
+        if (dependency === "../util/flags") return flags;
+        if (dependency === "../util/dynamicImport")
+          return {
+            dynamicImport: async () => ({
+              Identity: class {
+                constructor(
+                  public name: string,
+                  public hash: string
+                ) {}
+              }
+            })
+          };
+        return localRequire(dependency);
+      }
+    });
+    expect(
+      await exports.findIdentity("Developer ID Application", undefined, "fixture-keychain")
+    ).toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+    expect(
+      await exports.findIdentity("Developer ID Application", fingerprint, "fixture-keychain")
+    ).toMatchObject({ hash: fingerprint });
+    expect(exec.mock.calls).toEqual([
+      ["/usr/bin/security", ["find-identity", "-v", "fixture-keychain"]],
+      ["/usr/bin/security", ["find-identity", "-v", "-p", "codesigning", "fixture-keychain"]]
+    ]);
+    expect(
+      await exports.findIdentity("Developer ID Application", "B".repeat(40), "fixture-keychain")
+    ).toBeNull();
+  });
+
+  it("installed MacPackager reads CSC_KEYCHAIN without importing or changing keychains", async () => {
+    nodeRequire("electron-builder");
+    const file = nodeRequire.resolve("app-builder-lib/out/macPackager");
+    const localRequire = createRequire(file);
+    const exports = {} as any;
+    runInNewContext(fs.readFileSync(file, "utf8"), {
+      exports,
+      process: { platform: "darwin", env: { CSC_KEYCHAIN: "fixture-keychain" } },
+      require: (dependency: string): unknown =>
+        dependency === "./platformPackager"
+          ? {
+              PlatformPackager: class {
+                getCscLink() {
+                  return null;
+                }
+              }
+            }
+          : localRequire(dependency)
+    });
+    const packager = new exports.MacPackager({});
+    expect(await packager.codeSigningInfo.value).toEqual({ keychainFile: "fixture-keychain" });
+  });
+
   it("installed builder supplies runtime and configured entitlements to nested native code", async () => {
     nodeRequire("electron-builder");
     const { MacTargetHelper } = nodeRequire("app-builder-lib/out/mac/MacTargetHelper");
