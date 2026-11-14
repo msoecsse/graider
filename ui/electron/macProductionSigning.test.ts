@@ -313,7 +313,7 @@ describe("fail-closed macOS production signing", () => {
     const test = harness();
     const successful = test.command.getMockImplementation()!;
     test.command.mockImplementation((file, args, env) => {
-      if (args.some((arg) => arg === operation || arg.endsWith(`/${operation}`))) {
+      if (args.some((arg) => arg === operation || path.basename(arg) === operation)) {
         // Include every class of forbidden data, including a forged safe-looking error.
         const error = new Error(JSON.stringify({ file, args, env, privateKey }));
         Object.assign(error, { stage: "forged-stage", category: "forged-category" });
