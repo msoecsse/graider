@@ -566,6 +566,10 @@ describe("fail-closed macOS production signing", () => {
   });
 
   it.each([
+    ...nodeRequire("./scripts/mac-app-signing.cjs").categories.map((category: string) => [
+      "stage=builder-app-sign; category=" + category,
+      "builder-app-sign; category=" + category
+    ]),
     [
       "stage=builder-artifact-dmg; category=unexpected-output-directory",
       "builder-artifact-dmg; category=unexpected-output-directory"

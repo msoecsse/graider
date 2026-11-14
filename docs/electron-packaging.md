@@ -840,6 +840,84 @@ and review these fixed observations before any separately owner-authorized
 production attempt. No production workflow is dispatched by this investigation;
 #54 stays open and signed/downloaded native acceptance remains pending.
 
+#### Application-signing rejection investigation (run 43568638747)
+
+[Run 43568638747](https://github.com/msoecsse/graider/actions/runs/43568638747)
+used `0811d91153107d9404f7e7455cc5251c3f76cb38`. Its builder promise rejected
+in application signing, and the failure record was written and received. It did
+not reach app notarization, DMG creation or archive acceptance. The two old
+application-sign stage entries were afterPack and the actual custom signing
+callback, respectively; they were not evidence of two signer calls.
+
+Installed electron-builder/app-builder-lib **26.15.3**:
+
+- MacPackager obtains CSC_KEYCHAIN without importing another certificate when no
+  CSC link is supplied. Identity selection queries the explicit temporary keychain
+  and matches the configured fingerprint. The wrapper already requires its
+  Developer ID Application identity and Team ID, unlocks the keychain and sets
+  its private-key partition list. Identity discovery does not prove key access.
+- MacTargetHelper.buildSignOptions supplies a fingerprint **string**, keychain,
+  identityValidation=false, strict verification, disabled automatic entitlements,
+  and per-file options to the custom callback. This is a supported osx-sign input:
+  its Identity wrapper uses that string directly. The default builder signer uses
+  the identity name instead; a fingerprint is not a demonstrated callback defect.
+- macCodeSign.sign imports osx-sign.signAsync and retries three times after the
+  initial attempt, with 5/10/15-second delays. The custom callback awaits this
+  exact operation without altering options or retry behavior.
+- osx-sign validates the app/options, walks nested binary files and app/framework
+  bundles, and signs deeper children before the main app. Explicit extra binaries
+  are also signed. Every nonignored target receives the configured JIT entitlement
+  plist and hardened runtime. No timestamp override is configured, so osx-sign
+  passes --timestamp on each signing command. It then performs deep strict
+  verification and displays the app entitlements before resolving. A rejection
+  can therefore originate in validation, traversal, signing or these final checks.
+- osx-sign rejects execFile's Error without separately attaching captured native
+  output; Node includes native stderr in that Error's message. Classifying only
+  an error.stderr field would miss this installed implementation's failures.
+
+The callback, signing options, entitlements, lockfile, keychain preparation and
+identity selection at that failed SHA match
+[run 43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888)
+at `79cbf768dbe2e3ed799b96b0193ff411d80d9637`, which reached the outer DMG
+signing command. Later changes added artifact/lifecycle evidence and a C locale.
+There is no demonstrated deterministic configuration or callback-contract defect
+causing the latest rejection. No credentials, trust, timestamp or notarization
+workaround is justified.
+
+The callback now records signing-call-entered/resolved/rejected on FD4 at the
+actual awaited call. afterPack instead records builder-sign-prepare. Rejection
+inspects only data fields in memory and retains one tested, fixed FD3 category:
+identity-not-found/ambiguous, private-key-access-denied/unavailable,
+keychain-unavailable, certificate-trust-failure, timestamp-service-failure,
+entitlements-failure, signing-configuration-failure, signing-target-missing/invalid,
+filesystem-permission-denied/read-only/no-space/io-failure,
+resource-fork-or-finder-info, or native-security-internal-error. Structural
+fallbacks distinguish signing-command-start-or-io-failure, signing-command-terminated,
+signing-command-exit-failure, signing-filesystem-failure and unknown-signing-rejection.
+The implementation's explicit allowlist defines the exact spellings.
+The vendor exception is replaced by a fixed error without its cause or fields.
+Neither diagnostic pipe carries raw exceptions, native output, command arguments,
+paths, certificate details or credentials; malformed streams remain rejected.
+
+Credential-free native tests execute installed signing on disposable app, Node,
+Dugite Git and dylib copies using ad hoc signing. They reproduce missing app and
+additional-binary targets, unreadable entitlements and unavailable identity.
+One real worker subprocess preserves all installed retry delays and verifies the
+classified rejection and signing lifecycle markers reach FD3/FD4. Other native
+probes remove retry delays only. These establish diagnostic behavior, not
+Developer ID, private-key, timestamp-service or production acceptance.
+
+**Still unproven:** the underlying native failure in run 43568638747. Key access,
+trust, timestamp availability and production-specific target/configuration
+problems remain hypotheses. The next separately authorized production run will
+distinguish preparation failure from actual signer entry, resolution or rejection,
+and report a recognized failure family after the installed retries, or an explicit
+unknown rejection. errSecInternalComponent remains ambiguous and does not prove
+an ACL problem. No target path or subprocess output is retained, and a category
+alone cannot establish a specific nested target or exact root cause.
+All existing signing, cleanup, notarization, archive and native acceptance gates
+remain mandatory. This investigation dispatches no production run; #54 stays open.
+
 #### Temporary Windows CI pause during #54
 
 During macOS signing diagnosis, main CI excludes Windows x64 matrix entries

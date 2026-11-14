@@ -18,6 +18,7 @@ const environment = {
 };
 
 function harness() {
+  const signer = vi.fn(async (_options: unknown) => {});
   const writeSync = vi.fn((_fd: number, value: string) => Buffer.byteLength(value));
   const lstatSync = vi.fn(() => ({ isFile: () => true, size: 1 }));
   const processMock = Object.assign(new EventEmitter(), { exitCode: 0 });
@@ -36,6 +37,8 @@ function harness() {
     process: processMock,
     require: (name: string): unknown => {
       if (name === "node:fs") return { writeSync, lstatSync };
+      if (name === "app-builder-lib/out/codeSign/macCodeSign") return { sign: signer };
+      if (name === "./mac-app-signing.cjs") return nodeRequire("./scripts/mac-app-signing.cjs");
       if (name === "electron-builder")
         return { build: execute, Platform: { MAC: { createTarget } }, Arch: { arm64: 1 } };
       return nodeRequire(
@@ -44,7 +47,6 @@ function harness() {
     }
   });
   const worker = module.exports;
-  const signer = vi.fn(async (_options: unknown) => {});
   const verifyApp = vi.fn();
   const beforePack = vi.fn();
   const configModule = { exports: {} as any };
@@ -76,6 +78,98 @@ function harness() {
 }
 
 describe("safe diagnostics inside the production builder", () => {
+  it("marks actual signer entry and settlement independently of afterPack", async () => {
+    const test = harness();
+    test.config.afterPack();
+    expect(test.writeSync).toHaveBeenCalledWith(
+      4,
+      "stage=builder-sign-prepare; category=stage-entered\n"
+    );
+    expect(
+      test.writeSync.mock.calls.some(([, value]) => value.includes("signing-call-entered"))
+    ).toBe(false);
+    let settle!: () => void;
+    test.signer.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    const pending = test.config.mac.sign({ identity: fingerprint });
+    expect(test.writeSync).toHaveBeenCalledWith(
+      4,
+      "stage=builder-app-sign; category=signing-call-entered\n"
+    );
+    expect(
+      test.writeSync.mock.calls.some(([, value]) => value.includes("signing-call-resolved"))
+    ).toBe(false);
+    expect(
+      test.writeSync.mock.calls.some(([, value]) => value.includes("builder-app-notarize-staple"))
+    ).toBe(false);
+    settle();
+    await pending;
+    expect(test.writeSync).toHaveBeenCalledWith(
+      4,
+      "stage=builder-app-sign; category=signing-call-resolved\n"
+    );
+    expect(test.writeSync).toHaveBeenCalledWith(
+      4,
+      "stage=builder-app-notarize-staple; category=stage-entered\n"
+    );
+    expect(
+      test.worker.isLifecycle("stage=builder-app-sign; category=signing-call-resolved\nsecret")
+    ).toBe(false);
+    expect(test.worker.isLifecycle("stage=builder-pack; category=signing-call-entered")).toBe(
+      false
+    );
+  });
+
+  it.each([
+    ["User interaction is not allowed.", "private-key-access-denied"],
+    ["errSecInternalComponent", "native-security-internal-error"],
+    ["The timestamp service is not available.", "timestamp-service-failure"],
+    ["cannot read entitlement data", "entitlements-failure"],
+    ["unknown private failure", "unknown-signing-rejection"]
+  ])(
+    "preserves only a fixed signing category through builder rejection: %s",
+    async (message, category) => {
+      const test = harness();
+      const raw = new Error(message + " secret certificate argv credential path");
+      test.signer.mockRejectedValue(raw);
+      let forwarded: unknown;
+      test.execute.mockImplementation(async () => {
+        try {
+          await test.config.mac.sign({});
+        } catch (error) {
+          forwarded = error;
+          throw error;
+        }
+        return [];
+      });
+      await test.worker.build();
+      expect(forwarded).not.toBe(raw);
+      expect((forwarded as Error).message).toBe("Application signing failed.");
+      expect((forwarded as Error).cause).toBeUndefined();
+      expect(test.writeSync).toHaveBeenCalledWith(
+        3,
+        "stage=builder-app-sign; category=" + category
+      );
+      expect(test.writeSync).toHaveBeenCalledWith(
+        4,
+        "stage=builder-app-sign; category=signing-call-rejected\n"
+      );
+      expect(
+        test.writeSync.mock.calls.some(([, value]) => /secret|credential|argv/.test(value))
+      ).toBe(false);
+      expect(
+        test.writeSync.mock.calls.some(([, value]) =>
+          /signing-call-resolved|builder-app-notarize-staple/.test(value)
+        )
+      ).toBe(false);
+      expect(test.processMock.exitCode).toBe(1);
+    }
+  );
+
   it("installed DMG builder selects UDZO and HFS+ for the production defaults", async () => {
     nodeRequire("electron-builder");
     const { DmgTarget } = nodeRequire("dmg-builder/out/dmg");
@@ -373,7 +467,7 @@ describe("safe diagnostics inside the production builder", () => {
       expect(test.processMock.exitCode).toBe(1);
       const stages: Record<string, string> = {
         pack: "builder-pack; category=builder-failure",
-        sign: "builder-app-sign; category=signing-failure",
+        sign: "builder-app-sign; category=unknown-signing-rejection",
         verify: "builder-app-verification; category=verification-failure",
         archive: "builder-archive; category=archive-failure"
       };

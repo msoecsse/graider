@@ -2,6 +2,7 @@
 "use strict";
 const fs = require("node:fs");
 const { join, resolve } = require("node:path");
+const { classify, isSigningDiagnostic } = require("./mac-app-signing.cjs");
 const {
   expectedArtifacts,
   resultCategory,
@@ -13,10 +14,11 @@ const LIFECYCLE_PIPE = 4;
 const completion = "stage=builder-artifacts; category=validated";
 
 // Dedicated pipe, never builder stdout/stderr. Only these fixed identifiers may
-// cross the subprocess boundary; caught errors are never inspected or rendered.
+// cross the subprocess boundary; caught errors are never rendered.
 const categories = Object.freeze({
   "builder-initialize": "builder-failure",
   "builder-pack": "builder-failure",
+  "builder-sign-prepare": "signing-failure",
   "builder-app-sign": "signing-failure",
   "builder-app-notarize-staple": "notarization-failure",
   "builder-app-verification": "verification-failure",
@@ -24,12 +26,15 @@ const categories = Object.freeze({
   "builder-artifact-validation": "artifact-validation-failure"
 });
 let currentStage = "builder-initialize";
+let signingFailure;
 const stage = (value) => {
   if (!Object.hasOwn(categories, value)) throw new Error("Invalid builder stage.");
   currentStage = value;
+  signingFailure = undefined;
   observation("stage-entered");
 };
-const diagnostic = () => `stage=${currentStage}; category=${categories[currentStage]}`;
+const diagnostic = () =>
+  `stage=${currentStage}; category=${signingFailure || categories[currentStage]}`;
 const lifecycleCategories = Object.freeze([
   "stage-entered",
   "promise-started",
@@ -46,9 +51,12 @@ const lifecycleCategories = Object.freeze([
 ]);
 const isLifecycle = (value) =>
   typeof value === "string" &&
-  (Object.keys(categories).some((name) =>
-    lifecycleCategories.some((category) => value === `stage=${name}; category=${category}`)
+  (["signing-call-entered", "signing-call-resolved", "signing-call-rejected"].some(
+    (category) => value === `stage=builder-app-sign; category=${category}`
   ) ||
+    Object.keys(categories).some((name) =>
+      lifecycleCategories.some((category) => value === `stage=${name}; category=${category}`)
+    ) ||
     ["dmg", "zip"].some(
       (extension) => value === `stage=builder-artifact-${extension}; category=build-completed`
     ));
@@ -63,6 +71,19 @@ const observe = (value) => {
   }
 };
 const observation = (category) => observe(`stage=${currentStage}; category=${category}`);
+const signApplication = async (options) => {
+  stage("builder-app-sign");
+  observation("signing-call-entered");
+  try {
+    await require("app-builder-lib/out/codeSign/macCodeSign").sign(options);
+    observation("signing-call-resolved");
+  } catch (error) {
+    signingFailure = classify(error);
+    observation("signing-call-rejected");
+  }
+  // Never forward the vendor Error, its native output, properties or cause.
+  if (signingFailure) throw new Error("Application signing failed.");
+};
 const artifactCompleted = (event) => {
   const artifact = expectedArtifacts(resolve(__dirname, "..")).find(
     ({ file }) => event?.file === file
@@ -70,6 +91,7 @@ const artifactCompleted = (event) => {
   if (artifact) observe(`stage=builder-artifact-${artifact.extension}; category=build-completed`);
 };
 const isDiagnostic = (value) =>
+  isSigningDiagnostic(value) ||
   isArtifactDiagnostic(value) ||
   Object.keys(categories).some((name) =>
     ["promise-pending-before-exit", "premature-exit", "uncaught-exception"].some(
@@ -146,5 +168,13 @@ const build = async () => {
     process.exitCode = 1;
   }
 };
-module.exports = { stage, isDiagnostic, isLifecycle, artifactCompleted, build, completion };
+module.exports = {
+  stage,
+  signApplication,
+  isDiagnostic,
+  isLifecycle,
+  artifactCompleted,
+  build,
+  completion
+};
 if (require.main === module) void build();

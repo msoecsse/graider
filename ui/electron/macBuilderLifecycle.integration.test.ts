@@ -24,7 +24,11 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(tmpdir(), "graider builder lifecycle "));
   const scripts = path.join(root, "scripts");
   fs.mkdirSync(scripts);
-  for (const name of ["mac-production-builder.cjs", "mac-production-artifacts.cjs"])
+  for (const name of [
+    "mac-production-builder.cjs",
+    "mac-production-artifacts.cjs",
+    "mac-app-signing.cjs"
+  ])
     fs.copyFileSync(path.join(ui, "scripts", name), path.join(scripts, name));
   fs.writeFileSync(
     path.join(root, "package.json"),
