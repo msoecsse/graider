@@ -98,8 +98,21 @@ const run = (file, args, environment, stage) => {
     ? `${result.stdout ?? ""}\n${result.stderr ?? ""}`
     : result.stdout;
 };
+const parseSearchList = (output) => {
+  // security prints one raw, double-quoted path per line, without escaping
+  // embedded quotes or backslashes. Never shell-split, unescape or log paths.
+  if (typeof output !== "string") throw failure("keychain-search-list-parse", "invalid-response");
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const match = /^[ \t]*"(\/[^\0\r\n]*)"[ \t]*$/.exec(line);
+      if (!match) throw failure("keychain-search-list-parse", "invalid-response");
+      return match[1];
+    });
+};
 // Sign only a disposable copy, never the running executable or packaged app.
-// No retry, ambient identity, keychain/search-list change, or timestamp fallback.
+// The wrapper owns keychain/search-list setup. No retry or timestamp fallback.
 const appPreflight = (executable, environment, command = run, verify = signatures) => {
   step("app-preflight-prepare", "filesystem-failure", () => {
     fs.copyFileSync(process.execPath, executable, fs.constants.COPYFILE_EXCL);
@@ -199,6 +212,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
   // publishing credentials or Node injection switches into packaging subprocesses.
   let child;
   let keychainAttempted = false;
+  let originalSearchList;
   let originalFailure;
   let preflightDiagnostic;
   const cleanupFailures = [];
@@ -234,6 +248,10 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
     step("api-key-write", "filesystem-failure", () =>
       fs.writeFileSync(apiKey, configuration.apiKey, { mode: PRIVATE_FILE_MODE })
     );
+    // Capture before creation too: even a failed create can change native state.
+    originalSearchList = parseSearchList(
+      execute("keychain-search-list-query", "/usr/bin/security", ["list-keychains", "-d", "user"])
+    );
     keychainAttempted = true;
     execute("keychain-create", "/usr/bin/security", ["create-keychain", "-p", password, keychain]);
     execute("keychain-settings", "/usr/bin/security", ["set-keychain-settings", keychain]);
@@ -255,6 +273,14 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
       "-s",
       "-k",
       password,
+      keychain
+    ]);
+    execute("keychain-search-list-register", "/usr/bin/security", [
+      "list-keychains",
+      "-d",
+      "user",
+      "-s",
+      ...originalSearchList,
       keychain
     ]);
     const identities = execute("identity-query", "/usr/bin/security", [
@@ -378,10 +404,20 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
         cleanupFailures.push(diagnostic(error));
       }
     };
-    if (keychainAttempted)
+    if (keychainAttempted) {
+      clean("cleanup-keychain-search-list", () =>
+        execute("cleanup-keychain-search-list", "/usr/bin/security", [
+          "list-keychains",
+          "-d",
+          "user",
+          "-s",
+          ...originalSearchList
+        ])
+      );
       clean("cleanup-keychain", () =>
         execute("cleanup-keychain", "/usr/bin/security", ["delete-keychain", keychain])
       );
+    }
     clean("cleanup-private-directory", () => fs.rmSync(root, { recursive: true, force: true }));
     clean("cleanup-oauth-file", () =>
       fs.rmSync(join(ui, "dist-electron/github-oauth.release.json"), { force: true })

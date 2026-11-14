@@ -536,7 +536,15 @@ Do not change credentials based solely on the first run's generic error. Use the
 next attempt's safe stage/category to guide further investigation; a successful
 attempt still requires the downloaded native acceptance below.
 
-It neither changes the default keychain nor persists notarization credentials.
+The wrapper captures the original user keychain search list before keychain
+creation, then appends its private temporary keychain while preserving all
+pre-existing entries and their order. In `finally` it restores that exact list
+before attempting keychain deletion, including after creation, registration or
+signing failure. An empty original list is restored with no path arguments.
+Restoration failure is reported separately and fails closed; deletion and private
+file cleanup are still attempted. The search list stays only in memory and is
+never printed or persisted. It neither changes the default keychain nor persists
+notarization credentials.
 Cleanup runs on success/failure; workflow `always()` cleanup also covers normal
 cancellation on the ephemeral runner. Forced runner termination ultimately relies
 on GitHub-hosted runner destruction; use no persistent/self-hosted signing runner.
@@ -671,8 +679,9 @@ now separates filesystem evidence from native inspection failure.
 
 The native `codesign(1)` manual states that `--keychain` restricts identity lookup
 to that keychain, while the normal search list is still used for certificate-chain
-construction. The wrapper does not change the default keychain, search list or
-trust settings. An identity-query match does not by itself prove private-key
+construction. At that commit the wrapper did not change the default keychain,
+search list or trust settings; the reversible search-list correction below
+supersedes that setup. An identity-query match does not by itself prove private-key
 access. The same identity already signed the app in this run, which makes a
 permanent global credential defect less likely but does not eliminate keychain,
 trust, timing or timestamp failures. Apple's [timestamp guidance](https://developer.apple.com/documentation/security/resolving-common-notarization-issues)
@@ -956,8 +965,9 @@ resolved. Both used Node 24.22.2, as did the latest run. The locked dependencies
 identity configuration and effective application-signing options are unchanged;
 later callback changes added observations/error classification. Historical logs
 do not establish identical credential material, native state or service
-availability. No search-list, trust, certificate or production signing-argument
-change is justified by this comparison.
+availability. This comparison alone did not justify a search-list, trust, certificate or
+production signing-argument change; the search-list discrepancy is tested by the
+focused correction below.
 
 After the existing identity query/match and before starting builder, a mandatory
 preflight exclusively creates a copy of the running arm64 Node Mach-O executable
@@ -1028,6 +1038,53 @@ item, prove an ACL defect, locate a failing app target or establish the underlyi
 root cause. It cannot establish signed/notarized production archive acceptance.
 No certificate, keychain search list, identity or notarization changes are made;
 #54 remains open and this correction dispatches no production signing.
+
+#### Temporary keychain search-list correction (run 43610967706)
+
+[Run 43610967706](https://github.com/msoecsse/graider/actions/runs/43610967706)
+at `994843f1a7549cb1005c2247ebfcfe102e696951` passed certificate import,
+partition-list configuration and the explicit identity match, but actual signing
+of the disposable Mach-O failed at
+`app-preflight-sign; category=keychain-item-not-found`. This category does not
+identify the missing item or prove a private-key access or certificate defect.
+
+The native Apple `codesign(1)` manual's `--keychain` and **SIGNING IDENTITIES**
+sections state that the user's search list remains relevant even with an explicit
+keychain, including for certificate-chain construction. The wrapper previously
+never registered its private temporary keychain. This is a documented setup
+discrepancy worth correcting, not an established root cause of the failed run.
+The correction captures `security list-keychains -d user` privately before
+creation and uses argv arrays to append the existing temporary keychain after
+partition-list setup, before identity validation and preflight. Parsing follows
+[Apple's raw quoted-line output](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/keychain_list.c),
+preserving spaces, quotes, backslashes and order without shell evaluation.
+Malformed output fails before keychain creation; it is never partially accepted.
+
+Setup failures use `keychain-search-list-query` or
+`keychain-search-list-register` with fixed command categories; malformed output
+uses `keychain-search-list-parse; category=invalid-response`. Restoration runs as
+`cleanup-keychain-search-list` in `finally` before deletion, even if creation or
+registration partially changed native state before failing. Only fixed safe
+categories are reported. Restoration-only failure fails the command; simultaneous
+signing and cleanup failures retain the original failure and independent cleanup
+diagnostics. Tests cover empty/populated lists, exact ordered restoration,
+partial mutation, native command failures, cleanup ordering and output suppression.
+The exact SHA-1 and explicit `--keychain` remain on every signing operation;
+certificate material, private-key access policy, default keychain, trust settings,
+timestamp requirements and notarization configuration are unchanged.
+
+Historical [run 43550080038](https://github.com/msoecsse/graider/actions/runs/43550080038)
+at `fd2bfb329609092c6b88257d4f66ed7bbed8b223` reached DMG signature verification;
+[run 43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888)
+at `79cbf768dbe2e3ed799b96b0193ff411d80d9637` reached DMG signing. Rechecked logs
+and wrappers confirm that application signing/notarization and after-sign checks
+resolved with the same search-list omission. Those runs therefore do not prove
+that omission explains the later failure. Historical credentials, native search
+lists, intermediate-certificate availability and service state cannot be assumed
+identical. Credential-free tests prove wrapper sequencing and restoration, not
+that this correction resolves real Developer ID signing. No production workflow
+is dispatched or release acceptance claimed; #54 stays open pending real signing,
+notarization and downloaded/quarantined native DMG and ZIP acceptance.
 
 For subsequent #54 diagnostic slices, validate new/modified and directly affected
 signing/packaging tests locally, plus applicable hygiene, lint, formatting and

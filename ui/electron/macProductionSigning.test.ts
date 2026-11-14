@@ -41,10 +41,31 @@ const prepared = {
   APPLE_API_KEY_ID: environment.GRAIDER_APPLE_API_KEY_ID,
   APPLE_API_ISSUER: environment.GRAIDER_APPLE_API_ISSUER
 };
+const originalKeychains = [
+  "/Users/Fake Owner/Library/Keychains/login.keychain-db",
+  "/Library/Keychains/System.keychain",
+  '/Users/Fake Owner/quoted " keychain\\literal.keychain-db'
+];
+// security wraps raw paths in quotes; it does not shell/JSON-escape their contents.
+const searchListOutput = originalKeychains.map((file) => `    "${file}"\n`).join("");
+const searchListArguments = ["list-keychains", "-d", "user", "-s"];
 const builderScript = path.resolve("scripts/mac-production-builder.cjs");
 const wrapperSource = fs.readFileSync("scripts/package-mac-production.cjs", "utf8");
 
 function harness(platform = "darwin", arch = "arm64") {
+  const nativeCommand = vi.fn(
+    (
+      _file: string,
+      _args: string[],
+      _options: unknown
+    ): {
+      status: number | null;
+      stdout: string;
+      stderr: string;
+      error?: Error;
+      signal?: string;
+    } => ({ status: 0, stdout: "", stderr: "" })
+  );
   const writes = vi.fn();
   const copies = vi.fn();
   const reports = vi.fn();
@@ -55,6 +76,7 @@ function harness(platform = "darwin", arch = "arm64") {
   const directories = vi.fn((prefix: string) => `${prefix}test`);
   const verify = { verifySignature: vi.fn() };
   const command = vi.fn((file: string, args: string[], _env: Record<string, string>): string => {
+    if (args[0] === "list-keychains" && !args.includes("-s")) return searchListOutput;
     if (args[0] === "find-identity")
       return `1) ${fingerprint} "Developer ID Application: Fake Owner (${team})"\n`;
     if (args[0] === "notarytool") return JSON.stringify({ status: "Accepted" });
@@ -67,6 +89,7 @@ function harness(platform = "darwin", arch = "arm64") {
       sign: (env: Record<string, string>, cmd: typeof command, verifier: typeof verify) => void;
       notarize: (file: string, env: Record<string, string>, cmd: typeof command) => void;
       diagnostic: (error: unknown) => string;
+      run: typeof command;
     }
   };
   const loader = Object.assign(
@@ -84,6 +107,7 @@ function harness(platform = "darwin", arch = "arm64") {
           lstatSync: lstat
         };
       if (name === "./macos-signing-config.cjs") return helpers;
+      if (name === "node:child_process") return { spawnSync: nativeCommand };
       if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
       if (name === "./mac-app-signing.cjs") return nodeRequire("./scripts/mac-app-signing.cjs");
       if (name === "./mac-production-builder.cjs")
@@ -112,11 +136,214 @@ function harness(platform = "darwin", arch = "arm64") {
     directories,
     verify,
     command,
+    nativeCommand,
     lstat
   };
 }
 
 describe("fail-closed macOS production signing", () => {
+  it.each([searchListOutput, ""])(
+    "registers the private keychain and restores the exact ordered list: %j",
+    (output) => {
+      const test = harness();
+      const original = output ? originalKeychains : [];
+      const successful = test.command.getMockImplementation()!;
+      test.command.mockImplementation((file, args, env) =>
+        args[0] === "list-keychains" && !args.includes("-s") ? output : successful(file, args, env)
+      );
+      test.sign(environment, test.command, test.verify);
+      const calls = test.command.mock.calls;
+      const search = calls.filter(([, args]) => args[0] === "list-keychains");
+      const keychain = calls.find(([, args]) => args[0] === "create-keychain")![1].at(-1)!;
+      expect(search.map(([file, args]) => [file, args])).toEqual([
+        ["/usr/bin/security", ["list-keychains", "-d", "user"]],
+        ["/usr/bin/security", [...searchListArguments, ...original, keychain]],
+        ["/usr/bin/security", [...searchListArguments, ...original]]
+      ]);
+      const indexOf = (operation: string): number =>
+        calls.findIndex(([, args]) => args[0] === operation);
+      expect(calls.indexOf(search[0])).toBeLessThan(indexOf("create-keychain"));
+      expect(indexOf("set-key-partition-list")).toBeLessThan(calls.indexOf(search[1]));
+      expect(calls.indexOf(search[1])).toBeLessThan(indexOf("find-identity"));
+      expect(indexOf("notarytool")).toBeLessThan(calls.indexOf(search[2]));
+      expect(calls.indexOf(search[2])).toBeLessThan(indexOf("delete-keychain"));
+      expect(test.command.mock.invocationCallOrder[indexOf("delete-keychain")]).toBeLessThan(
+        test.removes.mock.invocationCallOrder[0]
+      );
+      expect(JSON.stringify([test.reports.mock.calls, test.writes.mock.calls])).not.toContain(
+        originalKeychains[0]
+      );
+    }
+  );
+
+  it.each([
+    "unquoted private output",
+    '    "/private/valid.keychain-db"\nmalformed private output',
+    '    "relative.keychain-db"\n',
+    '    ""\n',
+    '    "/private/null\0.keychain-db"\n'
+  ])("rejects an unparseable search list before keychain creation: %j", (output) => {
+    const test = harness();
+    test.command.mockReturnValue(output);
+    expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+      "Original failure: stage=keychain-search-list-parse; category=invalid-response."
+    );
+    expect(test.command.mock.calls.map(([, args]) => args)).toEqual([
+      ["list-keychains", "-d", "user"]
+    ]);
+    expect(test.removes).toHaveBeenCalledTimes(2);
+    expect(test.reports).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["query", "keychain-search-list-query"],
+    ["create", "keychain-create"],
+    ["register", "keychain-search-list-register"],
+    ["import", "certificate-import"],
+    ["preflight", "app-preflight-sign"],
+    ["builder", "builder-sign-notarize-archive"]
+  ])(
+    "restores before deleting after %s failure, including partial mutation",
+    (operation, stage) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      let current = [...originalKeychains];
+      test.command.mockImplementation((file, args, env) => {
+        const query = args[0] === "list-keychains" && !args.includes("-s");
+        const register = args[0] === "list-keychains" && args.includes(env.CSC_KEYCHAIN);
+        // Model creation/registration mutating state even when the command throws.
+        if (args[0] === "create-keychain") current.push(args.at(-1)!);
+        if (args[0] === "list-keychains" && args.includes("-s"))
+          current = args.slice(searchListArguments.length);
+        if (
+          (operation === "query" && query) ||
+          (operation === "create" && args[0] === "create-keychain") ||
+          (operation === "register" && register) ||
+          (operation === "import" && args[0] === "import") ||
+          (operation === "preflight" && args[0] === "--sign") ||
+          (operation === "builder" && args[0] === builderScript)
+        )
+          throw new Error(JSON.stringify({ file, args, env, output: searchListOutput }));
+        return successful(file, args, env);
+      });
+      let message = "";
+      try {
+        test.sign(environment, test.command, test.verify);
+      } catch (error) {
+        message = test.diagnostic(error);
+      }
+      expect(message).toBe(
+        `Original failure: stage=${stage}; category=${operation === "preflight" ? "signing-failure" : "command-failure"}.`
+      );
+      expect(current).toEqual(originalKeychains);
+      const calls = test.command.mock.calls;
+      if (operation === "query") expect(calls).toHaveLength(1);
+      else {
+        expect(calls.at(-2)?.[1]).toEqual([...searchListArguments, ...originalKeychains]);
+        expect(calls.at(-1)?.[1][0]).toBe("delete-keychain");
+        expect(test.command.mock.invocationCallOrder.at(-1)).toBeLessThan(
+          test.removes.mock.invocationCallOrder[0]
+        );
+      }
+      expect(test.removes).toHaveBeenCalledTimes(2);
+      expect(test.writes.mock.calls.some(([file]) => file.endsWith(".sha256"))).toBe(false);
+    }
+  );
+
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true]
+  ])(
+    "fails closed on restoration failure with signing failure=%s, deletion failure=%s",
+    (failSigning, failDeletion) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      test.command.mockImplementation((file, args, env) => {
+        if (
+          (args[0] === "list-keychains" &&
+            args.includes("-s") &&
+            !args.includes(env.CSC_KEYCHAIN)) ||
+          (failSigning && args[0] === "--sign") ||
+          (failDeletion && args[0] === "delete-keychain")
+        )
+          throw new Error(JSON.stringify({ file, args, env, output: searchListOutput }));
+        return successful(file, args, env);
+      });
+      let message = "";
+      try {
+        test.sign(environment, test.command, test.verify);
+      } catch (error) {
+        message = test.diagnostic(error);
+      }
+      expect(message).toBe(
+        [
+          failSigning
+            ? "Original failure: stage=app-preflight-sign; category=signing-failure."
+            : "Signing stages completed.",
+          "Cleanup failure: stage=cleanup-keychain-search-list; category=command-failure.",
+          ...(failDeletion
+            ? ["Cleanup failure: stage=cleanup-keychain; category=command-failure."]
+            : [])
+        ].join("\n")
+      );
+      expect(test.command.mock.calls.at(-2)?.[1]).toEqual([
+        ...searchListArguments,
+        ...originalKeychains
+      ]);
+      expect(test.command.mock.calls.at(-1)?.[1][0]).toBe("delete-keychain");
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each([
+    { status: 1, category: "command-exit-failure" },
+    {
+      status: null,
+      error: new Error("private command argv"),
+      category: "command-start-or-io-failure"
+    },
+    { status: null, signal: "SIGTERM", category: "command-terminated" }
+  ])("suppresses native restoration output and paths: $category", (result) => {
+    const test = harness();
+    const secret = "private native output credential certificate";
+    test.nativeCommand.mockImplementation((_file, args) => {
+      if (args[0] === "list-keychains") {
+        if (!args.includes("-s")) return { status: 0, stdout: searchListOutput, stderr: secret };
+        if (args.at(-1) === originalKeychains.at(-1))
+          return { ...result, stdout: searchListOutput, stderr: secret };
+      }
+      if (args[0] === "find-identity")
+        return {
+          status: 0,
+          stdout: `${fingerprint} "Developer ID Application: Fake (${team})"`,
+          stderr: secret
+        };
+      if (args[0] === "--sign")
+        return { status: 1, stdout: secret, stderr: "errSecItemNotFound " + secret };
+      return { status: 0, stdout: secret, stderr: secret };
+    });
+    let message = "";
+    try {
+      test.sign(environment, test.run, test.verify);
+    } catch (error) {
+      message = test.diagnostic(error);
+    }
+    expect(message).toBe(
+      [
+        "Original failure: stage=app-preflight-sign; category=keychain-item-not-found.",
+        `Cleanup failure: stage=cleanup-keychain-search-list; category=${result.category}.`
+      ].join("\n")
+    );
+    expect(test.reports).not.toHaveBeenCalled();
+    expect(test.nativeCommand.mock.calls.at(-2)?.[1]).toEqual([
+      ...searchListArguments,
+      ...originalKeychains
+    ]);
+    expect(test.nativeCommand.mock.calls.at(-1)?.[1][0]).toBe("delete-keychain");
+    expect(test.removes).toHaveBeenCalledTimes(2);
+  });
+
   it("proves actual signing on a disposable executable before starting builder", () => {
     const test = harness();
     test.sign(environment, test.command, test.verify);
@@ -154,9 +381,7 @@ describe("fail-closed macOS production signing", () => {
     expect(test.reports).toHaveBeenCalledExactlyOnceWith(
       "stage=app-preflight-verification; category=passed\n"
     );
-    expect(calls.some(([, args]) => ["list-keychains", "default-keychain"].includes(args[0]))).toBe(
-      false
-    );
+    expect(calls.some(([, args]) => args[0] === "default-keychain")).toBe(false);
   });
 
   it.each(["prepare", "sign", "verification", "timestamp", "timestamp-missing", "timestamp-none"])(
@@ -460,7 +685,10 @@ describe("fail-closed macOS production signing", () => {
 
   it("rejects a wrong certificate/team before builder", () => {
     const test = harness();
-    test.command.mockReturnValue("Wrong identity");
+    const successful = test.command.getMockImplementation()!;
+    test.command.mockImplementation((file, args, env) =>
+      args[0] === "find-identity" ? "Wrong identity" : successful(file, args, env)
+    );
     expect(() => test.sign(environment, test.command, test.verify)).toThrow(
       "stage=identity-match; category=identity-mismatch"
     );
@@ -652,7 +880,7 @@ describe("fail-closed macOS production signing", () => {
     expect(processMock.exitCode).toBe(1);
     expect(JSON.stringify(stderr.mock.calls)).not.toContain("fake-secret");
     expect(stderr).toHaveBeenCalledWith(
-      `macOS production signing failed. Original failure: stage=keychain-create; category=${result.category}.\nCleanup failure: stage=cleanup-keychain; category=${result.category}. No acceptance recorded.\n`
+      `macOS production signing failed. Original failure: stage=keychain-search-list-query; category=${result.category}. No acceptance recorded.\n`
     );
   });
 
