@@ -685,6 +685,7 @@ Actual signing errors now use fixed native-marker categories at `dmg-sign` and
 | Condition reported by native tools                              | Safe category                                                                                                                  |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Identity missing or ambiguous                                   | `identity-not-found`, `identity-ambiguous`                                                                                     |
+| Unspecified missing Security/keychain item                      | `keychain-item-not-found`                                                                                                      |
 | Key authorization/interaction denied or private key unavailable | `private-key-access-denied`, `private-key-unavailable`                                                                         |
 | Invalid/missing keychain                                        | `keychain-unavailable`                                                                                                         |
 | Certificate chain/trust/validity failure                        | `certificate-trust-failure`                                                                                                    |
@@ -917,6 +918,90 @@ an ACL problem. No target path or subprocess output is retained, and a category
 alone cannot establish a specific nested target or exact root cause.
 All existing signing, cleanup, notarization, archive and native acceptance gates
 remain mandatory. This investigation dispatches no production run; #54 stays open.
+
+#### Identity lookup versus native signing (run 43606279210)
+
+[Run 43606279210](https://github.com/msoecsse/graider/actions/runs/43606279210)
+at `850010b8701a118a33d6bfb8177917ea16c40c82` passed the wrapper's explicit
+temporary-keychain identity/fingerprint/Team ID check, entered the application
+signing callback and rejected with the old `identity-not-found` category. That
+classifier also matched generic `errSecItemNotFound` / “specified item could not
+be found in the keychain” messages. Those messages do not identify the missing
+item and cannot establish certificate absence. Both application and DMG classifiers
+now report them as `keychain-item-not-found`; explicit “no identity found” remains
+distinct. Previously discarded native text cannot be reconstructed from the old
+category, so this fixes a demonstrated diagnostic ambiguity, not a proven native
+signing defect.
+
+Installed `app-builder-lib` **26.15.3** selects the identity before calling the
+custom signer: `MacPackager.sign` reads `CSC_KEYCHAIN`, `findSigningIdentity` uses
+the configured SHA-1 qualifier and both `security find-identity` queries receive
+that keychain. `buildSignOptions` passes the selected hash, keychain and
+`identityValidation: false` to `@electron/osx-sign` **1.3.3** through the installed
+retry helper. Therefore osx-sign bypasses its own discovery and “No identity found
+for signing” branch in this production path. Its nested-file and top-level bundle
+`codesign --sign` calls all carry that identity, `--keychain`, `--force`, mandatory
+timestamp, hardened runtime and configured entitlements. Its subsequent strict
+verification and entitlement-display commands do not sign or select an identity.
+Credential-free tests execute these installed implementations, distinguish a
+discovery rejection before any codesign call from a native signing rejection,
+and assert every signing call's options. No omitted keychain/fingerprint was found.
+
+Earlier [run 43550080038](https://github.com/msoecsse/graider/actions/runs/43550080038)
+at `fd2bfb329609092c6b88257d4f66ed7bbed8b223` reached outer DMG verification;
+[run 43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888)
+at `79cbf768dbe2e3ed799b96b0193ff411d80d9637` reached outer DMG signing. Their
+application signing, notarization/stapling and after-sign verification gates had
+resolved. Both used Node 24.22.2, as did the latest run. The locked dependencies,
+identity configuration and effective application-signing options are unchanged;
+later callback changes added observations/error classification. Historical logs
+do not establish identical credential material, native state or service
+availability. No search-list, trust, certificate or production signing-argument
+change is justified by this comparison.
+
+After the existing identity query/match and before starting builder, a mandatory
+preflight exclusively creates a copy of the running arm64 Node Mach-O executable
+inside the existing private signing directory. It signs that disposable file
+using the already imported certificate's SHA-1, the same temporary keychain,
+`--force`, `--timestamp`, runtime and production JIT entitlements. The unchanged
+runtime verifier requires strict integrity, the exact leaf certificate, expected
+Developer ID/Team ID, runtime and the single allowed entitlement; an additional
+native display inspection requires a secure `Timestamp`, rejecting local
+`Signed Time` or no timestamp. The source executable and packaged artifacts are
+never modified. The private copy is removed by the existing cleanup on success
+or failure. Ad hoc fixture signing must fail the real Developer ID verifier.
+
+Only fixed results are reported:
+
+| Operation                                               | Fixed stage/result                                                                           |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Identity query failed or certificate/team did not match | Existing `identity-query` command categories or `identity-match; category=identity-mismatch` |
+| Disposable executable could not be prepared             | `app-preflight-prepare; category=filesystem-failure`                                         |
+| Actual signing failed                                   | `app-preflight-sign` with existing command start/I/O, termination or exit-failure categories |
+| Signature/identity/runtime/entitlements failed          | `app-preflight-verification; category=verification-failure`                                  |
+| Timestamp inspection failed or secure timestamp missing | `app-preflight-timestamp` with command failure categories or `verification-failure`          |
+| All preflight gates passed                              | `stage=app-preflight-verification; category=passed`                                          |
+
+No native output, paths, certificate details or secrets are emitted. Any preflight
+failure stops before builder, notarization, archives or checksums; cleanup still
+runs independently. Success cannot bypass the subsequent production gates.
+The next separately owner-authorized run will establish whether lookup succeeds,
+whether that identity can actually sign a disposable executable with these
+options at that moment, and whether verification including timestamp succeeds.
+If preflight passes but the app signer rejects, the new fixed category separates
+the generic missing-item case from explicit identity-selection evidence. It will
+not identify a nested target, a specific missing item, or a transient native cause.
+Real Developer ID preflight success and production acceptance remain unproven;
+no production workflow is dispatched by this investigation. Keep #54 open.
+
+For subsequent #54 diagnostic slices, validate new/modified and directly affected
+signing/packaging tests locally, plus applicable hygiene, lint, formatting and
+typechecks; retain passed results when their inputs are unchanged. Do not run
+complete root/UI, unrelated migration or Windows suites locally. Commit and push
+after focused checks pass; report comprehensive exact-SHA CI status without
+waiting for it after each diagnostic commit. Comprehensive exact-SHA CI on all
+applicable platforms is required before release acceptance. Diagnostic commits
+are not release acceptance and do not authorize production signing dispatch.
 
 #### Temporary Windows CI pause during #54
 

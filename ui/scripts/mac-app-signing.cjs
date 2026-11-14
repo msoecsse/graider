@@ -7,9 +7,12 @@ const markers = Object.freeze([
     "timestamp-service-failure",
     /timestamp service is not available|timestamp service (?:failed|refused)|timestamp authority|invalid timestamp|timestamp was expected but was not found|timestamp.*(?:unavailable|could not|cannot|failed|failure|timed out)/i
   ],
+  ["identity-not-found", /no identity found/i],
+  // Security uses this for missing items during native operations too. It does
+  // not identify the missing item or contradict a successful identity query.
   [
-    "identity-not-found",
-    /no identity found|specified item could not be found in the keychain|errSecItemNotFound/i
+    "keychain-item-not-found",
+    /specified item could not be found in the keychain|errSecItemNotFound/i
   ],
   ["identity-ambiguous", /ambiguous \(matches|multiple identities/i],
   [

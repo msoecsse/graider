@@ -46,6 +46,8 @@ const wrapperSource = fs.readFileSync("scripts/package-mac-production.cjs", "utf
 
 function harness(platform = "darwin", arch = "arm64") {
   const writes = vi.fn();
+  const copies = vi.fn();
+  const reports = vi.fn();
   const removes = vi.fn();
   const permissions = vi.fn();
   const reads = vi.fn(() => Buffer.from("fake-archive"));
@@ -57,6 +59,7 @@ function harness(platform = "darwin", arch = "arm64") {
       return `1) ${fingerprint} "Developer ID Application: Fake Owner (${team})"\n`;
     if (args[0] === "notarytool") return JSON.stringify({ status: "Accepted" });
     if (args[0] === "imageinfo") return "UDZO\n";
+    if (args[0] === "--display") return "Timestamp=fixture timestamp\n";
     return "";
   });
   const module = {
@@ -70,6 +73,8 @@ function harness(platform = "darwin", arch = "arm64") {
     (name: string): unknown => {
       if (name === "node:fs")
         return {
+          constants: fs.constants,
+          copyFileSync: copies,
           mkdtempSync: directories,
           mkdirSync: vi.fn(),
           chmodSync: permissions,
@@ -93,11 +98,13 @@ function harness(platform = "darwin", arch = "arm64") {
     require: loader,
     module,
     __dirname: path.resolve("scripts"),
-    process: { platform, arch, execPath: "node", env: {} }
+    process: { platform, arch, execPath: "node", env: {}, stdout: { write: reports } }
   });
   return {
     ...module.exports,
     writes,
+    copies,
+    reports,
     removes,
     permissions,
     reads,
@@ -109,6 +116,91 @@ function harness(platform = "darwin", arch = "arm64") {
 }
 
 describe("fail-closed macOS production signing", () => {
+  it("proves actual signing on a disposable executable before starting builder", () => {
+    const test = harness();
+    test.sign(environment, test.command, test.verify);
+    const calls = test.command.mock.calls;
+    const lookup = calls.findIndex(([, args]) => args[0] === "find-identity");
+    const preflight = calls.findIndex(([, args]) => args.at(-1)?.endsWith("signing-preflight"));
+    const builder = calls.findIndex(([, args]) => args[0] === builderScript);
+    const [file, args, child] = calls[preflight];
+    const executable = args.at(-1)!;
+    expect(lookup).toBeLessThan(preflight);
+    expect(preflight).toBeLessThan(builder);
+    expect(file).toBe("/usr/bin/codesign");
+    expect(args).toEqual([
+      "--sign",
+      fingerprint,
+      "--force",
+      "--keychain",
+      child.CSC_KEYCHAIN,
+      "--timestamp",
+      "--options",
+      "runtime",
+      "--entitlements",
+      path.resolve("build/entitlements.mac-production.plist"),
+      executable
+    ]);
+    expect(child).toBe(calls[builder][2]);
+    expect(path.dirname(executable)).toBe(path.dirname(child.CSC_KEYCHAIN));
+    expect(test.copies).toHaveBeenCalledExactlyOnceWith(
+      "node",
+      executable,
+      fs.constants.COPYFILE_EXCL
+    );
+    expect(test.permissions).toHaveBeenCalledWith(executable, 0o700);
+    expect(test.verify.verifySignature).toHaveBeenNthCalledWith(1, executable, child, true);
+    expect(test.reports).toHaveBeenCalledExactlyOnceWith(
+      "stage=app-preflight-verification; category=passed\n"
+    );
+    expect(calls.some(([, args]) => ["list-keychains", "default-keychain"].includes(args[0]))).toBe(
+      false
+    );
+  });
+
+  it.each(["prepare", "sign", "verification", "timestamp", "timestamp-missing", "timestamp-none"])(
+    "fails closed with private cleanup when app preflight fails at %s",
+    (operation) => {
+      const test = harness();
+      const successful = test.command.getMockImplementation()!;
+      const privateFailure = () => {
+        throw new Error("private native output certificate credential /private/path");
+      };
+      if (operation === "prepare") test.copies.mockImplementation(privateFailure);
+      if (operation === "verification")
+        test.verify.verifySignature.mockImplementation(privateFailure);
+      test.command.mockImplementation((file, args, env) => {
+        if (args.at(-1)?.endsWith("signing-preflight")) {
+          if (operation === "sign" && args[0] === "--sign") privateFailure();
+          if (operation.startsWith("timestamp") && args[0] === "--display") {
+            if (operation === "timestamp") privateFailure();
+            return operation === "timestamp-none" ? "Timestamp=none\n" : "Signed Time=local time\n";
+          }
+        }
+        return successful(file, args, env);
+      });
+      const stage = operation.startsWith("timestamp") ? "timestamp" : operation;
+      const category =
+        operation === "prepare"
+          ? "filesystem-failure"
+          : operation === "sign"
+            ? "signing-failure"
+            : "verification-failure";
+      expect(() => test.sign(environment, test.command, test.verify)).toThrow(
+        `Original failure: stage=app-preflight-${stage}; category=${category}.`
+      );
+      expect(test.reports).not.toHaveBeenCalled();
+      expect(
+        test.command.mock.calls.some(
+          ([, args]) => args[0] === builderScript || args[0] === "notarytool"
+        )
+      ).toBe(false);
+      expect(test.writes.mock.calls.some(([file]) => file.endsWith(".sha256"))).toBe(false);
+      expect(test.command.mock.calls.at(-1)?.[1][0]).toBe("delete-keychain");
+      expect(test.removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it.each(Object.keys(environment).filter((name) => name.startsWith("GRAIDER_")))(
     "requires %s before commands or file writes",
     (name) => {
@@ -185,7 +277,9 @@ describe("fail-closed macOS production signing", () => {
       expect.stringMatching(/-signed\.dmg$/),
       child
     );
-    const dmgSignIndex = calls.findIndex((call) => call[1][0] === "--sign");
+    const dmgSignIndex = calls.findIndex(
+      (call) => call[1].at(-1)?.endsWith("-signed.dmg") && call[1][0] === "--sign"
+    );
     expect(calls[dmgSignIndex][1]).toEqual([
       "--sign",
       fingerprint,
@@ -223,7 +317,9 @@ describe("fail-closed macOS production signing", () => {
           throw new Error("private original signing failure");
         if (
           (outcome === "create" && args[0] === "create") ||
-          (outcome === "sign" && args[0] === "--sign")
+          (outcome === "sign" &&
+            args[0] === "--sign" &&
+            !args.at(-1)?.endsWith("signing-preflight"))
         )
           throw new Error("private preflight failure");
         return successful(file, args, env);
@@ -236,8 +332,8 @@ describe("fail-closed macOS production signing", () => {
             throw new Error("private path");
           });
       if (outcome === "verification")
-        test.verify.verifySignature.mockImplementation(() => {
-          throw new Error("private certificate");
+        test.verify.verifySignature.mockImplementation((file: string) => {
+          if (!file.endsWith("signing-preflight")) throw new Error("private certificate");
         });
       let message = "";
       try {
@@ -262,7 +358,9 @@ describe("fail-closed macOS production signing", () => {
                 : "category=command-failure."
         )
       ).toBe(true);
-      const signatures = test.command.mock.calls.filter((call) => call[1][0] === "--sign");
+      const signatures = test.command.mock.calls.filter(
+        (call) => call[1][0] === "--sign" && !call[1].at(-1)?.endsWith("signing-preflight")
+      );
       if (["passed", "sign", "verification"].includes(outcome)) {
         expect(signatures).toHaveLength(2);
         expect(signatures[0][1].slice(0, -1)).toEqual(signatures[1][1].slice(0, -1));
@@ -288,11 +386,13 @@ describe("fail-closed macOS production signing", () => {
         `stage=artifact-validation-${extension}; category=missing-artifact`
       );
       expect(
-        test.command.mock.calls.some((call) =>
-          ["imageinfo", "--sign", "notarytool"].includes(call[1][0])
+        test.command.mock.calls.some(
+          (call) =>
+            ["imageinfo", "--sign", "notarytool"].includes(call[1][0]) &&
+            !call[1].at(-1)?.endsWith("signing-preflight")
         )
       ).toBe(false);
-      expect(test.verify.verifySignature).not.toHaveBeenCalled();
+      expect(test.verify.verifySignature).toHaveBeenCalledTimes(1);
       expect(test.writes.mock.calls.some((call) => call[0].endsWith(".sha256"))).toBe(false);
       expect(test.removes).toHaveBeenCalledTimes(2);
     }
@@ -324,7 +424,11 @@ describe("fail-closed macOS production signing", () => {
       expect(() => test.sign(environment, test.command, test.verify)).toThrow(
         "stage=dmg-format-inspection; category=unexpected-dmg-format"
       );
-      expect(test.command.mock.calls.some((call) => call[1][0] === "--sign")).toBe(false);
+      expect(
+        test.command.mock.calls.some(
+          (call) => call[1][0] === "--sign" && !call[1].at(-1)?.endsWith("signing-preflight")
+        )
+      ).toBe(false);
       expect(test.removes).toHaveBeenCalledTimes(2);
     }
   );
@@ -404,6 +508,7 @@ describe("fail-closed macOS production signing", () => {
       arch: "arm64",
       execPath: "node",
       env: environment,
+      stdout: { write: vi.fn() },
       stderr: { write: stderr },
       exitCode: 0
     };
@@ -418,6 +523,8 @@ describe("fail-closed macOS production signing", () => {
         if (name === "./verify-macos-signatures.cjs") return {};
         if (name === "node:fs")
           return {
+            constants: fs.constants,
+            copyFileSync: vi.fn(),
             mkdtempSync: () => "fake-temp",
             chmodSync: vi.fn(),
             writeFileSync: vi.fn(),
@@ -462,7 +569,10 @@ describe("fail-closed macOS production signing", () => {
     const test = harness();
     const successful = test.command.getMockImplementation()!;
     test.command.mockImplementation((file, args, env) => {
-      if (args.some((arg) => arg === operation || path.basename(arg) === operation)) {
+      if (
+        args.some((arg) => arg === operation || path.basename(arg) === operation) &&
+        !args.at(-1)?.endsWith("signing-preflight")
+      ) {
         // Include every class of forbidden data, including a forged safe-looking error.
         const error = new Error(JSON.stringify({ file, args, env, privateKey }));
         Object.assign(error, { stage: "forged-stage", category: "forged-category" });
@@ -506,7 +616,9 @@ describe("fail-closed macOS production signing", () => {
     if (stage === "api-key-write")
       test.writes.mockImplementationOnce(() => {}).mockImplementationOnce(fail);
     if (stage === "dmg-signature-verification")
-      test.verify.verifySignature.mockImplementation(fail);
+      test.verify.verifySignature.mockImplementation((file: string) => {
+        if (!file.endsWith("signing-preflight")) fail();
+      });
     if (stage === "checksum-dmg") test.reads.mockImplementationOnce(fail);
     if (stage === "checksum-zip")
       test.reads.mockImplementationOnce(() => Buffer.from("archive")).mockImplementationOnce(fail);
@@ -606,12 +718,14 @@ describe("fail-closed macOS production signing", () => {
       arch: "arm64",
       execPath: "node",
       env: environment,
+      stdout: { write: vi.fn() },
       stderr: { write: stderr },
       exitCode: 0
     };
     const spawnSync = vi.fn((_file: string, args: string[]) => {
       if (args[0] === "find-identity")
         return { status: 0, stdout: `${fingerprint} "Developer ID Application: Fake (${team})"` };
+      if (args[0] === "--display") return { status: 0, stderr: "Timestamp=fixture timestamp\n" };
       if (args[0] === builderScript)
         return {
           status: 1,
@@ -627,11 +741,14 @@ describe("fail-closed macOS production signing", () => {
         if (name === "node:child_process") return { spawnSync };
         if (name === "node:fs")
           return {
+            constants: fs.constants,
+            copyFileSync: vi.fn(),
             mkdtempSync: () => "fake-temp",
             chmodSync: vi.fn(),
             writeFileSync: vi.fn(),
             rmSync: vi.fn()
           };
+        if (name === "./verify-macos-signatures.cjs") return { verifySignature: vi.fn() };
         if (name.startsWith("./")) return nodeRequire(`./scripts/${name.slice(2)}`);
         return nodeRequire(
           name === "./mac-production-artifacts.cjs"
@@ -791,9 +908,10 @@ describe("fail-closed macOS production signing", () => {
     });
     const verifier = module.exports;
     const test = harness();
-    test.verify.verifySignature.mockImplementation(() =>
-      verifier.verifyDmgSignature("private-path", environment)
-    );
+    test.verify.verifySignature.mockImplementation((file: string) => {
+      if (!file.endsWith("signing-preflight"))
+        verifier.verifyDmgSignature("private-path", environment);
+    });
     Object.assign(test.verify, { signatureCategory: verifier.signatureCategory });
     // The wrapper loads this exact verifier instance, whose WeakMap rejects forged errors.
     expect(() => test.sign(environment, test.command, test.verify)).toThrow(

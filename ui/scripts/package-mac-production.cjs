@@ -88,7 +88,50 @@ const run = (file, args, environment, stage) => {
   if (builder && result.output?.[BUILDER_DIAGNOSTIC_PIPE] !== completion) {
     throw builderFailure("missing-completion-evidence");
   }
-  return result.stdout;
+  return stage === "app-preflight-timestamp"
+    ? `${result.stdout ?? ""}\n${result.stderr ?? ""}`
+    : result.stdout;
+};
+// Sign only a disposable copy, never the running executable or packaged app.
+// No retry, ambient identity, keychain/search-list change, or timestamp fallback.
+const appPreflight = (executable, environment, command = run, verify = signatures) => {
+  step("app-preflight-prepare", "filesystem-failure", () => {
+    fs.copyFileSync(process.execPath, executable, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(executable, PRIVATE_DIRECTORY_MODE);
+  });
+  step("app-preflight-sign", "signing-failure", () =>
+    command(
+      "/usr/bin/codesign",
+      [
+        "--sign",
+        environment.GRAIDER_MAC_CERT_SHA1,
+        "--force",
+        "--keychain",
+        environment.CSC_KEYCHAIN,
+        "--timestamp",
+        "--options",
+        "runtime",
+        "--entitlements",
+        resolve(__dirname, "../build/entitlements.mac-production.plist"),
+        executable
+      ],
+      environment,
+      "app-preflight-sign"
+    )
+  );
+  step("app-preflight-verification", "verification-failure", () =>
+    verify.verifySignature(executable, environment, true)
+  );
+  const details = step("app-preflight-timestamp", "verification-failure", () =>
+    command(
+      "/usr/bin/codesign",
+      ["--display", "--verbose=4", executable],
+      environment,
+      "app-preflight-timestamp"
+    )
+  );
+  if (!/^Timestamp=.+$/m.test(details) || /^Timestamp=none\s*$/m.test(details))
+    throw failure("app-preflight-timestamp", "verification-failure");
 };
 const notarize = (artifact, environment, command = run) => {
   const output = step("dmg-notarization-submit", "command-failure", () =>
@@ -227,6 +270,8 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
     ) {
       throw failure("identity-match", "identity-mismatch");
     }
+    appPreflight(join(root, "signing-preflight"), child, command, verify);
+    process.stdout.write("stage=app-preflight-verification; category=passed\n");
     execute("builder-sign-notarize-archive", process.execPath, [
       join(__dirname, "mac-production-builder.cjs")
     ]);
@@ -350,7 +395,7 @@ const sign = (environment = process.env, command = run, verify = signatures) => 
     throw error;
   }
 };
-module.exports = { sign, notarize, diagnostic, run };
+module.exports = { sign, notarize, diagnostic, run, appPreflight };
 if (require.main === module) {
   try {
     sign();

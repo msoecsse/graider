@@ -12,7 +12,9 @@ const { classify, categories, isSigningDiagnostic } = nodeRequire("./scripts/mac
 const secret = "PRIVATE certificate /private/path credential argv";
 const examples = [
   ["timestamp-service-failure", "The timestamp service is not available."],
-  ["identity-not-found", "specified item could not be found in the keychain"],
+  ["identity-not-found", "No identity found for signing."],
+  ["keychain-item-not-found", "specified item could not be found in the keychain"],
+  ["keychain-item-not-found", "errSecItemNotFound"],
   ["identity-ambiguous", "ambiguous (matches multiple identities)"],
   ["private-key-access-denied", "User interaction is not allowed."],
   ["private-key-unavailable", "CSSMERR_CSP_INVALID_KEY"],
@@ -115,6 +117,59 @@ function installedSigner(signAsync?: (options: unknown) => Promise<void>) {
   return { sign: exports.sign, retry };
 }
 
+it("distinguishes installed identity selection rejection from a native signing item failure", async () => {
+  const file = nodeRequire.resolve("@electron/osx-sign/dist/cjs/sign");
+  const localRequire = createRequire(file);
+  const exports = {} as any;
+  const findIdentities = vi.fn(async () => []);
+  const execute = vi.fn(async () => {
+    throw Object.assign(new Error(secret + ": errSecItemNotFound"), { code: 1 });
+  });
+  runInNewContext(fs.readFileSync(file, "utf8"), {
+    exports,
+    __dirname: path.dirname(file),
+    require: (name: string) => {
+      if (name === "./util-identities") return { ...localRequire(name), findIdentities };
+      if (name === "./util")
+        return {
+          ...localRequire(name),
+          execFileAsync: execute,
+          validateOptsApp: async () => {},
+          walkAsync: async () => []
+        };
+      return localRequire(name);
+    }
+  });
+  const options = {
+    app: path.resolve("Fixture.app"),
+    identity: "A".repeat(40),
+    keychain: "fixture-keychain",
+    platform: "darwin",
+    type: "distribution",
+    preAutoEntitlements: false,
+    preEmbedProvisioningProfile: false,
+    optionsForFile: () => ({ hardenedRuntime: true, entitlements: "fixture.plist" })
+  };
+  await expect(exports.signApp(options).catch(classify)).resolves.toBe("identity-not-found");
+  expect(findIdentities).toHaveBeenCalledExactlyOnceWith(options.keychain, options.identity);
+  expect(execute).not.toHaveBeenCalled();
+  findIdentities.mockClear();
+  await expect(
+    exports.signApp({ ...options, identityValidation: false }).catch(classify)
+  ).resolves.toBe("keychain-item-not-found");
+  expect(findIdentities).not.toHaveBeenCalled();
+  expect(execute).toHaveBeenCalledExactlyOnceWith(
+    "codesign",
+    expect.arrayContaining([
+      "--sign",
+      options.identity,
+      "--keychain",
+      options.keychain,
+      "--timestamp"
+    ])
+  );
+});
+
 it("installed osx-sign passes fingerprint, keychain, entitlements, runtime and secure timestamp to nested signing commands", async () => {
   const file = nodeRequire.resolve("@electron/osx-sign/dist/cjs/sign");
   const localRequire = createRequire(file);
@@ -154,6 +209,7 @@ it("installed osx-sign passes fingerprint, keychain, entitlements, runtime and s
     optionsForFile: () => ({ hardenedRuntime: true, entitlements: "fixture.plist" })
   });
   const signingCalls = execute.mock.calls.filter(([, args]) => args.includes("--sign"));
+  expect(execute.mock.calls.some(([command]) => command === "security")).toBe(false);
   expect(signingCalls).toHaveLength(3);
   expect(signingCalls.map(([, args]) => args.at(-1))).toEqual([...targets, app]);
   for (const [command, args] of signingCalls) {
@@ -237,6 +293,52 @@ it("installed builder callback accepts the fingerprint and retains retry, keycha
 
 // Native codesign is available only on macOS. No real identity or private key;
 // the installed helper and osx-sign execute real native signing on private copies.
+it.runIf(process.platform === "darwin")(
+  "the real preflight signs a private Mach-O copy and rejects an ad hoc identity",
+  () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "graider executable preflight "));
+    const executable = path.join(root, "preflight");
+    const original = fs.readFileSync(process.execPath);
+    const wrapper = nodeRequire("./scripts/package-mac-production.cjs");
+    const environment = {
+      GRAIDER_MAC_CERT_SHA1: "A".repeat(40),
+      GRAIDER_APPLE_TEAM_ID: "FAKETEAM00",
+      CSC_KEYCHAIN: "unused-fixture-keychain"
+    };
+    // Only the fixture command uses ad hoc/untimestamped signing. The production
+    // verifier is unchanged and must reject it, even after strict integrity passes.
+    const command = (file: string, args: string[], env: Record<string, string>, stage: string) => {
+      const nativeArgs =
+        stage === "app-preflight-sign"
+          ? [
+              "--sign",
+              "-",
+              "--force",
+              "--timestamp=none",
+              "--options",
+              "runtime",
+              "--entitlements",
+              path.resolve("build/entitlements.mac-production.plist"),
+              executable
+            ]
+          : args;
+      return wrapper.run(file, nativeArgs, env, stage);
+    };
+    try {
+      fs.chmodSync(root, 0o700);
+      expect(() => wrapper.appPreflight(executable, environment, command)).toThrow(
+        "stage=app-preflight-verification; category=verification-failure"
+      );
+      const verified = spawnSync("/usr/bin/codesign", ["--verify", "--strict", executable]);
+      expect(verified.error === undefined && verified.status === 0).toBe(true);
+      expect(fs.readFileSync(process.execPath).equals(original)).toBe(true);
+      expect(fs.readFileSync(executable).equals(original)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
 it.runIf(process.platform === "darwin")(
   "reproduces native installed-signer failures without credentials",
   async () => {

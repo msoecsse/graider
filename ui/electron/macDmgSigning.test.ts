@@ -16,7 +16,8 @@ describe("native DMG signing diagnosis", () => {
     ["The timestamp service is not available.", "timestamp-service-failure"],
     ["A timestamp was expected but was not found.", "timestamp-service-failure"],
     ["no identity found", "identity-not-found"],
-    ["The specified item could not be found in the keychain.", "identity-not-found"],
+    ["The specified item could not be found in the keychain.", "keychain-item-not-found"],
+    ["errSecItemNotFound", "keychain-item-not-found"],
     ["ambiguous (matches multiple certificates)", "identity-ambiguous"],
     ["User interaction is not allowed.", "private-key-access-denied"],
     ["errSecAuthFailed", "private-key-access-denied"],
@@ -157,7 +158,9 @@ describe("native DMG signing diagnosis", () => {
           image
         ]);
         expect(identity.status !== 0).toBe(true);
-        expect(["identity-not-found", "keychain-unavailable"]).toContain(signingCategory(identity));
+        expect(["identity-not-found", "keychain-item-not-found", "keychain-unavailable"]).toContain(
+          signingCategory(identity)
+        );
         expect(signingArguments(image, "fixture-fingerprint", "fixture-keychain")).toEqual([
           "--sign",
           "fixture-fingerprint",
