@@ -382,8 +382,7 @@ it.runIf(process.platform === "darwin")(
             hardenedRuntime: true,
             entitlements: path.join(root, "missing.plist")
           })
-        },
-        { ...base, identity: "F".repeat(40), keychain: path.join(root, "missing.keychain-db") }
+        }
       ]) {
         try {
           await signer.sign(options);
@@ -396,9 +395,18 @@ it.runIf(process.platform === "darwin")(
         "resolved",
         "signing-target-missing",
         "signing-target-missing",
-        "entitlements-failure",
-        "keychain-item-not-found"
+        "entitlements-failure"
       ]);
+      // Native macOS diagnostics vary when both the identity and keychain are unavailable.
+      await expect(
+        signer.sign({
+          ...base,
+          identity: "F".repeat(40),
+          keychain: path.join(root, "missing.keychain-db")
+        })
+      ).rejects.toSatisfy((error: unknown) =>
+        ["identity-not-found", "keychain-item-not-found"].includes(classify(error))
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
