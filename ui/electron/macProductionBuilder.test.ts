@@ -63,6 +63,56 @@ function harness() {
 }
 
 describe("safe diagnostics inside the production builder", () => {
+  it.each(["signed", "disallowed", "missing-identity", "disabled"])(
+    "installed DMG signer behavior: %s",
+    async (scenario) => {
+      nodeRequire("electron-builder");
+      const file = nodeRequire.resolve("dmg-builder/out/dmg");
+      const localRequire = createRequire(file);
+      const exec = vi.fn(async () => "");
+      const findIdentity = vi.fn(async () =>
+        scenario === "missing-identity" ? null : { hash: fingerprint }
+      );
+      const exports = {} as any;
+      runInNewContext(fs.readFileSync(file, "utf8"), {
+        exports,
+        require: (dependency: string) => {
+          if (dependency === "app-builder-lib/out/codeSign/macCodeSign")
+            return { isSignAllowed: () => scenario !== "disallowed", findIdentity };
+          if (dependency === "builder-util") return { ...localRequire(dependency), exec };
+          return localRequire(dependency);
+        }
+      });
+      const target = new exports.DmgTarget(
+        {
+          config: { dmg: { sign: true } },
+          platformSpecificBuildOptions: {
+            identity: scenario === "disabled" ? null : fingerprint
+          },
+          codeSigningInfo: { value: Promise.resolve({ keychainFile: "fake-keychain" }) }
+        },
+        "output"
+      );
+      await target.signDmg("signed.dmg");
+      if (scenario === "signed") {
+        expect(findIdentity).toHaveBeenCalledWith(
+          "Developer ID Application",
+          fingerprint,
+          "fake-keychain"
+        );
+        expect(exec).toHaveBeenCalledWith("codesign", [
+          "--sign",
+          fingerprint,
+          "--keychain",
+          "fake-keychain",
+          "signed.dmg"
+        ]);
+      } else {
+        expect(exec).not.toHaveBeenCalled();
+      }
+    }
+  );
+
   it("installed builder supplies runtime and configured entitlements to nested native code", async () => {
     nodeRequire("electron-builder");
     const { MacTargetHelper } = nodeRequire("app-builder-lib/out/mac/MacTargetHelper");

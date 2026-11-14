@@ -17,7 +17,8 @@ const verifySignature = (file, environment, runtime = false) => {
     "--verify",
     "--strict",
     "-R",
-    `certificate leaf = H"${expected.fingerprint}"`,
+    // Without '=', codesign treats this argument as a requirement FILE path.
+    `=certificate leaf = H"${expected.fingerprint}"`,
     file
   ]);
   const details = run("/usr/bin/codesign", ["--display", "--verbose=4", file]);

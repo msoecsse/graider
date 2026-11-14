@@ -563,6 +563,50 @@ by the current verifier was established. Preserve the checks until a concrete
 failure is demonstrated. Regression tests execute the installed lifecycle with
 external operations stubbed and test safe builder failure propagation.
 
+The third attempt, [run 43532058480](https://github.com/msoecsse/graider/actions/runs/43532058480)
+at `2976b47`, completed builder but failed the independent DMG signature gate.
+Inspection of installed `dmg-builder` **26.15.3**, `DmgTarget.build` and `signDmg`,
+confirms `dmg.sign: true` awaits `codesign --sign <hash> --keychain <keychain> <dmg>`.
+It can silently skip signing when signing is disallowed, identity is explicitly
+disabled, or neither Developer ID Application nor fallback Mac Developer identity
+is found. Builder completion alone therefore does not prove a signed DMG.
+
+A deterministic verifier defect was reproduced without credentials: the `-R`
+argument lacked the leading `=` that marks an inline requirement. macOS instead
+interprets the certificate expression as a filename and reports an invalid
+requirement specification. The fix supplies `=certificate leaf = H"<sha1>"` for
+DMG, app and nested signatures. See Apple's [TN3127 requirement examples](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+and the installed `codesign(1)` section **SPECIFYING REQUIREMENTS**. Tests assert
+the exact argv on all platforms and compile that actual argument with Apple's
+`csreq` on native macOS CI; no real certificate or keychain is needed.
+
+Apple [supports Developer ID Application signing of disk images](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
+Strict signature verification and an exact leaf certificate constraint apply to
+disk images. The existing Developer ID authority and TeamIdentifier checks remain;
+no evidence establishes a DMG-specific false rejection by those display checks.
+The archived run discarded the underlying error, so the command defect is proven,
+but it cannot establish the artifact's actual signing state or the sole run cause:
+
+- A missing signature must be established by native signature inspection, not
+  builder completion or this failed requirement invocation.
+- An invalid signature must be established by integrity verification using
+  `codesign --verify --strict <dmg>` independently of the identity requirement.
+- A wrong certificate is distinguished by applying the corrected `-R` constraint
+  after integrity succeeds; a wrong Team ID or authority by inspecting the signed
+  identity. Apple's [certificate requirement documentation](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/RequirementLang/RequirementLang.html)
+  identifies certificate `subject.OU` as the developer Team ID.
+- A verifier invocation/parsing failure can reject otherwise valid signatures;
+  the reproduced missing `=` is such a defect. This is not permission to accept
+  an unverified artifact or relax strictness or identity checks.
+
+The next owner-authorized signing run must pass the corrected gate, DMG
+notarization/stapling and both archive installation proofs. If the same outer gate
+still fails, its generic category alone cannot distinguish integrity, identity or
+display parsing; independently collect those native pass/fail results using fixed
+identifiers without disclosing command output, certificate details or credentials.
+No production signing workflow was dispatched for this investigation. Native
+downloaded/quarantined DMG and ZIP acceptance remains mandatory before closing #54.
+
 Outputs live only under `ui/release/macos-production/`:
 
 ```text

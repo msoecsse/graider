@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -531,8 +532,32 @@ describe("fail-closed macOS production signing", () => {
     const valid = load(details, entitlements);
     valid.verifySignature("app", environment, true);
     valid.verifyStaple("app");
-    expect(valid.spawnSync.mock.calls[0][1]).toContain(`certificate leaf = H"${fingerprint}"`);
+    const requirement = valid.spawnSync.mock.calls[0][1][3];
+    expect(valid.spawnSync.mock.calls[0][1]).toEqual([
+      "--verify",
+      "--strict",
+      "-R",
+      `=certificate leaf = H"${fingerprint}"`,
+      "app"
+    ]);
+    // Only macOS provides Apple's requirement compiler. All platforms assert
+    // the exact argv above; native macOS CI also checks actual tool semantics.
+    if (process.platform === "darwin") {
+      const compiled = spawnSync("/usr/bin/csreq", ["-r", requirement, "-t"], {
+        encoding: "utf8",
+        shell: false
+      });
+      expect(compiled.error).toBeUndefined();
+      expect(compiled.status).toBe(0);
+      expect(compiled.stdout.trim()).toBe(`certificate leaf = H"${fingerprint.toLowerCase()}"`);
+    }
     expect(valid.spawnSync.mock.calls.at(-1)?.[1]).toEqual(["stapler", "validate", "app"]);
+    const diskImage = load(details, entitlements);
+    diskImage.verifySignature("signed.dmg", environment, false);
+    expect(diskImage.spawnSync.mock.calls.map((call) => call[1])).toEqual([
+      ["--verify", "--strict", "-R", requirement, "signed.dmg"],
+      ["--display", "--verbose=4", "signed.dmg"]
+    ]);
     for (const invalid of [
       details
         .replace(team, "WRONGTEAM0")
@@ -542,6 +567,16 @@ describe("fail-closed macOS production signing", () => {
     ]) {
       expect(() => load(invalid, entitlements).verifySignature("app", environment, true)).toThrow();
     }
+    for (const invalid of [
+      details.replace(`TeamIdentifier=${team}`, "TeamIdentifier=WRONGTEAM0"),
+      details.replace("Developer ID Application:", "Apple Development:")
+    ])
+      expect(() =>
+        load(invalid, entitlements).verifySignature("signed.dmg", environment, false)
+      ).toThrow();
+    expect(() =>
+      load(details, entitlements, "--verify").verifySignature("signed.dmg", environment, false)
+    ).toThrow("verification failed");
     expect(() =>
       load(details, {
         ...entitlements,
