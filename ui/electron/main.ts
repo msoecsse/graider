@@ -458,15 +458,11 @@ const isTemplateManagedWorkflowReplacementRequest = (
 export const registerIpcHandlers = (): void => {
   const approvedCourseSetupRoots = new Set<string>();
   const processRunner = createNodeProcessRunner({
-    graiderCli: app.isPackaged
-      ? {
-          mode: "bundled",
-          appPath: app.getAppPath(),
-          execPath: process.execPath
-        }
-      : {
-          mode: "external"
-        }
+    graiderCli: {
+      mode: app.isPackaged ? "bundled" : "external",
+      appPath: app.getAppPath(),
+      execPath: process.execPath
+    }
   });
   const isRegisteredAssignmentSetupCourse = (request: AssignmentSetupTermsRequest): boolean =>
     listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).some(

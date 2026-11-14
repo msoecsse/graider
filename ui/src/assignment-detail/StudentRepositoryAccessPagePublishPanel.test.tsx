@@ -19,6 +19,7 @@ const createResult = (
     isGitRepository: true,
     currentBranch: "main",
     hasUncommittedAccessPage: true,
+    changedCloneScriptCount: 0,
     hasUncommittedOtherChanges: false,
     upstreamBranch: "origin/main",
     aheadCount: 0,
@@ -50,11 +51,32 @@ describe("StudentRepositoryAccessPagePublishPanel", () => {
 
     const review = screen.getByRole("region", { name: "Publish Student Access Page review" });
     expect(within(review).getByText("/Users/sean/dev/csc1120pages")).toBeInTheDocument();
+    expect(within(review).queryByText("Clone scripts")).not.toBeInTheDocument();
 
     fireEvent.click(
       within(review).getByRole("button", { name: "Confirm Publish Student Access Page" })
     );
     expect(onPublish).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows how many clone scripts changed in the review", () => {
+    const baseResult = createResult();
+    render(
+      <StudentRepositoryAccessPagePublishPanel
+        result={createResult({ checks: { ...baseResult.checks, changedCloneScriptCount: 2 } })}
+        copyFeedback={null}
+        onCopy={vi.fn()}
+        onPublish={vi.fn()}
+        isPublishing={false}
+        publishResult={null}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Student Access Page" }));
+
+    const review = screen.getByRole("region", { name: "Publish Student Access Page review" });
+    expect(within(review).getByText("Clone scripts")).toBeInTheDocument();
+    expect(within(review).getByText("2 changed")).toBeInTheDocument();
   });
 
   it("shows the publish result and copyable suggested commands", () => {

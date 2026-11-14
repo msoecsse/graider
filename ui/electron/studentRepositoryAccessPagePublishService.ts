@@ -11,6 +11,7 @@ import type {
   StudentRepositoryAccessPageRequest
 } from "./ipc.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
+import { getStudentRepositoryAccessPageCloneScriptPattern } from "./studentRepositoryAccessPageService.js";
 
 const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
@@ -23,15 +24,15 @@ const isContainedPath = (root: string, target: string): boolean => {
 const runGit = async (
   repositoryFolderPath: string,
   arguments_: readonly string[]
-): Promise<{ readonly ok: boolean; readonly stderr: string }> => {
+): Promise<{ readonly ok: boolean; readonly stdout: string; readonly stderr: string }> => {
   try {
-    await execFileAsync("git", arguments_, {
+    const result = await execFileAsync("git", arguments_, {
       cwd: repositoryFolderPath,
       shell: false,
       windowsHide: true,
       maxBuffer: 1024 * 1024
     });
-    return { ok: true, stderr: "" };
+    return { ok: true, stdout: result.stdout.trim(), stderr: "" };
   } catch (error) {
     const stderr =
       error instanceof Error && "stderr" in error && typeof error.stderr === "string"
@@ -39,7 +40,7 @@ const runGit = async (
         : error instanceof Error
           ? error.message
           : "";
-    return { ok: false, stderr };
+    return { ok: false, stdout: "", stderr };
   }
 };
 
@@ -122,7 +123,22 @@ export const publishStudentRepositoryAccessPage = async (
         .ok
     )
       return failure("This Pages repository branch does not have an upstream branch configured.");
-    if (!(await runGit(repositoryRoot, ["add", "--", readiness.outputPath])).ok)
+    const cloneScriptPattern = getStudentRepositoryAccessPageCloneScriptPattern(
+      readiness.outputPath
+    );
+    const cloneScripts = await runGit(repositoryRoot, [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "--",
+      cloneScriptPattern
+    ]);
+    const publishPaths = [
+      readiness.outputPath,
+      ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern])
+    ];
+    if (!(await runGit(repositoryRoot, ["add", "--", ...publishPaths])).ok)
       return failure("Unable to stage the generated student access page.");
     if (!(await runGit(repositoryRoot, ["commit", "-m", commitMessage])).ok)
       return failure("Unable to commit the generated student access page.");
