@@ -827,7 +827,7 @@ Credential-free local probes with installed electron-builder **26.15.3** complet
 real app packaging, DMG and ZIP creation, including the default Electron download
 and extraction path. `builder.build()` resolved in those probes. A permanent
 native macOS integration test runs the actual worker against an isolated unsigned
-fixture and installed Electron distribution, observing both real artifact hooks,
+fixture through builder's default Electron download/extraction path, observing both real artifact hooks,
 the resolved promise and exact FD3 success. It performs no signing/notarization
 and uses no credentials. The subprocess regression also covers rejection,
 explicit exit, uncaught exception, missing/empty artifacts, closed pipes,

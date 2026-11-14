@@ -264,7 +264,6 @@ it.runIf(process.platform === "darwin" && process.arch === "arm64")(
         module.exports = {
           appId: 'test.graider.lifecycle', productName: 'Graider', publish: null,
           electronVersion: require(${JSON.stringify(nodeRequire.resolve("electron/package.json"))}).version,
-          electronDist: ${JSON.stringify(path.join(path.dirname(nodeRequire.resolve("electron/package.json")), "dist"))},
           npmRebuild: false, files: ['index.js', 'package.json'],
           directories: { output: 'release/macos-production' },
           mac: { identity: null, artifactName: ${JSON.stringify("Graider-${version}-mac-${arch}-signed.${ext}")} },
