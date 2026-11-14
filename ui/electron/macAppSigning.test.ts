@@ -397,7 +397,7 @@ it.runIf(process.platform === "darwin")(
         "signing-target-missing",
         "signing-target-missing",
         "entitlements-failure",
-        "identity-not-found"
+        "keychain-item-not-found"
       ]);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
