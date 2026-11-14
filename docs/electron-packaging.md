@@ -973,14 +973,14 @@ or failure. Ad hoc fixture signing must fail the real Developer ID verifier.
 
 Only fixed results are reported:
 
-| Operation                                               | Fixed stage/result                                                                           |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Identity query failed or certificate/team did not match | Existing `identity-query` command categories or `identity-match; category=identity-mismatch` |
-| Disposable executable could not be prepared             | `app-preflight-prepare; category=filesystem-failure`                                         |
-| Actual signing failed                                   | `app-preflight-sign` with existing command start/I/O, termination or exit-failure categories |
-| Signature/identity/runtime/entitlements failed          | `app-preflight-verification; category=verification-failure`                                  |
-| Timestamp inspection failed or secure timestamp missing | `app-preflight-timestamp` with command failure categories or `verification-failure`          |
-| All preflight gates passed                              | `stage=app-preflight-verification; category=passed`                                          |
+| Operation                                               | Fixed stage/result                                                                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Identity query failed or certificate/team did not match | Existing `identity-query` command categories or `identity-match; category=identity-mismatch`                       |
+| Disposable executable could not be prepared             | `app-preflight-prepare; category=filesystem-failure`                                                               |
+| Actual signing failed                                   | `app-preflight-sign` with application-signing native categories; command start/I/O or termination takes precedence |
+| Signature/identity/runtime/entitlements failed          | `app-preflight-verification; category=verification-failure`                                                        |
+| Timestamp inspection failed or secure timestamp missing | `app-preflight-timestamp` with command failure categories or `verification-failure`                                |
+| All preflight gates passed                              | `stage=app-preflight-verification; category=passed`                                                                |
 
 No native output, paths, certificate details or secrets are emitted. Any preflight
 failure stops before builder, notarization, archives or checksums; cleanup still
@@ -993,6 +993,41 @@ the generic missing-item case from explicit identity-selection evidence. It will
 not identify a nested target, a specific missing item, or a transient native cause.
 Real Developer ID preflight success and production acceptance remain unproven;
 no production workflow is dispatched by this investigation. Keep #54 open.
+
+#### Disposable application-signing diagnostics (run 43609769054)
+
+[Run 43609769054](https://github.com/msoecsse/graider/actions/runs/43609769054)
+at `52bde19f7342b029e6f75f9c86407535a689778c` failed at
+`app-preflight-sign; category=command-exit-failure`. The wrapper bypassed the
+existing application-signing classifier at that stage and discarded native
+stderr. The historical native cause cannot be recovered from this category.
+
+Nonzero preflight signing exits now reuse `mac-app-signing.cjs`: only stderr and
+exit status are inspected inside the trusted wrapper. The existing fixed
+allowlist distinguishes missing keychain items, explicit identity-selection
+failure, private-key access, timestamp service, certificate trust and other
+recognized native markers. An unrecognized nonzero exit retains
+`signing-command-exit-failure`; missing exit evidence retains
+`unknown-signing-rejection`. Command start/I/O and termination keep their existing
+categories and take precedence. Raw output, native Error objects, arguments,
+paths, certificate details and credentials are never included in diagnostics.
+
+Comparison with installed `@electron/osx-sign` **1.3.3** confirms the same signing
+arguments: fingerprint, `--force`, explicit temporary `--keychain`, `--timestamp`,
+`--options runtime` and the production entitlements plist. No demonstrated
+argument incompatibility was found; signing behavior is unchanged. A disposable
+Node executable does not exercise the application's nested targets, traversal,
+installed signer retries or later notarization/archive gates.
+
+The next separately authorized diagnostic run can establish a recognized native
+failure family for this preflight, or an explicit unknown/command-exit result.
+If all preflight gates pass, it establishes that this identity signed and verified
+that disposable executable with the required runtime, entitlements and secure
+timestamp at that moment. A category alone does not identify a specific missing
+item, prove an ACL defect, locate a failing app target or establish the underlying
+root cause. It cannot establish signed/notarized production archive acceptance.
+No certificate, keychain search list, identity or notarization changes are made;
+#54 remains open and this correction dispatches no production signing.
 
 For subsequent #54 diagnostic slices, validate new/modified and directly affected
 signing/packaging tests locally, plus applicable hygiene, lint, formatting and

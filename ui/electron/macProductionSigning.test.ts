@@ -85,6 +85,7 @@ function harness(platform = "darwin", arch = "arm64") {
         };
       if (name === "./macos-signing-config.cjs") return helpers;
       if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
+      if (name === "./mac-app-signing.cjs") return nodeRequire("./scripts/mac-app-signing.cjs");
       if (name === "./mac-production-builder.cjs")
         return nodeRequire("./scripts/mac-production-builder.cjs");
       if (name === "./verify-macos-signatures.cjs") return verify;
@@ -497,6 +498,109 @@ describe("fail-closed macOS production signing", () => {
     }
   );
 
+  it.each<[string, string, Record<string, unknown>?]>([
+    ["The specified item could not be found in the keychain.", "keychain-item-not-found"],
+    ["errSecItemNotFound", "keychain-item-not-found"],
+    ["No identity found for signing.", "identity-not-found"],
+    ["User interaction is not allowed.", "private-key-access-denied"],
+    ["errSecAuthFailed", "private-key-access-denied"],
+    ["no private key", "private-key-unavailable"],
+    ["The timestamp service is not available.", "timestamp-service-failure"],
+    ["CSSMERR_TP_CERT_EXPIRED", "certificate-trust-failure"],
+    ["unable to build chain to self-signed root", "certificate-trust-failure"],
+    ["errSecInternalComponent", "native-security-internal-error"],
+    ["unrecognized native failure", "signing-command-exit-failure"],
+    ["missing exit status", "unknown-signing-rejection", { status: null }],
+    [
+      "errSecItemNotFound",
+      "command-start-or-io-failure",
+      { error: new Error("private native Error") }
+    ],
+    ["errSecItemNotFound", "command-terminated", { signal: "SIGTERM" }],
+    ["unknown stderr", "signing-command-exit-failure", { stdout: "errSecItemNotFound" }],
+    [
+      "malformed stderr",
+      "signing-command-exit-failure",
+      { stderr: { message: "errSecItemNotFound" } }
+    ]
+  ])(
+    "classifies preflight native stderr privately at the entry point: %s",
+    (marker, category, overrides) => {
+      const secret = "fake credential certificate /private/path command argv";
+      const stderr = vi.fn();
+      const stdout = vi.fn();
+      const removes = vi.fn();
+      const processMock = {
+        platform: "darwin",
+        arch: "arm64",
+        execPath: secret,
+        env: environment,
+        stdout: { write: stdout },
+        stderr: { write: stderr },
+        exitCode: 0
+      };
+      const spawn = vi.fn((_file: string, args: string[]) => {
+        if (args[0] === "find-identity")
+          return { status: 0, stdout: `${fingerprint} "Developer ID Application: Fake (${team})"` };
+        if (args[0] === "--sign")
+          return {
+            status: 1,
+            stderr: `${secret}\n${marker}\n${secret}`,
+            stdout: secret,
+            ...overrides
+          };
+        return { status: 0, stdout: "" };
+      });
+      const module = { exports: {} };
+      const loader = Object.assign(
+        (name: string): unknown => {
+          if (name === "node:child_process") return { spawnSync: spawn };
+          if (name === "node:fs")
+            return {
+              constants: fs.constants,
+              copyFileSync: vi.fn(),
+              mkdtempSync: () => secret,
+              chmodSync: vi.fn(),
+              writeFileSync: vi.fn(),
+              rmSync: removes
+            };
+          if (name === "./verify-macos-signatures.cjs") return { verifySignature: vi.fn() };
+          return name.startsWith("./")
+            ? nodeRequire(`./scripts/${name.slice(2)}`)
+            : nodeRequire(name);
+        },
+        { main: module, resolve: () => builderScript }
+      );
+      runInNewContext(wrapperSource, {
+        require: loader,
+        module,
+        process: processMock,
+        __dirname: path.resolve("scripts")
+      });
+      expect(processMock.exitCode).toBe(1);
+      expect(stderr).toHaveBeenCalledExactlyOnceWith(
+        `macOS production signing failed. Original failure: stage=app-preflight-sign; category=${category}. No acceptance recorded.\n`
+      );
+      expect(stdout).not.toHaveBeenCalled();
+      const output = JSON.stringify(stderr.mock.calls);
+      for (const sensitive of [
+        secret,
+        marker,
+        "private native Error",
+        fingerprint,
+        team,
+        ...Object.values(environment)
+      ]) {
+        expect(output).not.toContain(sensitive);
+      }
+      expect(
+        spawn.mock.calls.some(([, args]) => args[0] === builderScript || args[0] === "notarytool")
+      ).toBe(false);
+      expect(spawn.mock.calls.at(-1)?.[1][0]).toBe("delete-keychain");
+      expect(removes).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it.each([
     { status: 1, stderr: "fake-secret", stdout: "fake-secret", category: "command-exit-failure" },
     { status: null, error: new Error("fake-secret"), category: "command-start-or-io-failure" },
@@ -518,6 +622,7 @@ describe("fail-closed macOS production signing", () => {
         if (name === "node:child_process") return { spawnSync: () => result };
         if (name === "./macos-signing-config.cjs") return helpers;
         if (name === "./mac-dmg-signing.cjs") return nodeRequire("./scripts/mac-dmg-signing.cjs");
+        if (name === "./mac-app-signing.cjs") return nodeRequire("./scripts/mac-app-signing.cjs");
         if (name === "./mac-production-builder.cjs")
           return nodeRequire("./scripts/mac-production-builder.cjs");
         if (name === "./verify-macos-signatures.cjs") return {};

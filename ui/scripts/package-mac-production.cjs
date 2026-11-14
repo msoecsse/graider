@@ -9,6 +9,7 @@ const { inputs } = require("./macos-signing-config.cjs");
 const signatures = require("./verify-macos-signatures.cjs");
 const { isDiagnostic, isLifecycle, completion } = require("./mac-production-builder.cjs");
 const { signingCategory, signingArguments } = require("./mac-dmg-signing.cjs");
+const { classify: appSigningCategory } = require("./mac-app-signing.cjs");
 const { expectedArtifacts, fileCategory } = require("./mac-production-artifacts.cjs");
 
 const MAX_COMMAND_OUTPUT = 64 * 1024 * 1024;
@@ -77,6 +78,11 @@ const run = (file, args, environment, stage) => {
     throw builder ? builderFailure("command-terminated") : failure(stage, "command-terminated");
   if (result.status !== 0) {
     if (dmgSigning) throw failure(stage, signingCategory(result));
+    if (stage === "app-preflight-sign") {
+      // Reuse the installed app signer's allowlist. Only native stderr and exit
+      // status are inspected here; never pass through output or native errors.
+      throw failure(stage, appSigningCategory({ code: result.status, stderr: result.stderr }));
+    }
     if (stage === "dmg-format-inspection") {
       // The artifact already passed filesystem validation. Native output alone
       // cannot establish that the image itself is missing.
