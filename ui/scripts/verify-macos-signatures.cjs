@@ -1,7 +1,7 @@
 /* global Buffer, process */
 "use strict";
 const fs = require("node:fs");
-const { join } = require("node:path");
+const { join, relative, sep } = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { identity } = require("./macos-signing-config.cjs");
 
@@ -23,14 +23,18 @@ const appVerificationCategories = Object.freeze([
   "main-signature-failure",
   "main-identity-failure",
   "main-runtime-failure",
-  "main-entitlements-failure",
   "deep-signature-failure",
   "native-inventory-failure",
   "dugite-payload-missing",
   "native-signature-failure",
   "native-identity-failure",
   "native-runtime-failure",
-  "native-entitlements-failure",
+  "native-kind-failure",
+  ...["main", "native"].flatMap((component) =>
+    ["missing", "malformed", "unexpected", "command"].map(
+      (reason) => `${component}-entitlements-${reason}-failure`
+    )
+  ),
   "stapled-ticket-failure"
 ]);
 const appVerificationFailures = new WeakMap();
@@ -91,7 +95,8 @@ const verifyRuntimeSignature = (
   file,
   environment,
   runtime = true,
-  check = (_gate, operation) => operation()
+  check = (_gate, operation) => operation(),
+  requiresJit = () => true
 ) => {
   const expected = identity(environment);
   check("signature", () =>
@@ -119,24 +124,87 @@ const verifyRuntimeSignature = (
       if (!/flags=.*\bruntime\b/.test(details))
         throw new Error("Hardened runtime verification failed.");
     });
-    check("entitlements", () => {
-      const signedEntitlements = run("/usr/bin/codesign", [
-        "--display",
-        "--entitlements",
-        ":-",
-        file
-      ]);
-      const xml = signedEntitlements.match(/<\?xml[\s\S]*?<\/plist>/)?.[0];
-      if (!xml) throw new Error("Missing hardened runtime entitlements.");
-      const entitlements = JSON.parse(
-        run("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", "-"], { input: xml })
-      );
+    verifyEntitlements(file, requiresJit(), check);
+  }
+};
+// Apple's Hardened Runtime contract assigns entitlements to processes, not
+// libraries/frameworks loaded into them. Classify actual Mach-O content, never
+// infer a library from its filename. Unknown formats fail closed.
+const nativeRequiresJit = (file, app) => {
+  const format = run("/usr/bin/file", ["--brief", "--", file], {
+    env: { ...process.env, LC_ALL: "C", LANG: "C" }
+  });
+  const descriptions = format
+    .split("Mach-O ")
+    .slice(1)
+    .filter((description) => !description.startsWith("universal binary"));
+  const kinds = descriptions.map(
+    (description) =>
+      /^(?:64-bit )?(executable|dynamically linked shared library|bundle) /.exec(description)?.[1]
+  );
+  if (kinds.length === 0 || kinds.some((kind) => !kind))
+    throw new Error("Unrecognized native code kind.");
+  if (!kinds.includes("executable")) return false;
+  const location = relative(app, file).split(sep).join("/");
+  // Git and Crashpad do not run V8. Other executables (including every Electron
+  // helper and the main executable used for ELECTRON_RUN_AS_NODE) retain JIT.
+  return !(
+    location.startsWith("Contents/Resources/app.asar.unpacked/node_modules/dugite/git/") ||
+    /^Contents\/Frameworks\/Electron Framework\.framework\/Versions\/[^/]+\/Helpers\/chrome_crashpad_handler$/.test(
+      location
+    )
+  );
+};
+const verifyEntitlements = (file, required, check = (_gate, operation) => operation()) => {
+  const execute = (command, args, options = {}) =>
+    check("entitlements-command", () => {
+      const result = spawnSync(command, args, {
+        encoding: "utf8",
+        shell: false,
+        ...options
+      });
+      if (result.error || result.signal || result.status === null)
+        throw new Error("Entitlement command failed.");
+      return result;
+    });
+  // Request XML explicitly: recent codesign versions also support an abstract
+  // display representation. Only stdout is entitlement data; stderr is private.
+  const displayed = execute("/usr/bin/codesign", [
+    "--display",
+    "--entitlements",
+    "-",
+    "--xml",
+    file
+  ]);
+  check("entitlements-command", () => {
+    if (displayed.status !== 0) throw new Error("Entitlement command failed.");
+  });
+  const xml = displayed.stdout ?? "";
+  if (xml.trim().length === 0) {
+    check("entitlements-missing", () => {
+      if (required) throw new Error("Missing required JIT entitlement.");
+    });
+  } else {
+    const converted = execute("/usr/bin/plutil", ["-convert", "json", "-o", "-", "--", "-"], {
+      input: xml
+    });
+    const entitlements = check("entitlements-malformed", () => {
+      if (converted.status !== 0) throw new Error("Malformed entitlement data.");
+      const value = JSON.parse(converted.stdout);
+      if (value === null || typeof value !== "object" || Array.isArray(value))
+        throw new Error("Malformed entitlement dictionary.");
+      return value;
+    });
+    const keys = Object.keys(entitlements);
+    check("entitlements-missing", () => {
+      if (required && keys.length === 0) throw new Error("Missing required JIT entitlement.");
+    });
+    check("entitlements-unexpected", () => {
       if (
-        entitlements["com.apple.security.cs.allow-jit"] !== true ||
-        Object.keys(entitlements).length !== 1
-      ) {
+        keys.some((key) => key !== "com.apple.security.cs.allow-jit") ||
+        (keys.length !== 0 && entitlements["com.apple.security.cs.allow-jit"] !== true)
+      )
         throw new Error("Unexpected production signing entitlements.");
-      }
     });
   }
 };
@@ -186,8 +254,12 @@ const verifyApp = (app, environment) => {
     }
   });
   for (const file of files)
-    verifyRuntimeSignature(file, environment, true, (gate, operation) =>
-      appGate(`native-${gate}-failure`, operation)
+    verifyRuntimeSignature(
+      file,
+      environment,
+      true,
+      (gate, operation) => appGate(`native-${gate}-failure`, operation),
+      () => appGate("native-kind-failure", () => nativeRequiresJit(file, app))
     );
   appGate("stapled-ticket-failure", () => verifyStaple(app));
 };
@@ -200,5 +272,7 @@ module.exports = {
   isAppVerificationDiagnostic,
   verifyStaple,
   verifyApp,
-  nativeFiles
+  nativeFiles,
+  nativeRequiresJit,
+  verifyEntitlements
 };

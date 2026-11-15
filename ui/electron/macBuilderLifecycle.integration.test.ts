@@ -218,7 +218,7 @@ describe("real Node builder subprocess lifecycle", () => {
       "",
       completion + "\nprivate",
       "stage=builder-archive; category=archive-failure",
-      "stage=builder-app-verification; category=native-entitlements-failure"
+      "stage=builder-app-verification; category=native-entitlements-unexpected-failure"
     ])
       expect(() => invoke(record)).toThrow(
         record === "" || record.startsWith(completion) ? "missing-completion-evidence" : record

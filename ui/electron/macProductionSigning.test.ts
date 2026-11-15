@@ -1015,14 +1015,19 @@ describe("fail-closed macOS production signing", () => {
       "main-signature-failure",
       "main-identity-failure",
       "main-runtime-failure",
-      "main-entitlements-failure",
+      ...["missing", "malformed", "unexpected", "command"].map(
+        (reason) => `main-entitlements-${reason}-failure`
+      ),
       "deep-signature-failure",
       "native-inventory-failure",
       "dugite-payload-missing",
       "native-signature-failure",
       "native-identity-failure",
       "native-runtime-failure",
-      "native-entitlements-failure",
+      "native-kind-failure",
+      ...["missing", "malformed", "unexpected", "command"].map(
+        (reason) => `native-entitlements-${reason}-failure`
+      ),
       "stapled-ticket-failure"
     ].map((category) => [
       "stage=builder-app-verification; category=" + category,

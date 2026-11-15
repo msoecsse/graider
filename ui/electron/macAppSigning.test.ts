@@ -9,7 +9,178 @@ import { describe, expect, it, vi } from "vitest";
 
 const nodeRequire = createRequire(path.resolve("package.json"));
 const { classify, categories, isSigningDiagnostic } = nodeRequire("./scripts/mac-app-signing.cjs");
+const nativeVerifier = nodeRequire("./scripts/verify-macos-signatures.cjs");
 const secret = "PRIVATE certificate /private/path credential argv";
+
+it.each([
+  ["Contents/MacOS/Graider", "executable", true],
+  [
+    "Contents/Frameworks/Graider Helper (Renderer).app/Contents/MacOS/Graider Helper (Renderer)",
+    "executable",
+    true
+  ],
+  [
+    "Contents/Frameworks/Graider Helper (GPU).app/Contents/MacOS/Graider Helper (GPU)",
+    "executable",
+    true
+  ],
+  [
+    "Contents/Frameworks/Graider Helper (Plugin).app/Contents/MacOS/Graider Helper (Plugin)",
+    "executable",
+    true
+  ],
+  ["Contents/Frameworks/Graider Helper.app/Contents/MacOS/Graider Helper", "executable", true],
+  [
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler",
+    "executable",
+    false
+  ],
+  ["Contents/Resources/app.asar.unpacked/node_modules/dugite/git/bin/git", "executable", false],
+  [
+    "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+    "dynamically linked shared library",
+    false
+  ],
+  ["Contents/Resources/app.asar.unpacked/addon.node", "bundle", false],
+  ["Contents/Frameworks/renamed-library", "dynamically linked shared library", false],
+  ["Contents/Frameworks/renamed-executable.dylib", "executable", true]
+])("uses the native kind and process role for %s", (location, kind, required) => {
+  const app = path.join("fixture", "Graider.app");
+  const file = path.join(app, ...location.split("/"));
+  const spawnSync = vi.fn(() => ({ status: 0, stdout: `Mach-O 64-bit ${kind} arm64\n` }));
+  const module = { exports: {} as typeof nativeVerifier };
+  runInNewContext(fs.readFileSync("scripts/verify-macos-signatures.cjs", "utf8"), {
+    module,
+    process: { env: {} },
+    require: (name: string) =>
+      name === "node:child_process"
+        ? { spawnSync }
+        : nodeRequire(
+            name === "./macos-signing-config.cjs" ? "./scripts/macos-signing-config.cjs" : name
+          )
+  });
+  expect(module.exports.nativeRequiresJit(file, app)).toBe(required);
+  expect(spawnSync).toHaveBeenCalledWith(
+    "/usr/bin/file",
+    ["--brief", "--", file],
+    expect.objectContaining({ shell: false })
+  );
+});
+
+it.each([
+  [
+    "Mach-O universal binary with 2 architectures: [arm64:Mach-O 64-bit dynamically linked shared library arm64] [x86_64:Mach-O 64-bit dynamically linked shared library x86_64]",
+    false
+  ],
+  [
+    "Mach-O universal binary with 2 architectures: [arm64:Mach-O 64-bit dynamically linked shared library arm64] [x86_64:Mach-O 64-bit executable x86_64]",
+    true
+  ],
+  [
+    "Mach-O universal binary with 2 architectures: [arm64:Mach-O 64-bit executable arm64] [x86_64:Mach-O 64-bit dynamically linked shared library x86_64]",
+    true
+  ],
+  ["Mach-O 64-bit object arm64", null],
+  [
+    "Mach-O universal binary with 2 architectures: [arm64:Mach-O 64-bit dynamically linked shared library arm64] [x86_64:Mach-O 64-bit object x86_64]",
+    null
+  ],
+  ["private unrecognized native output", null]
+])("classifies all described native slices or rejects the format: %s", (format, required) => {
+  const module = { exports: {} as typeof nativeVerifier };
+  runInNewContext(fs.readFileSync("scripts/verify-macos-signatures.cjs", "utf8"), {
+    module,
+    process: { env: {} },
+    require: (name: string) =>
+      name === "node:child_process"
+        ? { spawnSync: () => ({ status: 0, stdout: format }) }
+        : nodeRequire(
+            name === "./macos-signing-config.cjs" ? "./scripts/macos-signing-config.cjs" : name
+          )
+  });
+  const inspect = () => module.exports.nativeRequiresJit(path.join("app", "library"), "app");
+  if (required === null) expect(inspect).toThrow("Unrecognized native code kind");
+  else expect(inspect()).toBe(required);
+});
+
+it.runIf(process.platform === "darwin")(
+  "reproduces the library entitlement false rejection with disposable native code",
+  () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "graider native entitlements "));
+    const app = path.join(root, "Graider.app");
+    const fixtures = [
+      [
+        "Contents/Resources/app.asar.unpacked/node_modules/dugite/git/bin/git",
+        "node_modules/dugite/git/bin/git",
+        false
+      ],
+      [
+        "Contents/Resources/app.asar.unpacked/node_modules/dugite/git/lib/fixture.dylib",
+        "node_modules/dugite/git/libexec/git-core/libSystem.Native.dylib",
+        false
+      ],
+      [
+        "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
+        "node_modules/dugite/git/libexec/git-core/libSystem.Native.dylib",
+        false
+      ],
+      [
+        "Contents/Frameworks/Graider Helper (Renderer).app/Contents/MacOS/Graider Helper (Renderer)",
+        process.execPath,
+        true
+      ]
+    ] as const;
+    try {
+      for (const [location, source, required] of fixtures) {
+        const file = path.join(app, ...location.split("/"));
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        // Stand-ins use a real library and V8 executable available after npm ci;
+        // Electron's optional downloaded distribution is not needed by fixtures.
+        fs.copyFileSync(path.resolve(source), file);
+        for (const jit of [false, true]) {
+          const signed = spawnSync(
+            "/usr/bin/codesign",
+            [
+              "--force",
+              "--sign",
+              "-",
+              "--timestamp=none",
+              "--options",
+              "runtime",
+              ...(jit
+                ? ["--entitlements", path.resolve("build/entitlements.mac-production.plist")]
+                : []),
+              file
+            ],
+            { encoding: "utf8", shell: false, env: { PATH: "/usr/bin:/bin" } }
+          );
+          // Assert only safe booleans, never native output, arguments or paths.
+          expect(signed.status === 0 && !signed.error).toBe(true);
+          const verified = spawnSync("/usr/bin/codesign", ["--verify", "--strict", file]);
+          expect(verified.status === 0 && !verified.error).toBe(true);
+          expect(nativeVerifier.nativeRequiresJit(file, app) === required).toBe(true);
+          // Empty display is a successful native result, rejected by the old
+          // exactly-JIT-on-every-Mach-O rule even for a signed shared library.
+          if (!jit) {
+            const displayed = spawnSync(
+              "/usr/bin/codesign",
+              ["--display", "--entitlements", ":-", file],
+              { encoding: "utf8" }
+            );
+            expect(displayed.status === 0 && displayed.stdout.length === 0).toBe(true);
+          }
+          if (required && !jit)
+            expect(() => nativeVerifier.verifyEntitlements(file, required)).toThrow(
+              "Missing required JIT"
+            );
+          else nativeVerifier.verifyEntitlements(file, required);
+        }
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
 const examples = [
   ["timestamp-service-failure", "The timestamp service is not available."],
   ["identity-not-found", "No identity found for signing."],
@@ -177,7 +348,9 @@ it("installed osx-sign passes fingerprint, keychain, entitlements, runtime and s
   const app = path.resolve("Fixture.app");
   const targets = [
     path.join(app, "Contents", "Resources", "git"),
-    path.join(app, "Contents", "Resources", "libgit.dylib")
+    path.join(app, "Contents", "Resources", "libgit.dylib"),
+    path.join(app, "Contents", "Frameworks", "Electron Framework.framework"),
+    path.join(app, "Contents", "Frameworks", "Fixture Helper (Renderer).app")
   ];
   const execute = vi.fn(async (_command: string, _args: string[]) => "");
   runInNewContext(fs.readFileSync(file, "utf8"), {
@@ -210,7 +383,7 @@ it("installed osx-sign passes fingerprint, keychain, entitlements, runtime and s
   });
   const signingCalls = execute.mock.calls.filter(([, args]) => args.includes("--sign"));
   expect(execute.mock.calls.some(([command]) => command === "security")).toBe(false);
-  expect(signingCalls).toHaveLength(3);
+  expect(signingCalls).toHaveLength(targets.length + 1);
   expect(signingCalls.map(([, args]) => args.at(-1))).toEqual([...targets, app]);
   for (const [command, args] of signingCalls) {
     expect(command).toBe("codesign");

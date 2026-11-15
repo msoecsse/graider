@@ -84,10 +84,12 @@ function harness(verifier?: ReturnType<typeof verificationHarness>["verifier"]) 
   };
 }
 
-function verificationHarness(failed?: string, mode = "exit") {
+function verificationHarness(failed?: string, mode = "exit", failureTarget = 1) {
   const app = path.join("signed-output", "Graider.app");
   const contents = path.join(app, "Contents");
-  const dugite = path.join(contents, "Resources", "app.asar.unpacked", "dugite");
+  const unpacked = path.join(contents, "Resources", "app.asar.unpacked");
+  const modules = path.join(unpacked, "node_modules");
+  const dugite = path.join(modules, "dugite", "git");
   const native = [
     path.join(contents, "MacOS", "Graider"),
     path.join(dugite, "git"),
@@ -98,7 +100,9 @@ function verificationHarness(failed?: string, mode = "exit") {
     [contents, ["MacOS", "Resources"]],
     [path.join(contents, "MacOS"), ["Graider"]],
     [path.join(contents, "Resources"), ["app.asar.unpacked"]],
-    [path.join(contents, "Resources", "app.asar.unpacked"), ["dugite"]],
+    [unpacked, ["node_modules"]],
+    [modules, ["dugite"]],
+    [path.join(modules, "dugite"), ["git"]],
     [dugite, failed === "dugite-payload-missing" ? [] : ["git", "libgit.dylib"]]
   ]);
   const readdirSync = vi.fn((directory: string) => {
@@ -118,16 +122,23 @@ function verificationHarness(failed?: string, mode = "exit") {
       ? "deep-signature-failure"
       : args.includes("validate")
         ? "stapled-ticket-failure"
-        : `${prefix}-${args.includes("--verbose=4") ? "identity" : args.includes("--entitlements") || args.includes("-convert") ? "entitlements" : "signature"}-failure`;
+        : `${prefix}-${args.includes("--brief") ? "kind" : args.includes("--verbose=4") ? "identity" : args.includes("--entitlements") || args.includes("-convert") ? "entitlements-command" : "signature"}-failure`;
     // Fail on the extensionless Dugite executable, after the Electron executable.
     const fail =
-      failed === gate &&
-      (prefix === "main" || target === native[1] || gate === "stapled-ticket-failure");
+      (failed === gate ||
+        (gate === `${prefix}-entitlements-command-failure` &&
+          failed?.startsWith(`${prefix}-entitlements-`))) &&
+      (prefix === "main" || target === native[failureTarget] || gate === "stapled-ticket-failure");
     if (fail && mode === "throw") throw new Error(privateText);
     if (fail && mode === "start")
       return { error: new Error(privateText), status: null, stderr: privateText };
     if (fail && mode === "signal") return { signal: "SIGTERM", status: null, stderr: privateText };
     if (fail && mode === "exit") return { status: 1, stderr: privateText };
+    if (args.includes("--brief"))
+      return {
+        status: 0,
+        stdout: `Mach-O 64-bit ${target?.endsWith(".dylib") ? "dynamically linked shared library" : "executable"} arm64\n`
+      };
     if (args.includes("--verbose=4")) {
       const runtimeFailure =
         failed === `${prefix}-runtime-failure` && (prefix === "main" || target === native[1]);
@@ -141,12 +152,35 @@ function verificationHarness(failed?: string, mode = "exit") {
       return {
         status: 0,
         stdout:
-          fail && mode === "missing-xml"
-            ? privateText
-            : '<?xml version="1.0"?><plist><dict/></plist>'
+          fail && ["missing", "stderr-xml"].includes(mode)
+            ? ""
+            : mode === "empty-non-jit" && native.slice(1).includes(target!)
+              ? ""
+              : fail && mode === "missing-xml"
+                ? privateText
+                : '<?xml version="1.0"?><plist><dict/></plist>',
+        stderr:
+          fail && mode === "stderr-xml"
+            ? '<?xml version="1.0"?><plist><dict/></plist>'
+            : privateText
       };
     if (args.includes("-convert")) {
+      if (fail && mode === "missing-xml") return { status: 1, stderr: privateText };
       if (fail && mode === "invalid-json") return { status: 0, stdout: privateText };
+      const dictionaries: Record<string, unknown> = {
+        "null-dictionary": null,
+        "array-dictionary": [],
+        "scalar-dictionary": true,
+        "empty-dictionary": {},
+        "false-jit": { "com.apple.security.cs.allow-jit": false },
+        "string-jit": { "com.apple.security.cs.allow-jit": "true" },
+        "debug-entitlement": { "com.apple.security.get-task-allow": true },
+        "unsigned-memory-entitlement": {
+          "com.apple.security.cs.allow-unsigned-executable-memory": true
+        }
+      };
+      if (fail && Object.hasOwn(dictionaries, mode))
+        return { status: 0, stdout: JSON.stringify(dictionaries[mode]) };
       return {
         status: 0,
         stdout: JSON.stringify({
@@ -184,18 +218,100 @@ function verificationHarness(failed?: string, mode = "exit") {
 }
 
 describe("safe diagnostics inside the production builder", () => {
+  it("accepts absent entitlements on signed native libraries and non-JIT Dugite tools", () => {
+    const { verifier, app, spawnSync } = verificationHarness(undefined, "empty-non-jit");
+    verifier.verifyApp(app, environment);
+    expect(spawnSync.mock.calls.at(-1)?.[1]).toEqual(["stapler", "validate", app]);
+  });
+
+  it.each([
+    ["main", 0],
+    ["native", 0]
+  ])("still requires JIT on the %s Electron process", (prefix, target) => {
+    for (const mode of ["missing", "empty-dictionary", "stderr-xml"]) {
+      const category = `${prefix}-entitlements-missing-failure`;
+      const { verifier, app, spawnSync } = verificationHarness(category, mode, target);
+      let rejected: unknown;
+      try {
+        verifier.verifyApp(app, environment);
+      } catch (error) {
+        rejected = error;
+      }
+      expect(verifier.appVerificationCategory(rejected)).toBe(category);
+      expect(spawnSync.mock.calls.some(([, args]) => args.includes("validate"))).toBe(false);
+    }
+  });
+
+  it.each([0, 1, 2])(
+    "rejects malformed and unexpected entitlements on native component %s",
+    (target) => {
+      for (const mode of [
+        "missing-xml",
+        "invalid-json",
+        "null-dictionary",
+        "array-dictionary",
+        "scalar-dictionary",
+        "extra-entitlement",
+        "debug-entitlement",
+        "unsigned-memory-entitlement",
+        "false-jit",
+        "string-jit"
+      ]) {
+        const reason = [
+          "extra-entitlement",
+          "debug-entitlement",
+          "unsigned-memory-entitlement",
+          "false-jit",
+          "string-jit"
+        ].includes(mode)
+          ? "unexpected"
+          : "malformed";
+        const category = `native-entitlements-${reason}-failure`;
+        const { verifier, app, spawnSync } = verificationHarness(category, mode, target);
+        let rejected: unknown;
+        try {
+          verifier.verifyApp(app, environment);
+        } catch (error) {
+          rejected = error;
+        }
+        expect(verifier.appVerificationCategory(rejected)).toBe(category);
+        expect((rejected as Error).message).toBe("Application verification failed.");
+        expect(spawnSync.mock.calls.some(([, args]) => args.includes("validate"))).toBe(false);
+      }
+    }
+  );
+
+  it.each(["exit", "start", "signal", "throw"])(
+    "does not accept an entitlement inspection command %s failure as absent entitlements",
+    async (mode) => {
+      const category = "native-entitlements-command-failure";
+      const verification = verificationHarness(category, mode);
+      const test = harness(verification.verifier);
+      test.execute.mockImplementation(async () => {
+        test.config.afterSign({ appOutDir: "signed-output" });
+        return [];
+      });
+      await test.worker.build();
+      expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([
+        [3, `stage=builder-app-verification; category=${category}`]
+      ]);
+      expect(test.processMock.exitCode).toBe(1);
+    }
+  );
+
   it.each([
     "main-signature-failure",
     "main-identity-failure",
     "main-runtime-failure",
-    "main-entitlements-failure",
+    "main-entitlements-command-failure",
     "deep-signature-failure",
     "native-inventory-failure",
     "dugite-payload-missing",
     "native-signature-failure",
     "native-identity-failure",
     "native-runtime-failure",
-    "native-entitlements-failure",
+    "native-entitlements-command-failure",
+    "native-kind-failure",
     "stapled-ticket-failure"
   ])(
     "preserves the independent %s gate through the actual verifier and builder",
@@ -240,7 +356,7 @@ describe("safe diagnostics inside the production builder", () => {
       mode === "metadata"
         ? "native-identity-failure"
         : ["missing-xml", "invalid-json", "extra-entitlement"].includes(mode)
-          ? "native-entitlements-failure"
+          ? `native-entitlements-${mode === "extra-entitlement" ? "unexpected" : "malformed"}-failure`
           : "native-signature-failure";
     const { verifier, app } = verificationHarness(category, mode);
     let rejected: unknown;
@@ -268,7 +384,7 @@ describe("safe diagnostics inside the production builder", () => {
       );
       expect(verification.spawnSync).toHaveBeenCalledWith(
         "/usr/bin/codesign",
-        ["--display", "--entitlements", ":-", target],
+        ["--display", "--entitlements", "-", "--xml", target],
         expect.anything()
       );
     }
@@ -595,6 +711,8 @@ describe("safe diagnostics inside the production builder", () => {
     for (const file of [
       "Graider.app",
       "Graider.app/Contents/MacOS/Graider",
+      "Graider.app/Contents/Frameworks/Electron Framework.framework",
+      "Graider.app/Contents/Frameworks/Graider Helper (Renderer).app",
       "Graider.app/Contents/Resources/app.asar.unpacked/node_modules/dugite/git/bin/git",
       "Graider.app/Contents/Resources/app.asar.unpacked/node_modules/dugite/git/lib/libgit.dylib"
     ])

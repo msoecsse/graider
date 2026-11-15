@@ -549,10 +549,10 @@ Cleanup runs on success/failure; workflow `always()` cleanup also covers normal
 cancellation on the ephemeral runner. Forced runner termination ultimately relies
 on GitHub-hosted runner destruction; use no persistent/self-hosted signing runner.
 
-Builder 26 signs nested Electron/native code with hardened runtime and only the
-`allow-jit` exception, notarizes and staples the app before archive construction.
+Builder 26 requests hardened runtime and only the `allow-jit` exception when
+signing nested Electron/native code, then notarizes and staples the app before archive construction.
 An `afterSign` gate independently checks the certificate fingerprint, Developer ID,
-Team ID, hardened runtime and entitlements on every real Mach-O, including Dugite
+Team ID, hardened runtime and component-appropriate entitlements on every real Mach-O, including Dugite
 executables/dylibs under `app.asar.unpacked`, plus the app's stapled ticket. Builder
 creates the DMG; the wrapper explicitly signs it with the verified fingerprint,
 temporary keychain and secure timestamp, then separately requires an Accepted DMG notarization result
@@ -572,7 +572,9 @@ Git and a dylib retained runtime and the JIT entitlement; it does not prove
 Developer ID or notarization acceptance. Libraries inherit host entitlements, so
 JIT is not intrinsically needed on every library, but no deterministic rejection
 by the current verifier was established. Preserve the checks until a concrete
-failure is demonstrated. Regression tests execute the installed lifecycle with
+failure is demonstrated. This describes the evidence at that attempt; the later
+[native entitlement investigation](#native-entitlement-policy-run-43667213149)
+demonstrates a false rejection of absent library entitlements. Regression tests execute the installed lifecycle with
 external operations stubbed and test safe builder failure propagation.
 
 The third attempt, [run 43532058480](https://github.com/msoecsse/graider/actions/runs/43532058480)
@@ -1115,8 +1117,9 @@ rejected-stapling and missing-authentication paths: missing authentication can
 reach `afterSign`, where the independent ticket gate must still reject an
 unstapled app. No historical skip or notarization success is inferred here.
 
-The fixed terminal stage remains `builder-app-verification`. Its allowlisted
-categories now identify the independent operation that rejected:
+The fixed terminal stage remains `builder-app-verification`. At `6656882`, its allowlisted
+categories identified the independent operation that rejected (the entitlement
+categories are superseded by the component policy below):
 
 | Gate                                                                        | Category                      |
 | --------------------------------------------------------------------------- | ----------------------------- |
@@ -1190,6 +1193,82 @@ insufficient. Require all real signature, ticket, DMG notarization/stapling and
 both installed CLI/Dugite proofs, then the downloaded/quarantined DMG **and** ZIP
 Finder acceptance below. This change dispatches no production workflow and makes
 no release acceptance claim; #54 remains open.
+
+#### Native entitlement policy (run 43667213149)
+
+[Run 43667213149](https://github.com/msoecsse/graider/actions/runs/43667213149)
+at `6656882f322c78df4ed401359294a717badb6660`, on macOS **15.8.2**, rejected
+`native-entitlements-failure` after the main-app checks, deep verification,
+inventory and Dugite-presence gates. The failing file and native result were not
+retained; stapled-ticket validation was not reached. It is not possible to prove
+which native file failed or whether that result was empty, malformed, unexpected,
+or a command failure from the old category alone.
+
+Reinspection of installed app-builder-lib **26.15.3** `MacTargetHelper.getOptionsForFile`
+and `@electron/osx-sign` `signApplication` confirms that Graider's main/inherit
+plist and runtime option are passed to native signing commands. Neither adds
+`--force-library-entitlements`. Passing a plist does not guarantee identical
+stored entitlements on every component. Apple's
+[Hardened Runtime contract](https://developer.apple.com/documentation/security/hardened-runtime)
+assigns entitlements to executable processes; frameworks, libraries and in-process
+plug-ins use their host's permissions. Apple's
+[distribution signing procedure](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac)
+specifically advises against applying entitlements to library code and documents
+`file` classification and explicit XML entitlement extraction. The signing
+configuration therefore stays unchanged; forcing library JIT permissions would
+encode the verifier's incorrect assumption into signing.
+
+The proven defect is the verifier's universal exactly-JIT requirement: a signed,
+hardened library with no entitlement data is valid for this policy but was always
+rejected. Disposable credential-free native fixtures reproduce that false rejection
+using real Dugite executable/dylib copies, a library in framework layout and a V8
+executable in helper layout. They also check native strict integrity, XML extraction
+and continued missing-JIT rejection for the helper. Local macOS **14.7.6** retains
+JIT when explicitly supplied even to a dylib; the absent-entitlement fixture omits
+the plist deliberately. It proves the policy defect, not production's exact
+signing output or Developer ID/notarization acceptance. The older local probe
+which supplied JIT to a library could not test this absence case.
+
+The independent verifier now uses native `file --brief` under the C locale to
+classify actual Mach-O code; an extension or directory name alone cannot classify
+an executable as a library. Unrecognized kinds and unrecognized universal slices
+fail closed. All described slices are considered; any executable slice requires
+the executable policy.
+
+| Component                                                                                         | Entitlement requirement                                                                                                             |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Main Electron app, its executable/Node CLI mode, all Electron helpers, and other executable code  | Exactly `com.apple.security.cs.allow-jit: true`                                                                                     |
+| Bundled Dugite Git tools and the versioned Electron framework's `Helpers/chrome_crashpad_handler` | No entitlement data or an empty dictionary is allowed; if present, only `allow-jit: true` is accepted, matching the existing signer |
+| Mach-O shared libraries, framework libraries and in-process bundles                               | Same bounded optional-JIT policy; their host provides runtime permissions                                                           |
+
+Every component still requires strict integrity, the exact Developer ID leaf
+fingerprint, expected Developer ID authority and Team ID, and the runtime flag.
+The main app, deep verification, recursive native inventory, Dugite-presence and
+stapled-ticket gates remain mandatory. DMG signing, notarization/stapling,
+Gatekeeper, installed CLI/Dugite and downloaded/quarantined Finder acceptance
+requirements remain unchanged. No unsigned/ad-hoc fallback is introduced.
+
+Entitlements are extracted with `codesign --display --entitlements - --xml`;
+only stdout is parsed, never stderr. Successful empty output is accepted only
+where the table permits it. Nonempty data must parse through `plutil` to a
+dictionary. False/string JIT values, additional keys (including debugging, unsigned
+memory or disabled library validation) and malformed data are rejected everywhere.
+The terminal stage remains `builder-app-verification` with these fixed categories:
+
+| Failure                                                                                                    | Category (`main` or `native` prefix)       |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Required entitlement data absent or dictionary empty                                                       | `<prefix>-entitlements-missing-failure`    |
+| Invalid plist/JSON or non-dictionary result                                                                | `<prefix>-entitlements-malformed-failure`  |
+| Additional permission or incorrect JIT value                                                               | `<prefix>-entitlements-unexpected-failure` |
+| Inspection nonzero exit, command start/I/O failure or termination; parser start/I/O failure or termination | `<prefix>-entitlements-command-failure`    |
+| Native kind cannot be inspected/classified                                                                 | `native-kind-failure`                      |
+
+Only locally registered errors carry these categories through the worker and
+parent; output, paths, certificate details, credentials and caught exceptions
+remain suppressed. Tests cover optional absence, mandatory JIT, malformed and
+extra permissions on executables and libraries, command failures, role/format
+classification and exact safe diagnostic propagation. This investigation dispatches
+no production signing and claims no release acceptance. #54 remains open.
 
 #### Temporary Windows CI pause during #54
 
