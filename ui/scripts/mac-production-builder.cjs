@@ -4,6 +4,11 @@ const fs = require("node:fs");
 const { join, resolve } = require("node:path");
 const { classify, isSigningDiagnostic } = require("./mac-app-signing.cjs");
 const {
+  appVerificationCategory,
+  isAppVerificationDiagnostic
+} = require("./verify-macos-signatures.cjs");
+const { performance } = require("node:perf_hooks");
+const {
   expectedArtifacts,
   resultCategory,
   fileCategory,
@@ -27,14 +32,36 @@ const categories = Object.freeze({
 });
 let currentStage = "builder-initialize";
 let signingFailure;
+let verificationFailure;
+let stageStarted = performance.now();
+let durationRecorded = false;
+const MINUTE_MS = 60_000;
+const durationBuckets = Object.freeze([
+  [1, "stage-duration-under-1m"],
+  [5, "stage-duration-1m-to-5m"],
+  [15, "stage-duration-5m-to-15m"],
+  [30, "stage-duration-15m-to-30m"],
+  [Infinity, "stage-duration-30m-or-more"]
+]);
+const finishStage = () => {
+  if (!durationRecorded) {
+    const minutes = (performance.now() - stageStarted) / MINUTE_MS;
+    observation(durationBuckets.find(([limit]) => minutes < limit)[1]);
+    durationRecorded = true;
+  }
+};
 const stage = (value) => {
   if (!Object.hasOwn(categories, value)) throw new Error("Invalid builder stage.");
+  finishStage();
   currentStage = value;
   signingFailure = undefined;
+  verificationFailure = undefined;
+  stageStarted = performance.now();
+  durationRecorded = false;
   observation("stage-entered");
 };
 const diagnostic = () =>
-  `stage=${currentStage}; category=${signingFailure || categories[currentStage]}`;
+  `stage=${currentStage}; category=${signingFailure || verificationFailure || categories[currentStage]}`;
 const lifecycleCategories = Object.freeze([
   "stage-entered",
   "promise-started",
@@ -47,7 +74,8 @@ const lifecycleCategories = Object.freeze([
   "completion-write-started",
   "completion-written",
   "completion-write-failed",
-  "exit-after-record"
+  "exit-after-record",
+  ...durationBuckets.map(([, category]) => category)
 ]);
 const isLifecycle = (value) =>
   typeof value === "string" &&
@@ -92,6 +120,7 @@ const artifactCompleted = (event) => {
 };
 const isDiagnostic = (value) =>
   isSigningDiagnostic(value) ||
+  isAppVerificationDiagnostic(value) ||
   isArtifactDiagnostic(value) ||
   Object.keys(categories).some((name) =>
     ["promise-pending-before-exit", "premature-exit", "uncaught-exception"].some(
@@ -121,6 +150,7 @@ const build = async () => {
   const earlyExit = (category) => {
     if (!recorded && !exitObserved) {
       exitObserved = true;
+      finishStage();
       observation(category);
       process.exitCode = 1;
       record(`stage=${currentStage}; category=${category}`);
@@ -146,6 +176,7 @@ const build = async () => {
       config: join(__dirname, "../electron-builder.mac-production.cjs")
     });
     pending = false;
+    finishStage();
     observation("promise-resolved");
     stage("builder-artifact-validation");
     observation("artifact-validation-started");
@@ -161,7 +192,10 @@ const build = async () => {
     } else {
       record(completion);
     }
-  } catch {
+  } catch (error) {
+    if (currentStage === "builder-app-verification")
+      verificationFailure = appVerificationCategory(error);
+    finishStage();
     if (pending) observation("promise-rejected");
     pending = false;
     record(diagnostic());

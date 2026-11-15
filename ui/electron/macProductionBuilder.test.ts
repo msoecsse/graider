@@ -17,7 +17,8 @@ const environment = {
   APPLE_API_ISSUER: "00000000-0000-0000-0000-000000000000"
 };
 
-function harness() {
+function harness(verifier?: ReturnType<typeof verificationHarness>["verifier"]) {
+  let elapsedMs = 0;
   const signer = vi.fn(async (_options: unknown) => {});
   const writeSync = vi.fn((_fd: number, value: string) => Buffer.byteLength(value));
   const lstatSync = vi.fn(() => ({ isFile: () => true, size: 1 }));
@@ -37,6 +38,9 @@ function harness() {
     process: processMock,
     require: (name: string): unknown => {
       if (name === "node:fs") return { writeSync, lstatSync };
+      if (name === "node:perf_hooks") return { performance: { now: () => elapsedMs } };
+      if (name === "./verify-macos-signatures.cjs")
+        return verifier ?? nodeRequire("./scripts/verify-macos-signatures.cjs");
       if (name === "app-builder-lib/out/codeSign/macCodeSign") return { sign: signer };
       if (name === "./mac-app-signing.cjs") return nodeRequire("./scripts/mac-app-signing.cjs");
       if (name === "electron-builder")
@@ -47,7 +51,7 @@ function harness() {
     }
   });
   const worker = module.exports;
-  const verifyApp = vi.fn();
+  const verifyApp = vi.fn(verifier?.verifyApp);
   const beforePack = vi.fn();
   const configModule = { exports: {} as any };
   runInNewContext(fs.readFileSync("electron-builder.mac-production.cjs", "utf8"), {
@@ -73,11 +77,241 @@ function harness() {
     processMock,
     signer,
     verifyApp,
-    beforePack
+    beforePack,
+    advance: (milliseconds: number) => {
+      elapsedMs += milliseconds;
+    }
   };
 }
 
+function verificationHarness(failed?: string, mode = "exit") {
+  const app = path.join("signed-output", "Graider.app");
+  const contents = path.join(app, "Contents");
+  const dugite = path.join(contents, "Resources", "app.asar.unpacked", "dugite");
+  const native = [
+    path.join(contents, "MacOS", "Graider"),
+    path.join(dugite, "git"),
+    path.join(dugite, "libgit.dylib")
+  ];
+  const privateText = "private credential certificate executable-path native-output";
+  const entries = new Map([
+    [contents, ["MacOS", "Resources"]],
+    [path.join(contents, "MacOS"), ["Graider"]],
+    [path.join(contents, "Resources"), ["app.asar.unpacked"]],
+    [path.join(contents, "Resources", "app.asar.unpacked"), ["dugite"]],
+    [dugite, failed === "dugite-payload-missing" ? [] : ["git", "libgit.dylib"]]
+  ]);
+  const readdirSync = vi.fn((directory: string) => {
+    if (failed === "native-inventory-failure") throw new Error(privateText);
+    return entries.get(directory)!.map((name) => ({
+      name,
+      isDirectory: () => entries.has(path.join(directory, name)),
+      isFile: () => native.includes(path.join(directory, name))
+    }));
+  });
+  let entitlementTarget: string | undefined;
+  const spawnSync = vi.fn((_file: string, args: string[]) => {
+    const target = args.includes("-convert") ? entitlementTarget : args.at(-1);
+    if (args.includes("--entitlements")) entitlementTarget = target;
+    const prefix = target === app ? "main" : "native";
+    const gate = args.includes("--deep")
+      ? "deep-signature-failure"
+      : args.includes("validate")
+        ? "stapled-ticket-failure"
+        : `${prefix}-${args.includes("--verbose=4") ? "identity" : args.includes("--entitlements") || args.includes("-convert") ? "entitlements" : "signature"}-failure`;
+    // Fail on the extensionless Dugite executable, after the Electron executable.
+    const fail =
+      failed === gate &&
+      (prefix === "main" || target === native[1] || gate === "stapled-ticket-failure");
+    if (fail && mode === "throw") throw new Error(privateText);
+    if (fail && mode === "start")
+      return { error: new Error(privateText), status: null, stderr: privateText };
+    if (fail && mode === "signal") return { signal: "SIGTERM", status: null, stderr: privateText };
+    if (fail && mode === "exit") return { status: 1, stderr: privateText };
+    if (args.includes("--verbose=4")) {
+      const runtimeFailure =
+        failed === `${prefix}-runtime-failure` && (prefix === "main" || target === native[1]);
+      const identityFailure = fail && mode === "metadata";
+      return {
+        status: 0,
+        stderr: `Authority=${identityFailure ? privateText : "Developer ID Application: Fixture"}\nTeamIdentifier=${environment.GRAIDER_APPLE_TEAM_ID}\nflags=${runtimeFailure ? "adhoc" : "runtime"}\n`
+      };
+    }
+    if (args.includes("--entitlements"))
+      return {
+        status: 0,
+        stdout:
+          fail && mode === "missing-xml"
+            ? privateText
+            : '<?xml version="1.0"?><plist><dict/></plist>'
+      };
+    if (args.includes("-convert")) {
+      if (fail && mode === "invalid-json") return { status: 0, stdout: privateText };
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          "com.apple.security.cs.allow-jit": true,
+          ...(fail && mode === "extra-entitlement"
+            ? { "com.apple.security.cs.disable-library-validation": true }
+            : {})
+        })
+      };
+    }
+    return { status: 0, stdout: "" };
+  });
+  const module = { exports: {} as any };
+  runInNewContext(fs.readFileSync("scripts/verify-macos-signatures.cjs", "utf8"), {
+    module,
+    Buffer,
+    process: { env: {} },
+    require: (name: string) => {
+      if (name === "node:child_process") return { spawnSync };
+      if (name === "node:fs")
+        return {
+          readdirSync,
+          openSync: () => 1,
+          readSync: (_fd: number, bytes: Buffer) => {
+            bytes.writeUInt32BE(0xfeedfacf);
+          },
+          closeSync: vi.fn()
+        };
+      if (name === "./macos-signing-config.cjs")
+        return nodeRequire("./scripts/macos-signing-config.cjs");
+      return nodeRequire(name);
+    }
+  });
+  return { verifier: module.exports, spawnSync, app, native };
+}
+
 describe("safe diagnostics inside the production builder", () => {
+  it.each([
+    "main-signature-failure",
+    "main-identity-failure",
+    "main-runtime-failure",
+    "main-entitlements-failure",
+    "deep-signature-failure",
+    "native-inventory-failure",
+    "dugite-payload-missing",
+    "native-signature-failure",
+    "native-identity-failure",
+    "native-runtime-failure",
+    "native-entitlements-failure",
+    "stapled-ticket-failure"
+  ])(
+    "preserves the independent %s gate through the actual verifier and builder",
+    async (category) => {
+      const verification = verificationHarness(category);
+      const test = harness(verification.verifier);
+      test.execute.mockImplementation(async () => {
+        test.config.afterSign({ appOutDir: "signed-output" });
+        return [];
+      });
+      await test.worker.build();
+      const detail = `stage=builder-app-verification; category=${category}`;
+      expect(test.writeSync.mock.calls.filter(([fd]) => fd === 3)).toEqual([[3, detail]]);
+      expect(test.worker.isDiagnostic(detail)).toBe(true);
+      expect(test.worker.isDiagnostic(detail + "\nprivate")).toBe(false);
+      expect(
+        test.worker.isDiagnostic(detail.replace("builder-app-verification", "builder-app-sign"))
+      ).toBe(false);
+      expect(test.processMock.exitCode).toBe(1);
+      expect(
+        test.writeSync.mock.calls.some(([, value]) =>
+          /private|credential|certificate|executable-path|native-output|builder-archive/.test(value)
+        )
+      ).toBe(false);
+      if (category !== "stapled-ticket-failure")
+        expect(
+          verification.spawnSync.mock.calls.some(([, args]) => args.includes("validate"))
+        ).toBe(false);
+    }
+  );
+
+  it.each([
+    "start",
+    "signal",
+    "throw",
+    "metadata",
+    "missing-xml",
+    "invalid-json",
+    "extra-entitlement"
+  ])("keeps %s verification errors private with local provenance", (mode) => {
+    const category =
+      mode === "metadata"
+        ? "native-identity-failure"
+        : ["missing-xml", "invalid-json", "extra-entitlement"].includes(mode)
+          ? "native-entitlements-failure"
+          : "native-signature-failure";
+    const { verifier, app } = verificationHarness(category, mode);
+    let rejected: unknown;
+    try {
+      verifier.verifyApp(app, environment);
+    } catch (error) {
+      rejected = error;
+    }
+    expect(verifier.appVerificationCategory(rejected)).toBe(category);
+    expect((rejected as Error).message).toBe("Application verification failed.");
+    expect((rejected as Error).cause).toBeUndefined();
+    for (const forged of [new Error(category), { category, message: category }, null, "private"])
+      expect(verifier.appVerificationCategory(forged)).toBeUndefined();
+  });
+
+  it("requires every native executable and dylib and the stapled ticket before archive construction", () => {
+    const verification = verificationHarness();
+    const test = harness(verification.verifier);
+    test.config.afterSign({ appOutDir: "signed-output" });
+    for (const target of [verification.app, ...verification.native]) {
+      expect(verification.spawnSync).toHaveBeenCalledWith(
+        "/usr/bin/codesign",
+        ["--verify", "--strict", "-R", `=certificate leaf = H"${fingerprint}"`, target],
+        expect.anything()
+      );
+      expect(verification.spawnSync).toHaveBeenCalledWith(
+        "/usr/bin/codesign",
+        ["--display", "--entitlements", ":-", target],
+        expect.anything()
+      );
+    }
+    expect(verification.spawnSync.mock.calls.at(-1)?.slice(0, 2)).toEqual([
+      "/usr/bin/xcrun",
+      ["stapler", "validate", verification.app]
+    ]);
+    expect(test.writeSync).toHaveBeenLastCalledWith(
+      4,
+      "stage=builder-archive; category=stage-entered\n"
+    );
+  });
+
+  it.each([
+    [0, "under-1m"],
+    [60_000, "1m-to-5m"],
+    [300_000, "5m-to-15m"],
+    [900_000, "15m-to-30m"],
+    [1_800_000, "30m-or-more"]
+  ])(
+    "records only a fixed duration bucket for %s elapsed milliseconds",
+    async (elapsed, bucket) => {
+      const test = harness();
+      test.execute.mockImplementation(async () => {
+        test.worker.stage("builder-app-notarize-staple");
+        test.advance(elapsed);
+        test.worker.stage("builder-app-verification");
+        throw new Error("private");
+      });
+      await test.worker.build();
+      const detail = `stage=builder-app-notarize-staple; category=stage-duration-${bucket}`;
+      expect(test.writeSync.mock.calls.filter(([, value]) => value === detail + "\n")).toHaveLength(
+        1
+      );
+      expect(test.worker.isLifecycle(detail)).toBe(true);
+      expect(test.worker.isLifecycle(detail + "; private")).toBe(false);
+      expect(
+        test.worker.isLifecycle("stage=builder-app-notarize-staple; category=stage-duration-31m")
+      ).toBe(false);
+      expect(test.worker.isDiagnostic(detail)).toBe(false);
+    }
+  );
+
   it("marks actual signer entry and settlement independently of afterPack", async () => {
     const test = harness();
     test.config.afterPack();
@@ -485,100 +719,121 @@ describe("safe diagnostics inside the production builder", () => {
 
 // Execute the installed implementation with only external operations replaced.
 // This guards against assuming afterSign precedes notarization in builder 26.
-it("installed builder awaits signing, notarization and stapling, then verification, before archives", async () => {
-  nodeRequire("electron-builder");
-  const events: string[] = [];
-  function load(name: string, overrides: Record<string, unknown>): any {
-    const file = nodeRequire.resolve(name);
-    const localRequire = createRequire(file);
-    const exports = {};
-    runInNewContext(fs.readFileSync(file, "utf8"), {
-      exports,
-      require: (dependency: string) => overrides[dependency] ?? localRequire(dependency)
+it.each(["accepted", "notary-rejected", "staple-rejected", "missing-auth"])(
+  "installed builder notarization lifecycle: %s",
+  async (scenario) => {
+    nodeRequire("electron-builder");
+    const events: string[] = [];
+    function load(name: string, overrides: Record<string, unknown>): any {
+      const file = nodeRequire.resolve(name);
+      const localRequire = createRequire(file);
+      const exports = {};
+      runInNewContext(fs.readFileSync(file, "utf8"), {
+        exports,
+        require: (dependency: string) => overrides[dependency] ?? localRequire(dependency)
+      });
+      return exports;
+    }
+    const notarizer = load("@electron/notarize", {
+      "promise-retry": (operation: () => Promise<void>) => operation(),
+      "./check-signature": {
+        checkSignatures: async () => {
+          events.push("notary-signature-check");
+        }
+      },
+      "./notarytool": {
+        isNotaryToolAvailable: async () => true,
+        notarizeAndWaitForNotaryTool: async () => {
+          if (scenario === "notary-rejected") {
+            events.push("notary-rejected");
+            throw new Error("private notarization error");
+          }
+          events.push("notarize-accepted");
+        }
+      },
+      "./staple": {
+        stapleApp: async () => {
+          events.push("staple");
+          if (scenario === "staple-rejected") throw new Error("private stapling error");
+        }
+      }
     });
-    return exports;
+    const { MacTargetHelper } = load("app-builder-lib/out/mac/MacTargetHelper", {
+      "../util/dynamicImport": { dynamicImport: async () => notarizer }
+    });
+    const { MacPackager } = load("app-builder-lib/out/macPackager", {
+      "./codeSign/macCodeSign": { isSignAllowed: () => true },
+      "./util/macosVersion": { isMacOsHighSierra: () => true }
+    });
+    const { PlatformPackager } = nodeRequire("app-builder-lib/out/platformPackager");
+    const helper = {
+      findSigningIdentity: async () => ({ name: "fake-identity" }),
+      buildSignOptions: async () => ({}),
+      notarizeIfProvided: async () => {
+        const options = vi
+          .spyOn(MacTargetHelper, "getNotarizeOptions")
+          .mockReturnValue(scenario === "missing-auth" ? undefined : { appPath: "test.app" });
+        try {
+          await MacTargetHelper.prototype.notarizeIfProvided.call(
+            { packager: { platformSpecificBuildOptions: { notarize: true } } },
+            "test.app"
+          );
+        } finally {
+          options.mockRestore();
+        }
+      }
+    };
+    const fake = {
+      helper,
+      platformSpecificBuildOptions: {},
+      codeSigningInfo: { value: Promise.resolve({}) },
+      computeAsarOptions: async () => ({}),
+      computeAppOutDir: () => "signed-output",
+      appInfo: { productFilename: "Graider" },
+      getPlatformConfig: () => ({ platformName: "darwin", config: {} }),
+      doSign: async () => {
+        events.push("sign");
+      },
+      signApp: async () => MacPackager.prototype.sign.call(fake, "test.app"),
+      info: {
+        emitAfterSign: async () => {
+          events.push("verify-app-and-staple");
+          const verification = verificationHarness(
+            scenario === "missing-auth" ? "stapled-ticket-failure" : undefined
+          );
+          verification.verifier.verifyApp(verification.app, environment);
+        }
+      },
+      doPack: async () =>
+        PlatformPackager.prototype.doSignAfterPack.call(
+          fake,
+          "out",
+          "signed-output",
+          "darwin",
+          1,
+          {},
+          []
+        ),
+      packageInDistributableFormat: () => {
+        events.push("archives");
+      }
+    };
+    const packed = MacPackager.prototype.packMacTargets.call(fake, "out", 1, [], null, {});
+    if (scenario === "accepted") await packed;
+    else await expect(packed).rejects.toThrow();
+    const expected: Record<string, string[]> = {
+      accepted: [
+        "sign",
+        "notary-signature-check",
+        "notarize-accepted",
+        "staple",
+        "verify-app-and-staple",
+        "archives"
+      ],
+      "notary-rejected": ["sign", "notary-signature-check", "notary-rejected"],
+      "staple-rejected": ["sign", "notary-signature-check", "notarize-accepted", "staple"],
+      "missing-auth": ["sign", "verify-app-and-staple"]
+    };
+    expect(events).toEqual(expected[scenario]);
   }
-  const notarizer = load("@electron/notarize", {
-    "./check-signature": {
-      checkSignatures: async () => {
-        events.push("notary-signature-check");
-      }
-    },
-    "./notarytool": {
-      isNotaryToolAvailable: async () => true,
-      notarizeAndWaitForNotaryTool: async () => {
-        events.push("notarize-accepted");
-      }
-    },
-    "./staple": {
-      stapleApp: async () => {
-        events.push("staple");
-      }
-    }
-  });
-  const { MacTargetHelper } = load("app-builder-lib/out/mac/MacTargetHelper", {
-    "../util/dynamicImport": { dynamicImport: async () => notarizer }
-  });
-  const { MacPackager } = load("app-builder-lib/out/macPackager", {
-    "./codeSign/macCodeSign": { isSignAllowed: () => true },
-    "./util/macosVersion": { isMacOsHighSierra: () => true }
-  });
-  const { PlatformPackager } = nodeRequire("app-builder-lib/out/platformPackager");
-  const helper = {
-    findSigningIdentity: async () => ({ name: "fake-identity" }),
-    buildSignOptions: async () => ({}),
-    notarizeIfProvided: async () => {
-      const options = vi
-        .spyOn(MacTargetHelper, "getNotarizeOptions")
-        .mockReturnValue({ appPath: "test.app" });
-      try {
-        await MacTargetHelper.prototype.notarizeIfProvided.call(
-          { packager: { platformSpecificBuildOptions: { notarize: true } } },
-          "test.app"
-        );
-      } finally {
-        options.mockRestore();
-      }
-    }
-  };
-  const fake = {
-    helper,
-    platformSpecificBuildOptions: {},
-    codeSigningInfo: { value: Promise.resolve({}) },
-    computeAsarOptions: async () => ({}),
-    computeAppOutDir: () => "signed-output",
-    appInfo: { productFilename: "Graider" },
-    getPlatformConfig: () => ({ platformName: "darwin", config: {} }),
-    doSign: async () => {
-      events.push("sign");
-    },
-    signApp: async () => MacPackager.prototype.sign.call(fake, "test.app"),
-    info: {
-      emitAfterSign: async () => {
-        events.push("verify-app-and-staple");
-      }
-    },
-    doPack: async () =>
-      PlatformPackager.prototype.doSignAfterPack.call(
-        fake,
-        "out",
-        "signed-output",
-        "darwin",
-        1,
-        {},
-        []
-      ),
-    packageInDistributableFormat: () => {
-      events.push("archives");
-    }
-  };
-  await MacPackager.prototype.packMacTargets.call(fake, "out", 1, [], null, {});
-  expect(events).toEqual([
-    "sign",
-    "notary-signature-check",
-    "notarize-accepted",
-    "staple",
-    "verify-app-and-staple",
-    "archives"
-  ]);
-});
+);

@@ -1095,6 +1095,102 @@ waiting for it after each diagnostic commit. Comprehensive exact-SHA CI on all
 applicable platforms is required before release acceptance. Diagnostic commits
 are not release acceptance and do not authorize production signing dispatch.
 
+#### Application verification investigation (run 43613762829)
+
+[Run 43613762829](https://github.com/msoecsse/graider/actions/runs/43613762829)
+at `7120b27284499b5ddc0e548236c377f985205ebc` passed the disposable Developer ID
+preflight and resolved the installed application signer. It entered
+`builder-app-notarize-staple`, then `builder-app-verification`, which rejected with
+the generic `verification-failure`. The failed gate and native cause cannot be
+recovered from discarded output. Entering verification alone does not establish
+notarization acceptance or a valid stapled ticket.
+
+Reinspection of installed app-builder-lib **26.15.3** confirms that
+`MacPackager.sign` awaits `MacTargetHelper.notarizeIfProvided` before
+`PlatformPackager.doSignAfterPack` emits `afterSign`. That helper can return
+without notarizing when options are disabled or credentials cannot be generated.
+When invoked, installed `@electron/notarize` awaits accepted notarization and
+stapling. Deterministic tests execute the installed success, rejected-notarization,
+rejected-stapling and missing-authentication paths: missing authentication can
+reach `afterSign`, where the independent ticket gate must still reject an
+unstapled app. No historical skip or notarization success is inferred here.
+
+The fixed terminal stage remains `builder-app-verification`. Its allowlisted
+categories now identify the independent operation that rejected:
+
+| Gate                                                                        | Category                      |
+| --------------------------------------------------------------------------- | ----------------------------- |
+| Main app strict signature and exact leaf certificate requirement            | `main-signature-failure`      |
+| Main app Developer ID authority and exact TeamIdentifier                    | `main-identity-failure`       |
+| Main app hardened runtime                                                   | `main-runtime-failure`        |
+| Main app XML/plutil parsing and exactly the required JIT entitlement        | `main-entitlements-failure`   |
+| Deep strict signature verification                                          | `deep-signature-failure`      |
+| Recursive Mach-O inventory, including filesystem inspection                 | `native-inventory-failure`    |
+| Required native Dugite payload presence                                     | `dugite-payload-missing`      |
+| Every native executable/dylib's strict signature and exact leaf requirement | `native-signature-failure`    |
+| Every native executable/dylib's Developer ID authority and TeamIdentifier   | `native-identity-failure`     |
+| Every native executable/dylib's hardened runtime                            | `native-runtime-failure`      |
+| Every native executable/dylib's exact required entitlements                 | `native-entitlements-failure` |
+| Independent app stapled-ticket validation                                   | `stapled-ticket-failure`      |
+
+These identify failing gates, not native root causes. For example, the signature
+gate's combined strict/certificate command cannot alone distinguish damaged code
+from a certificate mismatch. Only locally registered verifier errors carry a
+category through builder; forged messages/properties remain the generic failure.
+Native output, exception details, executable paths, certificate information and
+credentials remain private. Every previous acceptance check and its ordering is
+preserved; failure prevents archives. Focused tests inject each gate failure,
+including extensionless Dugite code, malformed entitlements and ticket validation,
+and verify safe propagation through the worker and parent pipe.
+
+Historical comparisons distinguish passing app verification from passing a whole
+production workflow; none of the listed workflows completed successfully:
+
+| Run                                                                         | Observed result after app verification           | Signing-step elapsed time (approximately) |
+| --------------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------- |
+| [43532058480](https://github.com/msoecsse/graider/actions/runs/43532058480) | Builder completed; outer DMG verification failed | 52 seconds                                |
+| [43550080038](https://github.com/msoecsse/graider/actions/runs/43550080038) | Builder completed; outer DMG verification failed | 65 seconds                                |
+| [43556223888](https://github.com/msoecsse/graider/actions/runs/43556223888) | Builder completed; explicit DMG signing failed   | 59 seconds                                |
+| [43610967706](https://github.com/msoecsse/graider/actions/runs/43610967706) | Disposable app signing failed before builder     | Under 1 second                            |
+| [43613762829](https://github.com/msoecsse/graider/actions/runs/43613762829) | App verification failed inside builder           | 31 minutes 27 seconds                     |
+
+The historical app/native/ticket requirements match the current requirements;
+later DMG verifier changes do not explain this app failure. Credentials, service
+state and actual produced apps cannot be assumed identical across runs.
+
+In 43613762829 the disposable preflight passed at **16:10:14 UTC** and the parent
+rendered builder failure at **16:41:40 UTC**. Parent `spawnSync` buffers stdout,
+stderr, FD3 and FD4 until child exit; all lifecycle observations consequently
+share the final log time. The 31-minute gap cannot locate the delay in packing,
+signing, notarization/stapling or verification, nor establish a hang.
+
+Safe bounded duration reporting now uses monotonic time at existing stage
+transitions/settlement and writes only fixed FD4 categories:
+`stage-duration-under-1m`, `stage-duration-1m-to-5m`, `stage-duration-5m-to-15m`,
+`stage-duration-15m-to-30m`, `stage-duration-30m-or-more`. No timer or handle is
+added, preserving pending-promise exit detection. On failure the parent renders
+these observations only after validating the entire newline-terminated stream,
+with a maximum of 128 records. Malformed, truncated or excessive streams are
+discarded in full. FD3 still requires its single exact terminal record; durations
+cannot establish completion. Real subprocess tests retain closed-pipe, pending
+promise, explicit-exit and output-suppression coverage.
+
+This is post-exit stage timing, not live progress. Live reporting is technically
+possible with a narrowly scoped asynchronous builder invocation and bounded pipe
+parsing, but emitting records before whole-stream validation would change the
+current integrity contract. No demonstrated subprocess transport defect warrants
+that rewrite. No keepalive, timeout, retry, signing identity, credential, trust,
+notarization or verification requirement is changed.
+
+For the next separately owner-authorized attempt, first require exact-SHA CI for
+the diagnostic commit. Preserve the exact terminal gate category and complete
+validated duration/lifecycle observations to locate the slow stage and failed
+requirement. A passing preflight or entered notarization/verification stage is
+insufficient. Require all real signature, ticket, DMG notarization/stapling and
+both installed CLI/Dugite proofs, then the downloaded/quarantined DMG **and** ZIP
+Finder acceptance below. This change dispatches no production workflow and makes
+no release acceptance claim; #54 remains open.
+
 #### Temporary Windows CI pause during #54
 
 During macOS signing diagnosis, main CI excludes Windows x64 matrix entries

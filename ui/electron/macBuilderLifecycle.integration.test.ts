@@ -27,7 +27,9 @@ function fixture() {
   for (const name of [
     "mac-production-builder.cjs",
     "mac-production-artifacts.cjs",
-    "mac-app-signing.cjs"
+    "mac-app-signing.cjs",
+    "verify-macos-signatures.cjs",
+    "macos-signing-config.cjs"
   ])
     fs.copyFileSync(path.join(ui, "scripts", name), path.join(scripts, name));
   fs.writeFileSync(
@@ -89,25 +91,26 @@ function lifecycleChild(
 }
 
 describe("real Node builder subprocess lifecycle", () => {
-  it.each([completion, "stage=builder-pack; category=builder-failure"])(
-    "delivers an exact FD3 record with the original four stdio descriptors: %s",
-    (record) => {
-      expect(process.versions.node.split(".")[0]).toBe("24");
-      const result = spawnSync(
-        process.execPath,
-        ["-e", `require('node:fs').writeSync(3, ${JSON.stringify(record)})`],
-        {
-          env: environment,
-          stdio: ["ignore", "pipe", "pipe", "pipe"],
-          encoding: "utf8",
-          timeout: CHILD_TIMEOUT_MS
-        }
-      );
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(0);
-      expect(result.output[3]).toBe(record);
-    }
-  );
+  it.each([
+    completion,
+    "stage=builder-pack; category=builder-failure",
+    "stage=builder-app-verification; category=stapled-ticket-failure"
+  ])("delivers an exact FD3 record with the original four stdio descriptors: %s", (record) => {
+    expect(process.versions.node.split(".")[0]).toBe("24");
+    const result = spawnSync(
+      process.execPath,
+      ["-e", `require('node:fs').writeSync(3, ${JSON.stringify(record)})`],
+      {
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe", "pipe"],
+        encoding: "utf8",
+        timeout: CHILD_TIMEOUT_MS
+      }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.output[3]).toBe(record);
+  });
 
   it("reproduces Node's silent zero exit for a pending promise with no handles", () => {
     const result = spawnSync(
@@ -214,10 +217,11 @@ describe("real Node builder subprocess lifecycle", () => {
     for (const record of [
       "",
       completion + "\nprivate",
-      "stage=builder-archive; category=archive-failure"
+      "stage=builder-archive; category=archive-failure",
+      "stage=builder-app-verification; category=native-entitlements-failure"
     ])
       expect(() => invoke(record)).toThrow(
-        record.startsWith("stage=builder-archive") ? record : "missing-completion-evidence"
+        record === "" || record.startsWith(completion) ? "missing-completion-evidence" : record
       );
     expect(() => invoke(completion, "process.exitCode = 1;")).toThrow("command-exit-failure");
     // Windows implements self-signals as forced termination with different
@@ -232,10 +236,20 @@ describe("real Node builder subprocess lifecycle", () => {
         "require('node:fs').writeSync(4, 'stage=builder-archive; category=completion-written\\n');"
       )
     ).toThrow("completion-record-not-received");
+    expect(() =>
+      invoke(
+        "",
+        "require('node:fs').writeSync(4, 'stage=builder-app-notarize-staple; category=stage-duration-30m-or-more\\n');"
+      )
+    ).toThrow(
+      "Builder lifecycle: stage=builder-app-notarize-staple; category=stage-duration-30m-or-more."
+    );
     for (const observation of [
       "stage=builder-archive; category=completion-written\nprivate path\n",
       "stage=builder-archive; category=completion-written",
-      "private credential output\n"
+      "private credential output\n",
+      "stage=builder-app-notarize-staple; category=stage-duration-30m-or-more\nprivate\n",
+      "stage=builder-archive; category=stage-entered\n".repeat(129)
     ]) {
       try {
         invoke("", `require('node:fs').writeSync(4, ${JSON.stringify(observation)});`);

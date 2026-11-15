@@ -18,6 +18,7 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const BUILDER_DIAGNOSTIC_PIPE = 3;
 const BUILDER_LIFECYCLE_PIPE = 4;
+const MAX_BUILDER_LIFECYCLE_RECORDS = 128;
 // Only errors created here may reach diagnostics. Never serialize caught errors.
 const safeFailures = new WeakSet();
 const failure = (stage, category) => {
@@ -49,7 +50,11 @@ const run = (file, args, environment, stage) => {
     const detail = result.output?.[BUILDER_DIAGNOSTIC_PIPE];
     const observations = result.output?.[BUILDER_LIFECYCLE_PIPE];
     const lines = typeof observations === "string" ? observations.split("\n") : [];
-    const valid = lines.pop() === "" && lines.length > 0 && lines.every(isLifecycle);
+    const valid =
+      lines.pop() === "" &&
+      lines.length > 0 &&
+      lines.length <= MAX_BUILDER_LIFECYCLE_RECORDS &&
+      lines.every(isLifecycle);
     const message =
       !result.error && !result.signal && typeof detail === "string" && isDiagnostic(detail)
         ? detail

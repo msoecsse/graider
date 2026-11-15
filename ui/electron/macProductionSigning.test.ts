@@ -1011,6 +1011,23 @@ describe("fail-closed macOS production signing", () => {
   });
 
   it.each([
+    ...[
+      "main-signature-failure",
+      "main-identity-failure",
+      "main-runtime-failure",
+      "main-entitlements-failure",
+      "deep-signature-failure",
+      "native-inventory-failure",
+      "dugite-payload-missing",
+      "native-signature-failure",
+      "native-identity-failure",
+      "native-runtime-failure",
+      "native-entitlements-failure",
+      "stapled-ticket-failure"
+    ].map((category) => [
+      "stage=builder-app-verification; category=" + category,
+      "builder-app-verification; category=" + category
+    ]),
     ...nodeRequire("./scripts/mac-app-signing.cjs").categories.map((category: string) => [
       "stage=builder-app-sign; category=" + category,
       "builder-app-sign; category=" + category
