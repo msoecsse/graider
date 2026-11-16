@@ -55,22 +55,23 @@ export interface LegacyCourseExpectation {
   readonly revision: string;
 }
 /** Production CLI safety boundary. Local Schema 1 is never compatibility evidence for the remote. */
-interface LegacyCourseRequest {
-  readonly root: string;
-  readonly client: GitHubClient;
+interface LocalCourseState {
   readonly remoteUrl: string;
   readonly localRevision: string;
+}
+type LegacyCourseRequest = {
+  readonly root: string;
+  readonly client: GitHubClient;
   readonly expected?: LegacyCourseExpectation | undefined;
   /** Backend-only capability: a live main-process guard closure, never CLI/env/IPC assertions. */
   readonly managedAuthorization?: {
     readonly binding: LegacyCourseExpectation;
     readonly revalidate: () => Promise<void>;
   };
-  readonly readLocalState?: () => Promise<{
-    readonly remoteUrl: string;
-    readonly localRevision: string;
-  }>;
-}
+} & (
+  | (LocalCourseState & { readonly readLocalState?: () => Promise<LocalCourseState> })
+  | { readonly readLocalState: () => Promise<LocalCourseState> }
+);
 export const assertAuthoritativeLegacyCourse = async (
   request: LegacyCourseRequest
 ): Promise<LegacyCourseExpectation> => {
@@ -79,9 +80,13 @@ export const assertAuthoritativeLegacyCourse = async (
   };
   const expected = request.managedAuthorization?.binding ?? request.expected;
   await request.managedAuthorization?.revalidate();
-  const localState = request.readLocalState
-    ? await request.readLocalState().catch(() => refuse("course_local_state_unavailable"))
-    : request;
+  const readLocalState = async (): Promise<LocalCourseState> =>
+    request.readLocalState
+      ? request.readLocalState().catch(() => refuse("course_local_state_unavailable"))
+      : "remoteUrl" in request
+        ? request
+        : refuse("course_local_state_unavailable");
+  const localState = await readLocalState();
   const local = loadCourseConfig(path.join(request.root, "course.yml"));
   if (local.status !== "success" || local.value.schema_version !== 1)
     return refuse("course_local_schema_invalid");
@@ -114,17 +119,36 @@ export const assertAuthoritativeLegacyCourse = async (
       return refuse(unavailable);
     }
   };
-  const identity = await observe(
-    () => request.client.getAuthenticatedUser(),
-    "course_account_unverified"
-  );
+  // These four reads are independent: file bytes are pinned to the local commit
+  // and become evidence only after the fresh default-branch revision matches it.
+  // Drain failures before leaving this boundary; retain deterministic diagnostics.
+  const [accountRead, repositoryRead, revisionRead, contentRead] = await Promise.allSettled([
+    observe(() => request.client.getAuthenticatedUser(), "course_account_unverified"),
+    observe(() => request.client.getRepository(owner, name), "course_repository_unavailable"),
+    observe(
+      () => request.client.getDefaultBranchCommitSha(owner, name),
+      "course_revision_unavailable"
+    ),
+    observe(
+      () =>
+        request.client.getRepositoryFileContent(
+          owner,
+          name,
+          "course.yml",
+          localState.localRevision
+        ),
+      "course_metadata_unavailable"
+    )
+  ]);
+  const observed = <T>(result: PromiseSettledResult<T>): T => {
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
+  };
+  const identity = observed(accountRead);
   if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id <= 0)
     return refuse("course_account_unverified");
   if (expected && identity.id !== expected.userId) return refuse("course_account_mismatch");
-  const repository = await observe(
-    () => request.client.getRepository(owner, name),
-    "course_repository_unavailable"
-  );
+  const repository = observed(repositoryRead);
   if (
     !repository ||
     repository.archived ||
@@ -134,17 +158,11 @@ export const assertAuthoritativeLegacyCourse = async (
     return refuse("course_repository_unavailable");
   if (expected && repository.id !== expected.repositoryId)
     return refuse("course_repository_mismatch");
-  const revision = await observe(
-    () => request.client.getDefaultBranchCommitSha(owner, name),
-    "course_revision_unavailable"
-  );
+  const revision = observed(revisionRead);
   if (!revision) return refuse("course_revision_unavailable");
   if (revision !== localState.localRevision || (expected && revision !== expected.revision))
     return refuse("course_revision_mismatch");
-  const bytes = await observe(
-    () => request.client.getRepositoryFileContent(owner, name, "course.yml", revision),
-    "course_metadata_unavailable"
-  );
+  const bytes = observed(contentRead);
   if (bytes === null) return refuse("course_metadata_unavailable");
   const authoritative = parseCourseConfig(bytes, "authoritative course.yml");
   if (
@@ -173,6 +191,11 @@ export const assertAuthoritativeLegacyCourse = async (
   )
     return refuse("course_account_mismatch");
   await request.managedAuthorization?.revalidate();
+  const finalLocalState = await readLocalState();
+  if (finalLocalState.remoteUrl !== localState.remoteUrl)
+    return refuse("course_repository_mismatch");
+  if (finalLocalState.localRevision !== localState.localRevision)
+    return refuse("course_revision_mismatch");
   return { userId: identity.id, repositoryId: repository.id, revision };
 };
 

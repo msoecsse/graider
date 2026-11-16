@@ -10,7 +10,12 @@ import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { OctokitGitHubClient } from "../../src/github/octokit-github-client.js";
 import { loadManifest } from "../../src/manifest/manifest-loader.js";
-import { APPLY_PHASES, type ApplyPerformance } from "../../src/github/apply-performance.js";
+import {
+  APPLY_PHASES,
+  measureApplyPhase,
+  withApplyPerformance,
+  type ApplyPerformance
+} from "../../src/github/apply-performance.js";
 import { GITHUB_READ_CONCURRENCY } from "../../src/github/bounded-github-reads.js";
 import { createManifestPath } from "../../src/manifest/manifest-paths.js";
 
@@ -24,27 +29,51 @@ const MISSING = 404;
 const FORBIDDEN = 403;
 const TEMPLATE = "lab04-template";
 const COURSE = "se2030-graider";
-const AUTHORITY_FIRST_REQUESTS = 1394;
-const AUTHORITY_RESUME_REQUESTS = 254;
-const AUTHORITY_FIRST_MS = 135_000;
-const AUTHORITY_RESUME_MS = 21_000;
+const AUTHORITY_FIRST_REQUESTS = 1122;
+const AUTHORITY_RESUME_REQUESTS = 252;
+const AUTHORITY_FIRST_MS = 71_500;
+const AUTHORITY_RESUME_MS = 20_500;
+const AUTHORITY_REQUESTS_PER_VALIDATION = 6;
+const WRITES_PER_STUDENT = 4;
 const ASSIGNMENT = "terms/27s1/assignments/lab04/assignment.yml";
 const TOKEN = "ghp_latency_test_secret";
 const roots: string[] = [];
-const FIRST_REQUESTS_WITH_GRADING = 426;
-const FIRST_REQUESTS_WITHOUT_GRADING = 306;
+const FIRST_REQUESTS_WITH_GRADING = 396;
+const FIRST_REQUESTS_WITHOUT_GRADING = 276;
 const RESUME_REQUESTS_WITH_GRADING = 246;
 const RESUME_REQUESTS_WITHOUT_GRADING = 156;
-const FIRST_MS_WITH_GRADING = 38_200;
-const FIRST_MS_WITHOUT_GRADING = 26_200;
+const FIRST_MS_WITH_GRADING = 35_200;
+const FIRST_MS_WITHOUT_GRADING = 23_200;
 const RESUME_MS_WITH_GRADING = 20_200;
 const RESUME_MS_WITHOUT_GRADING = 11_200;
 const READINESS_REQUESTS = 36;
 const PERMISSIONS_REQUESTS = 120;
+const CREATION_REQUESTS = 60;
 const DEPLOYMENT_REQUESTS = 90;
 const FIRST_EXPECTED_MISSING_GRADING = 150;
 const FIRST_EXPECTED_MISSING_UNINDEXED = 180;
 const FIRST_EXPECTED_MISSING_DISABLED = 90;
+
+// Measured at b40becc before this change; includes initial validation in readiness.
+const AUTHORITY_BEFORE = {
+  first: { requests: 1394, elapsedMs: 135_000, authorityRequests: 968 },
+  resume: { requests: 254, elapsedMs: 21_000, authorityRequests: 8 }
+};
+const AUTHORITY_FIRST_PHASES = {
+  readiness: { beforeRequests: 44, beforeMs: 2200, requests: 42, ms: 1700 },
+  planning: { beforeRequests: 30, beforeMs: 800, requests: 30, ms: 800 },
+  repositoryCreation: { beforeRequests: 330, beforeMs: 33_000, requests: 240, ms: 15_000 },
+  permissions: { beforeRequests: 600, beforeMs: 60_000, requests: 480, ms: 30_000 },
+  actionsConfiguration: { beforeRequests: 30, beforeMs: 3000, requests: 30, ms: 3000 },
+  workflowDeployment: { beforeRequests: 330, beforeMs: 33_000, requests: 270, ms: 18_000 },
+  verification: { beforeRequests: 30, beforeMs: 3000, requests: 30, ms: 3000 }
+};
+const AUTHORITY_RESUME_PHASES = {
+  ...AUTHORITY_FIRST_PHASES,
+  repositoryCreation: { beforeRequests: 0, beforeMs: 0, requests: 0, ms: 0 },
+  permissions: { beforeRequests: 60, beforeMs: 6000, requests: 60, ms: 6000 },
+  workflowDeployment: { beforeRequests: 60, beforeMs: 6000, requests: 60, ms: 6000 }
+};
 
 type PerformanceSnapshot = ReturnType<ApplyPerformance["snapshot"]>;
 const measurements = (summary: Readonly<Record<string, unknown>>): PerformanceSnapshot => {
@@ -252,7 +281,7 @@ describe(
       expect(profile.phases.planning.elapsedMs).toBe(
         Math.ceil(STUDENTS / GITHUB_READ_CONCURRENCY) * LATENCY_MS
       );
-      expect(profile.phases.repositoryCreation.httpRequests).toBe(DEPLOYMENT_REQUESTS);
+      expect(profile.phases.repositoryCreation.httpRequests).toBe(CREATION_REQUESTS);
       expect(profile.phases.permissions.httpRequests).toBe(PERMISSIONS_REQUESTS);
       expect(profile.phases.actionsConfiguration.httpRequests).toBe(STUDENTS);
       expect(profile.phases.workflowDeployment.httpRequests).toBe(
@@ -356,27 +385,30 @@ describe(
       expect(transport.peakWrites).toBe(1);
     });
     it("measures Apply including real authoritative validation before every write", async () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
       const transport = new ApplyTransport(true);
       transport.repositories.add(COURSE);
       vi.stubGlobal("fetch", transport.fetch);
       const cwd = fixture(true);
       transport.courseContent = fs.readFileSync(path.join(cwd, "course.yml"), "utf8");
       const githubClient = new OctokitGitHubClient({ token: TOKEN });
-      const run = async () => {
-        await beginAuthoritativeLegacyCliMutation({
-          root: cwd,
-          client: githubClient,
-          remoteUrl: `https://github.com/example-org/${COURSE}.git`,
-          localRevision: "baseline-sha"
+      const run = () =>
+        withApplyPerformance(async () => {
+          await measureApplyPhase("readiness", () =>
+            beginAuthoritativeLegacyCliMutation({
+              root: cwd,
+              client: githubClient,
+              remoteUrl: `https://github.com/example-org/${COURSE}.git`,
+              localRevision: "baseline-sha"
+            })
+          );
+          return runApplyCommand({
+            cwd,
+            assignmentFile: ASSIGNMENT,
+            options: normalizeCommonCommandOptions({ yes: true }),
+            githubClient
+          });
         });
-        return runApplyCommand({
-          cwd,
-          assignmentFile: ASSIGNMENT,
-          options: normalizeCommonCommandOptions({ yes: true }),
-          githubClient
-        });
-      };
       const start = Date.now();
       const pending = run();
       await vi.runAllTimersAsync();
@@ -386,6 +418,10 @@ describe(
       expect(transport.requests).toBe(AUTHORITY_FIRST_REQUESTS);
       expect(Date.now() - start).toBe(AUTHORITY_FIRST_MS);
       const firstRequests = transport.requests;
+      const authorityRequests = firstRequests - FIRST_REQUESTS_WITH_GRADING;
+      expect(authorityRequests).toBe(
+        AUTHORITY_REQUESTS_PER_VALIDATION * (STUDENTS * WRITES_PER_STUDENT + 1)
+      );
       const resumeStart = Date.now();
       const resumed = run();
       await vi.runAllTimersAsync();
@@ -395,8 +431,24 @@ describe(
       expect(transport.requests - firstRequests).toBe(AUTHORITY_RESUME_REQUESTS);
       expect(Date.now() - resumeStart).toBe(AUTHORITY_RESUME_MS);
       expect(transport.peakWrites).toBe(1);
+      expect(transport.peakReads).toBe(GITHUB_READ_CONCURRENCY);
+      for (const [result, expected] of [
+        [first, AUTHORITY_FIRST_PHASES],
+        [second, AUTHORITY_RESUME_PHASES]
+      ] as const) {
+        const profile = measurements(result.summary);
+        expect(profile.elapsedMs).toBe(result === first ? AUTHORITY_FIRST_MS : AUTHORITY_RESUME_MS);
+        expect(APPLY_PHASES.reduce((sum, phase) => sum + profile.phases[phase].elapsedMs, 0)).toBe(
+          profile.elapsedMs
+        );
+        for (const phase of APPLY_PHASES) {
+          expect(profile.phases[phase].httpRequests, phase).toBe(expected[phase].requests);
+          expect(profile.phases[phase].elapsedMs, phase).toBe(expected[phase].ms);
+          expect(profile.phases[phase].failedResponses, phase).toBe(0);
+        }
+      }
       process.stdout.write(
-        `${JSON.stringify({ authority: true, first: { requests: firstRequests, elapsedMs: AUTHORITY_FIRST_MS }, second: { requests: transport.requests - firstRequests, elapsedMs: Date.now() - resumeStart } })}\n`
+        `${JSON.stringify({ authority: true, before: AUTHORITY_BEFORE, phases: { first: AUTHORITY_FIRST_PHASES, resume: AUTHORITY_RESUME_PHASES }, first: { requests: firstRequests, authorityRequests, elapsedMs: AUTHORITY_FIRST_MS, profile: measurements(first.summary) }, second: { requests: transport.requests - firstRequests, elapsedMs: Date.now() - resumeStart, profile: measurements(second.summary) } })}\n`
       );
     });
   }

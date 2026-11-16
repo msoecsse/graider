@@ -594,6 +594,23 @@ describe("OctokitGitHubClient", () => {
       id: OctokitTestNumber.UserId
     });
   });
+  it("resolves the current default branch in one request without reusing a branch name", async () => {
+    const octokit = createMockOctokit();
+    const repository = vi.spyOn(octokit.rest.repos, "get");
+    const commits = vi
+      .spyOn(octokit.rest.repos, "listCommits")
+      .mockResolvedValueOnce({ data: [{ sha: EXISTING_SHA }] })
+      .mockResolvedValueOnce({ data: [{ sha: CREATED_SHA }] });
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getDefaultBranchCommitSha(OWNER, REPO)).resolves.toBe(EXISTING_SHA);
+    await expect(client.getDefaultBranchCommitSha(OWNER, REPO)).resolves.toBe(CREATED_SHA);
+    expect(repository).not.toHaveBeenCalled();
+    expect(commits).toHaveBeenCalledTimes(2);
+    for (const [input] of commits.mock.calls) {
+      expect(input).toEqual({ owner: OWNER, repo: REPO, per_page: 1 });
+      expect(input).not.toHaveProperty("sha");
+    }
+  });
 
   it("maps faculty display name and forwards cancellation with a bounded request timeout", async () => {
     const octokit = createMockOctokit();

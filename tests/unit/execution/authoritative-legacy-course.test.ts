@@ -157,7 +157,7 @@ describe("authoritative legacy mutation compatibility", () => {
         guarded.createRepository({ owner: "example-org", name: "student", private: true })
       ).rejects.toThrow("Course mutation unavailable");
       expect(write).not.toHaveBeenCalled();
-      expect(readLocalState).toHaveBeenCalledTimes(2);
+      expect(readLocalState).toHaveBeenCalledTimes(3);
     }
   );
   it("revalidates before each production API mutation, refusing migration during planning", async () => {
@@ -186,6 +186,82 @@ describe("authoritative legacy mutation compatibility", () => {
     const f = fixture();
     await f.run();
     expect(f.mutate).toHaveBeenCalledOnce();
+  });
+  it.each(["head", "origin"] as const)(
+    "rejects local %s changes during remote observations",
+    async (changed) => {
+      const f = fixture();
+      let local = { remoteUrl: f.request.remoteUrl, localRevision: sha };
+      f.read.mockImplementation(() => {
+        local = {
+          remoteUrl: changed === "origin" ? "https://github.com/other/course.git" : local.remoteUrl,
+          localRevision: changed === "head" ? "changed-head" : sha
+        };
+        return Promise.resolve(fs.readFileSync(path.join(f.root, "course.yml"), "utf8"));
+      });
+      await expect(
+        assertAuthoritativeLegacyCourse({
+          ...f.request,
+          readLocalState: () => Promise.resolve(local)
+        })
+      ).rejects.toMatchObject({
+        diagnosticCode:
+          changed === "origin" ? "course_repository_mismatch" : "course_revision_mismatch"
+      });
+    }
+  );
+  it("reads independent evidence concurrently and drains failures before returning", async () => {
+    const f = fixture();
+    const events: string[] = [];
+    let finishContent: ((content: string) => void) | undefined;
+    f.account.mockImplementation(() => {
+      events.push("identity");
+      return Promise.reject(new GitHubClientError("auth_failed", "secret-token"));
+    });
+    f.repository.mockImplementation(() => {
+      events.push("repository");
+      return Promise.resolve(null);
+    });
+    f.revision.mockImplementation(() => {
+      events.push("revision");
+      return Promise.resolve(sha);
+    });
+    f.read.mockImplementation(() => {
+      events.push("content");
+      return new Promise<string>((resolve) => {
+        finishContent = resolve;
+      });
+    });
+    let completed = false;
+    const pending = assertAuthoritativeLegacyCourse(f.request).catch((error: unknown) => {
+      completed = true;
+      return error;
+    });
+    await vi.waitFor(() => {
+      expect(events).toEqual(["identity", "repository", "revision", "content"]);
+    });
+    expect(completed).toBe(false);
+    expect(finishContent).toBeDefined();
+    finishContent?.("schema_version: 2\n");
+    expect(await pending).toMatchObject({ diagnosticCode: "course_account_unverified" });
+    expect(f.revision).toHaveBeenCalledOnce();
+  });
+  it("checks identity after the final revision observation and retains both live guards", async () => {
+    const f = fixture();
+    const binding = { userId: 42, repositoryId: 20, revision: sha };
+    const revalidate = vi.fn().mockResolvedValue(undefined);
+    await assertAuthoritativeLegacyCourse({
+      ...f.request,
+      managedAuthorization: { binding, revalidate }
+    });
+    expect(revalidate).toHaveBeenCalledTimes(2);
+    f.revision.mockResolvedValueOnce(sha).mockImplementation(() => {
+      f.account.mockResolvedValue({ id: 43, username: "other" });
+      return Promise.resolve(sha);
+    });
+    await expect(assertAuthoritativeLegacyCourse(f.request)).rejects.toMatchObject({
+      diagnosticCode: "course_account_mismatch"
+    });
   });
   it.each([2, 3, UNKNOWN_SCHEMA_VERSION])(
     "rejects authoritative schema %s despite a valid Schema 1 cache",

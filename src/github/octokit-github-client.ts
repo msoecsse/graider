@@ -783,10 +783,9 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   async getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {
-    const repository = await this.getRepository(owner, repo);
-    return repository === null
-      ? undefined
-      : await this.getCommitSha(owner, repo, repository.defaultBranch);
+    // Omitting sha asks GitHub for its current default branch on every request.
+    // Avoid a redundant repository read and a branch-name race between requests.
+    return this.getCommitSha(owner, repo);
   }
 
   async createRepositoryFromTemplate(input: CreateFromTemplateInput): Promise<GitHubRepository> {
@@ -1349,14 +1348,14 @@ export class OctokitGitHubClient implements GitHubClient {
   private async getCommitSha(
     owner: string,
     repo: string,
-    branch: string
+    branch?: string
   ): Promise<string | undefined> {
     const data = await this.runNullable(() =>
       this.octokit.rest.repos.listCommits({
         owner,
         per_page: FIRST_PAGE_LIMIT,
         repo,
-        sha: branch
+        ...(branch === undefined ? {} : { sha: branch })
       })
     );
 

@@ -153,7 +153,7 @@ Readiness still completes authentication before scheduling student-account
 reads. No cross-Apply negative cache, polling
 loop, retry-limit reduction or authorization cache was introduced.
 
-The authority-inclusive benchmark runs the actual authoritative validator on
+At #59, the authority-inclusive benchmark ran the actual authoritative validator on
 the fake course initially and before every write. It supplies fixed local Git
 identity/revision inputs, includes the initial validation in its measurement,
 and excludes UI session setup and local Git overhead. Both baseline and current
@@ -165,13 +165,97 @@ parent source in a disposable directory.
 | New repositories                         | 1,460 → 1,394       | 146.0 s → 135.0 s      |
 | Manifest-tracked rerun                   | 285 → 254           | 28.5 s → 21.0 s        |
 
-This is a **7.5%** improvement for new provisioning and **26.3%** on rerun in
-the controlled model. New provisioning retains 968 authority requests: eight
-initial checks plus eight for each of 120 writes. These checks dominate the
-remaining latency. The larger 22.4% gain above describes the provisioning core;
-it should not be presented as a measured end-to-end GUI speedup. Improving this
-remaining cost would require a separate review of authorization validation,
-without weakening live identity, schema or revision checks.
+That change improved new provisioning **7.5%** and rerun **26.3%** in the
+controlled model. It retained 968 authority requests: eight initial requests
+plus eight for each of 120 writes. The larger 22.4% gain above described the
+provisioning core. The following focused optimization addresses this remaining
+validator cost; neither measurement is a live end-to-end GUI speedup.
+
+### Fresh authority validation optimization (#60)
+
+Every mutation still obtains fresh observations. The validator now overlaps four
+independent reads: authenticated account, repository identity, current
+default-branch revision and `course.yml` pinned to the observed local HEAD.
+File bytes count as evidence only after the fresh revision equals both local
+HEAD and the operation binding, and after full remote Schema 1 validation.
+All four reads settle before a failure returns, with deterministic diagnostic
+precedence. This bounds this batch to four HTTP requests and prevents failed
+reads from escaping into a later operation.
+
+`getDefaultBranchCommitSha` now uses `GET /repos/{owner}/{repo}/commits?per_page=1`
+without `sha`. GitHub resolves the current default branch for each request
+([REST endpoint contract](https://docs.github.com/en/rest/commits/commits#list-commits)).
+This removes the helper's redundant repository-metadata request, twice per
+validation, and avoids a stale branch-name lookup. The validator's explicit
+fresh repository identity/archived/access check remains. Template lookups still
+specify their observed branch. The same helper also removes one redundant read
+when recording each new student repository's initial commit.
+
+After the initial batch and schema checks, a fresh default-branch revision is
+checked again, then the account is checked again. These final checks remain
+serial: parallelizing them could miss an account change during the final
+revision request. Both managed live guard calls remain in their original order,
+before and after remote validation. Their independent current-session,
+permission, revision, schema and source observations cannot be replaced by an
+unchanged commit SHA or a prior successful callback. The adapter removes an
+unused preliminary local Git read; the validator reads HEAD/origin at the start
+and now also at the end, including after the final live guard, blocking local
+changes during network waits. No authorization or course-content cache is added,
+and write ordering, manifest persistence, collision probes, recovery and retry/
+rate-limit handling are unchanged.
+
+Baseline `b40becc` was rerun before production edits with the same local Octokit
+transport and 100 ms virtual HTTP latency. The extended benchmark now includes
+initial validation in readiness phase diagnostics, so phase counts and elapsed
+time sum to the measured total. The following is new provisioning of 30 student
+repositories with indexed managed grading workflows:
+
+| Phase                 | HTTP before → after | Simulated elapsed before → after |
+| --------------------- | ------------------- | -------------------------------- |
+| Readiness             | 44 → 42             | 2.2 s → 1.7 s                    |
+| Planning              | 30 → 30             | 0.8 s → 0.8 s                    |
+| Repository creation   | 330 → 240           | 33.0 s → 15.0 s                  |
+| Permissions           | 600 → 480           | 60.0 s → 30.0 s                  |
+| Actions configuration | 30 → 30             | 3.0 s → 3.0 s                    |
+| Workflow deployment   | 330 → 270           | 33.0 s → 18.0 s                  |
+| Verification          | 30 → 30             | 3.0 s → 3.0 s                    |
+| **Total**             | **1,394 → 1,122**   | **135.0 s → 71.5 s**             |
+
+This saves **272 requests (19.5%)** and **63.5 simulated seconds (47.0% less
+time, 1.89× throughput for this serial scenario)**. Authority itself falls from
+968 to 726 requests (**25% fewer**), with six requests and three network-latency
+rounds per validation instead of eight serial requests. Removing authority
+metadata reads saves 24.2 s; overlapping its initial reads saves 36.3 s; removing
+30 creation metadata reads saves another 3.0 s. All 120 mutations remain serial;
+peak read concurrency is four and peak write concurrency is one.
+
+The manifest-tracked rerun performs no mutations: **254 → 252 HTTP** and
+**21.0 s → 20.5 s** (2.4% less time). Only initial authority validation improves;
+its readiness phase falls from 44 requests/2.2 s to 42 requests/1.7 s. Its other
+phases are unchanged: planning 30/0.8 s, creation 0/0 s, permissions 60/6.0 s,
+Actions 30/3.0 s, deployment 60/6.0 s, verification 30/3.0 s. Without the authority
+wrapper, current new provisioning is 396 requests/35.2 s with grading, or
+276/23.2 s without grading; reruns retain #59's counts and timings.
+
+The benchmark executes the real authoritative validator and all prewrite
+boundaries. It supplies fixed local Git identity/revision and excludes local Git
+wall time, UI setup and the managed main-process guard callback's additional
+remote access reads. Both callback invocations remain intact in production and
+are covered by managed Apply regressions. These results measure the shared
+validator improvement, not a measured 47% GUI wall-time gain. Permissions remain
+the largest measured phase (30.0 s); authority still costs 36.3 s across 121
+validations, and the unchanged live guard adds workload-dependent cost in the
+GUI. Sharing live-guard evidence would require a separate typed authority
+contract proving equivalent fresh identity/access/source checks; this change
+does not infer that evidence from a successful opaque callback.
+
+Adversarial GUI tests change account, permissions, repository identity, remote
+revision, local HEAD/origin, local/remote schema or the live guard immediately
+after creation, and assert that later collaborator/team mutations are blocked.
+The created repository remains recoverable through the existing durable manifest
+path. Validator tests also cover local changes during observations, account
+changes during the final revision read, concurrent failure draining and retained
+live guards. No live repository provisioning is involved.
 
 Reproduce with `npx vitest run tests/performance/apply-latency.test.ts` and
 `npx vitest run tests/unit/github/bounded-github-reads.test.ts`. Tests pin request

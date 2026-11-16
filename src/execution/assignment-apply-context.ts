@@ -75,7 +75,6 @@ const runManagedAssignmentApplyInternal = async (
       await assertAuthoritativeLegacyCourse({
         root: request.root,
         client,
-        ...(await readLocalState()),
         readLocalState,
         managedAuthorization: { binding: request.binding, revalidate }
       });

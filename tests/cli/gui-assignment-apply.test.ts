@@ -105,9 +105,11 @@ const fixture = async () => {
   );
   const content = fs.readFileSync(path.join(root, "course.yml"), "utf8");
   const read = client.getRepositoryFileContent.bind(client);
-  vi.spyOn(client, "getRepositoryFileContent").mockImplementation(async (owner, repo, file, ref) =>
-    repo === "se2030-graider" && file === "course.yml" ? content : read(owner, repo, file, ref)
-  );
+  const readCourse = vi
+    .spyOn(client, "getRepositoryFileContent")
+    .mockImplementation(async (owner, repo, file, ref) =>
+      repo === "se2030-graider" && file === "course.yml" ? content : read(owner, repo, file, ref)
+    );
   vi.spyOn(process, "cwd").mockReturnValue(root);
   const originalResolve = composition.resolveProductionGitHubClient;
   const resolve = vi.spyOn(composition, "resolveProductionGitHubClient");
@@ -156,6 +158,7 @@ const fixture = async () => {
     previousRevision,
     revision,
     getRevision,
+    readCourse,
     invalidate: () => {
       authorized = false;
     }
@@ -210,6 +213,60 @@ describe("GUI OAuth Apply backend boundary", () => {
     expect(f.client.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
     expect(await git(f.root, ["status", "--porcelain"])).toBe("");
   });
+
+  it.each([
+    ["account", "course_account_mismatch"],
+    ["permissions", "course_access_denied"],
+    ["repository", "course_repository_mismatch"],
+    ["revision", "course_revision_mismatch"],
+    ["head", "course_revision_mismatch"],
+    ["origin", "course_repository_mismatch"],
+    ["remote_schema", "course_authoritative_schema_invalid"],
+    ["local_schema", "course_local_schema_invalid"],
+    ["guard", "course_authorization_changed"]
+  ] as const)(
+    "blocks later Apply mutations after %s changes between writes",
+    async (changed, code) => {
+      const f = await fixture();
+      const create = f.client.createRepository.bind(f.client);
+      const repository = await f.client.getRepository("example-org", "se2030-graider");
+      if (!repository) throw new Error("Missing course repository fixture.");
+      vi.spyOn(f.client, "createRepository").mockImplementation(async (input) => {
+        const created = await create(input);
+        if (changed === "account")
+          vi.spyOn(f.client, "getAuthenticatedUser").mockResolvedValue({
+            id: USER_ID + 1,
+            username: "other"
+          });
+        if (changed === "permissions")
+          vi.spyOn(f.client, "getRepository").mockRejectedValue(
+            new GitHubClientError("permission_denied", OAUTH_TOKEN)
+          );
+        if (changed === "repository")
+          vi.spyOn(f.client, "getRepository").mockResolvedValue({
+            ...repository,
+            id: COURSE_ID + 1
+          });
+        if (changed === "revision") f.getRevision.mockResolvedValue(f.previousRevision);
+        if (changed === "head")
+          await git(f.root, ["commit", "--allow-empty", "-m", "Concurrent local change"]);
+        if (changed === "origin")
+          await git(f.root, ["remote", "set-url", "origin", "https://github.com/other/course.git"]);
+        if (changed === "remote_schema") f.readCourse.mockResolvedValue("schema_version: 2\n");
+        if (changed === "local_schema")
+          fs.writeFileSync(path.join(f.root, "course.yml"), "schema_version: 2\n");
+        if (changed === "guard") f.invalidate();
+        return created;
+      });
+      const result = await f.run({});
+      expect(result.apply?.status).toBe("partial_success");
+      expect(f.client.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
+      expect(f.client.mutations.addedCollaborators).toHaveLength(0);
+      expect(f.client.mutations.teamPermissions).toHaveLength(0);
+      expect(JSON.stringify(result)).toContain(code);
+      expect(JSON.stringify(result)).not.toContain(OAUTH_TOKEN);
+    }
+  );
 
   it("preserves standalone CLI refusal of stale repository locators even with a valid token", async () => {
     const f = await fixture();
