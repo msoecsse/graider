@@ -523,7 +523,8 @@ const legacyFixture = async () => {
           userId: 42,
           course,
           signal: f.request.signal,
-          revalidateSession: async () => authorized
+          revalidateSession: async () => authorized,
+          resynchronize: () => f.sync()
         },
         await f.sync()
       )
@@ -591,36 +592,163 @@ describe("safe legacy operational source synchronization with bundled Git", () =
     expect(f.snapshot()).toEqual(before);
     expect(await git(f.legacy, ["reflog", "--format=%H %gs"])).toBe(reflog);
   });
-  it("identifies clean behind source using managed history before legacy has fetched; update then fresh retry", async () => {
+  it("automatically synchronizes a clean behind source before a new mutation", async () => {
     const f = await legacyFixture();
     const target = await f.advance();
-    const mutation = vi.fn(async () => {});
-    await expect(f.guard.run("legacy", undefined, "new_mutation", mutation)).rejects.toMatchObject({
-      result: {
-        reason: "operational_source_updateable",
-        action: "update_source",
-        courseFolderId: "legacy"
-      }
+    const mutation = vi.fn(async (context) => {
+      expect(context.operationalCommit).toBe(target);
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
     });
-    expect(f.fetch).not.toHaveBeenCalled();
-    expect(mutation).not.toHaveBeenCalled();
-    await f.guard.updateSource("legacy");
+    await f.guard.run("legacy", undefined, "new_mutation", mutation);
     expect(f.ff).toHaveBeenCalledExactlyOnceWith({
       expectedHead: f.original,
       expectedBranch: "main",
       targetCommit: target,
+      preserveLocalChanges: true,
       signal: f.request.signal
     });
-    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
     expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(target);
-    expect(await git(f.legacy, ["rev-list", "--merges", "HEAD"])).toBe("");
     expect(await git(f.remote, ["rev-parse", "main"])).toBe(target);
     expect(f.snapshot().config).not.toMatch(/fixture-private-token|extraHeader/);
-    expect(mutation).not.toHaveBeenCalled();
+    expect(mutation).toHaveBeenCalledOnce();
+  });
+  const runtimeFiles = async (f: Awaited<ReturnType<typeof legacyFixture>>) => {
+    const tracked = "terms/27s1/manifests/hw3/manifest.yml";
+    const files = [
+      tracked,
+      ".graider/grading/27s1/hw3/data.json",
+      ".idea/workspace.xml",
+      "terms/27s1/manifests/hw4/manifest.yml",
+      "ignored-data/grade.json"
+    ];
+    for (const file of files) {
+      fs.mkdirSync(path.dirname(path.join(f.legacy, file)), { recursive: true });
+      fs.writeFileSync(path.join(f.legacy, file), "preserve local grading bytes\n");
+    }
+    fs.appendFileSync(path.join(f.legacy, ".git/info/exclude"), "\n/ignored-data/\n");
+    // Track the runtime manifest in the fixture's authoritative history.
+    await git(f.legacy, ["add", tracked]);
+    await git(f.legacy, ["commit", "-m", "Track runtime manifest"]);
+    await git(f.legacy, ["push", "origin", "main"]);
+    await git(f.writer, ["pull", "--ff-only"]);
+    fs.appendFileSync(path.join(f.legacy, tracked), "local runtime edit\n");
+    return () => files.map((file) => [file, fs.readFileSync(path.join(f.legacy, file), "utf8")]);
+  };
+  it.each([false, true])(
+    "preserves modified/untracked/ignored runtime data, source behind=%s",
+    async (behind) => {
+      const f = await legacyFixture();
+      const snapshot = await runtimeFiles(f);
+      const before = snapshot();
+      const target = behind ? await f.advance() : await git(f.legacy, ["rev-parse", "HEAD"]);
+      const mutation = vi.fn(async () => {});
+      await f.guard.run("legacy", undefined, "new_mutation", mutation);
+      expect(mutation).toHaveBeenCalledOnce();
+      expect(snapshot()).toEqual(before);
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
+      expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(target);
+      expect(f.ff).toHaveBeenCalledTimes(behind ? 1 : 0);
+    }
+  );
+  it("reconciles an older cache result when the registered source already matches GitHub", async () => {
+    const f = await legacyFixture();
+    const stale = await f.sync();
+    const target = await f.advance();
+    await git(f.legacy, ["pull", "--ff-only"]);
+    const synchronize = vi.spyOn(f.session, "withSynchronizedCourse");
+    synchronize.mockImplementationOnce(async (_id, _user, operation) =>
+      operation(
+        {
+          token: "never-log-token",
+          userId: 42,
+          course: { ...f.request.course, localFolderIds: ["legacy"] },
+          signal: f.request.signal,
+          revalidateSession: async () => true,
+          resynchronize: () => f.sync()
+        },
+        stale
+      )
+    );
+    const mutation = vi.fn(async (context) => expect(context.authoritativeCommit).toBe(target));
+    const log = vi.spyOn(console, "info");
     await f.guard.run("legacy", undefined, "new_mutation", mutation);
     expect(mutation).toHaveBeenCalledOnce();
-    expect(f.session.withSynchronizedCourse).toHaveBeenCalledTimes(3);
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(target);
+    expect(f.ff).not.toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).not.toContain("never-log-token");
+    expect(log).toHaveBeenCalledWith(
+      "Graider course synchronization",
+      expect.stringContaining(target)
+    );
   });
+  it("refuses a remote advance during automatic synchronization before invoking assignment creation", async () => {
+    const f = await legacyFixture();
+    await f.advance();
+    f.fetch.mockImplementationOnce(async (request) => {
+      await f.advance(courseYaml.replace("Original title", "Newer during creation"));
+      await f.fetchOrigin(request);
+    });
+    const before = f.snapshot();
+    const mutation = vi.fn(async () => {});
+    await expect(f.guard.run("legacy", undefined, "new_mutation", mutation)).rejects.toMatchObject({
+      result: { reason: "remote_version_conflict" }
+    });
+    expect(mutation).not.toHaveBeenCalled();
+    expect(f.ff).not.toHaveBeenCalled();
+    expect(f.snapshot()).toEqual(before);
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(f.original);
+  });
+  it("failed automatic synchronization preserves every local file", async () => {
+    const f = await legacyFixture();
+    const snapshot = await runtimeFiles(f);
+    const before = snapshot();
+    const head = await git(f.legacy, ["rev-parse", "HEAD"]);
+    await f.advance();
+    f.fetch.mockRejectedValueOnce(new Error("synthetic network failure with secret"));
+    const mutation = vi.fn(async () => {});
+    await expect(f.guard.run("legacy", undefined, "new_mutation", mutation)).rejects.toMatchObject({
+      result: { reason: "operational_source_unsafe", action: "retry" }
+    });
+    expect(mutation).not.toHaveBeenCalled();
+    expect(snapshot()).toEqual(before);
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(head);
+  });
+  it.each(["tracked", "untracked", "ignored", "case alias", "rules"])(
+    "refuses incoming overlap with %s local data",
+    async (kind) => {
+      const f = await legacyFixture();
+      const local =
+        kind === "tracked" ? "course.yml" : kind === "case alias" ? "DATA.json" : "data.json";
+      fs.writeFileSync(path.join(f.legacy, local), "preserve exact local data\n");
+      if (kind === "ignored")
+        fs.appendFileSync(path.join(f.legacy, ".git/info/exclude"), "\n/data.json\n");
+      const incoming =
+        kind === "tracked" ? "course.yml" : kind === "rules" ? ".gitattributes" : "data.json";
+      fs.writeFileSync(
+        path.join(f.writer, incoming),
+        kind === "rules" ? "*.json text\n" : "remote data\n"
+      );
+      await git(f.writer, ["add", incoming]);
+      await git(f.writer, ["commit", "-m", "Incoming overlap"]);
+      await git(f.writer, ["push", "origin", "main"]);
+      // Keep metadata valid for the tracked-overlap case.
+      if (kind === "tracked") {
+        fs.writeFileSync(
+          path.join(f.writer, "course.yml"),
+          courseYaml.replace("Original title", "Changed")
+        );
+        await git(f.writer, ["commit", "-am", "Valid metadata"]);
+        await git(f.writer, ["push", "origin", "main"]);
+      }
+      const mutation = vi.fn(async () => {});
+      await expect(f.guard.run("legacy", undefined, "new_mutation", mutation)).rejects.toThrow();
+      expect(fs.readFileSync(path.join(f.legacy, local), "utf8")).toBe(
+        "preserve exact local data\n"
+      );
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(f.original);
+      expect(mutation).not.toHaveBeenCalled();
+    }
+  );
   it("remote advancing during preparation cannot advance legacy beyond the managed validated commit", async () => {
     const f = await legacyFixture();
     const target = await f.advance();
@@ -728,6 +856,12 @@ describe("safe legacy operational source synchronization with bundled Git", () =
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.ff).not.toHaveBeenCalled();
     expect(tree(f.legacy)).toEqual(before);
+    if (["ahead", "diverged", "conflict", "tracked", "staged"].includes(kind)) {
+      const mutation = vi.fn(async () => {});
+      await expect(f.guard.run("legacy", undefined, "new_mutation", mutation)).rejects.toThrow();
+      expect(mutation).not.toHaveBeenCalled();
+      expect(tree(f.legacy)).toEqual(before);
+    }
   });
   it("refuses loss of authorization during fetch without changing the worktree", async () => {
     const f = await legacyFixture();

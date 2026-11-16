@@ -76,6 +76,8 @@ export interface GitWorkspaceSynchronizer extends GitWorkspaceInspector {
     readonly expectedHead: string;
     readonly expectedBranch: string;
     readonly targetCommit: string;
+    /** Preserve proven non-overlapping working files. */
+    readonly preserveLocalChanges?: boolean;
     readonly signal?: AbortSignal;
   }): Promise<void>;
   fastForwardUpstream(request: {

@@ -240,6 +240,8 @@ export interface GitWorkspaceSynchronizer extends GitWorkspaceReader {
     readonly expectedHead: string;
     readonly expectedBranch: string;
     readonly targetCommit: string;
+    /** Preserve proven non-overlapping working files; never stash or reset. */
+    readonly preserveLocalChanges?: boolean;
     readonly signal?: AbortSignal;
   }): Promise<void>;
   fastForwardUpstream(request: {

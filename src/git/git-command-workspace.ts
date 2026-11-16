@@ -815,6 +815,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     readonly expectedHead: string;
     readonly expectedBranch: string;
     readonly targetCommit: string;
+    readonly preserveLocalChanges?: boolean;
     readonly signal?: AbortSignal;
   }): Promise<void> {
     try {
@@ -846,12 +847,54 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         state.upstream.remote !== "origin" ||
         state.upstream.branch !== `origin/${request.expectedBranch}` ||
         state.upstream.relation !== "behind" ||
-        tree.trackedChanges.length > 0 ||
-        tree.stagedChanges.length > 0 ||
         tree.conflicts.length > 0 ||
-        tree.untrackedPaths.length > 0
+        (!request.preserveLocalChanges &&
+          (tree.trackedChanges.length > 0 ||
+            tree.stagedChanges.length > 0 ||
+            tree.untrackedPaths.length > 0))
       )
         throw new GitError("operation_rejected", "fast_forward");
+      const evidence = request.preserveLocalChanges
+        ? await this.localFastForwardEvidence(tree)
+        : null;
+      if (request.preserveLocalChanges) {
+        const incoming = parseSafetyPaths(
+          await this.executor.run(
+            this.root,
+            [
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--no-renames",
+              "--name-only",
+              "-z",
+              request.expectedHead,
+              target,
+              "--"
+            ],
+            "fast_forward"
+          )
+        );
+        if (
+          evidence === null ||
+          (await hasUnsafeIncomingFilesystemPaths(this.root, incoming)) ||
+          incoming.some(
+            (file) =>
+              incomingRulesAffectLocalPaths(file, evidence.paths) ||
+              evidence.paths.some((local) => pathsCollide(file, local))
+          )
+        )
+          throw new GitError("operation_rejected", "fast_forward", { code: "local_overlap" });
+        const current = await this.inspect({ readOnly: true });
+        const currentEvidence = await this.localFastForwardEvidence(current.workingTree);
+        if (
+          JSON.stringify(current) !== JSON.stringify(state) ||
+          currentEvidence?.fingerprint !== evidence.fingerprint ||
+          (await hasUnsafeIncomingFilesystemPaths(this.root, incoming)) ||
+          hasUnsafeFastForwardMetadata(this.root)
+        )
+          throw new GitError("operation_rejected", "fast_forward", { code: "repository_changed" });
+      }
       if (request.signal?.aborted) throw new GitError("operation_rejected", "fast_forward");
       await this.executor.run(
         this.root,
@@ -864,10 +907,23 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           "--ff-only",
           "--no-edit",
           "--no-autostash",
+          "--no-overwrite-ignore",
           target
         ],
         "fast_forward"
       );
+      if (evidence !== null) {
+        const after = await this.inspect({ readOnly: true });
+        const preserved = await this.localFastForwardEvidence(after.workingTree);
+        if (
+          after.head.kind !== "attached" ||
+          after.head.commit !== target ||
+          preserved?.fingerprint !== evidence.fingerprint
+        )
+          throw new GitError("operation_rejected", "fast_forward", {
+            code: "preservation_unverified"
+          });
+      }
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "fast_forward", "operation_rejected");
@@ -972,7 +1028,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       );
       const paths = [
         ...new Set([
-          ...tree.trackedChanges.flatMap((change) =>
+          ...[...tree.trackedChanges, ...tree.stagedChanges].flatMap((change) =>
             change.originalPath === undefined ? [change.path] : [change.path, change.originalPath]
           ),
           ...tree.untrackedPaths,

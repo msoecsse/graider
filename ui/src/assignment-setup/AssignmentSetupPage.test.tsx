@@ -240,7 +240,8 @@ const renderToConfirmDialog = async (
   );
 
   fireEvent.change(await screen.findByLabelText("Term"), { target: { value: "27s1" } });
-  fireEvent.click(screen.getByLabelText("Section 001"));
+  const section = screen.getByLabelText("Section 001") as HTMLInputElement;
+  if (!section.checked) fireEvent.click(section);
   fireEvent.change(screen.getByLabelText("Assignment title"), { target: { value: "Lab 04" } });
   fireEvent.change(screen.getByLabelText("Assignment slug"), { target: { value: "lab04" } });
   fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
@@ -258,6 +259,25 @@ const confirmAndExpectAlert = async (
 };
 
 describe("AssignmentSetupPage save error handling", () => {
+  it("preserves assignment form and confirmation inputs after synchronization fails", async () => {
+    const saveAssignmentSetup = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("Course synchronization failed. Retry; local files are preserved.")
+      );
+    const onOpenAssignment = vi.fn();
+    const { dialog } = await renderToConfirmDialog({ saveAssignmentSetup }, onOpenAssignment);
+    await confirmAndExpectAlert(dialog, "Course synchronization failed");
+    expect(screen.getByLabelText("Assignment title")).toHaveValue("Lab 04");
+    expect(screen.getByLabelText("Assignment slug")).toHaveValue("lab04");
+    expect(screen.getByLabelText("Term")).toHaveValue("27s1");
+    expect(screen.getByLabelText("Section 001")).toBeChecked();
+    expect(onOpenAssignment).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create assignment" }));
+    await waitFor(() => expect(saveAssignmentSetup).toHaveBeenCalledTimes(2));
+    expect(saveAssignmentSetup.mock.calls[1]).toEqual(saveAssignmentSetup.mock.calls[0]);
+  });
+
   it("surfaces the backend's diagnostic when the save fails, not a generic sentence", async () => {
     const { dialog } = await renderToConfirmDialog({
       saveAssignmentSetup: vi.fn().mockResolvedValue({

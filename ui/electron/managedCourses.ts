@@ -1,3 +1,4 @@
+import { reportCourseSynchronization } from "./courseSynchronizationDiagnostics.js";
 import { measureGradingPhase } from "./gradingPerformance.js";
 import { readRemoteCourseAccess } from "./remoteCourseAccess.js";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
@@ -1002,6 +1003,15 @@ const synchronizeCourseCache = async (
     const previousPublication = loadManagedCatalog(request.userData, request.userId).courses[
       String(repo.id)
     ]?.lastPublication;
+    reportCourseSynchronization({
+      stage: "cache",
+      repositoryId: repo.id,
+      organizationId: repo.organizationId,
+      source: "managed",
+      expectedSha: access.revision,
+      localSha: before,
+      managedCacheSha: observed.head.commit
+    });
     saveEntry(request.userData, {
       ...catalogEntry(request.userData, request.userId, repo.id, latest, state("ready"), timestamp),
       ...(previousPublication?.commit === observed.head.commit

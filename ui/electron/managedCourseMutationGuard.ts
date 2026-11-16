@@ -1,3 +1,4 @@
+import { reportCourseSynchronization } from "./courseSynchronizationDiagnostics.js";
 import { isTransientCourseDiagnostic } from "./remoteCourseTypes.js";
 import { classifyGradingOperation, measureGradingPhase } from "./gradingPerformance.js";
 import { canonicalFilesystemRoot, sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
@@ -145,6 +146,8 @@ export const validateOperationalCourseSource = async (request: {
   readonly authoritativeCommit: string;
   readonly mode: CourseMutationMode;
   readonly factory: GitWorkspaceFactory;
+  readonly allowBehind?: boolean;
+  readonly managedCacheSha?: string;
   readonly isAuthoritativeAncestor?: (head: string, target: string) => Promise<boolean>;
   readonly resolveOrigin: (
     owner: string,
@@ -165,7 +168,13 @@ export const validateOperationalCourseSource = async (request: {
       course.repositoryId
     );
   // Reuse the self-contained Git-storage checks, anchored at the legacy directory's parent.
-  if (validateManagedStorage(path.dirname(root), root).length) unsafe();
+  if (validateManagedStorage(path.dirname(root), root).length)
+    blockMutation(
+      "operational_source_unsafe",
+      "The registered source has an interrupted Git operation. All files are preserved. Ask the course administrator to resolve that operation before retrying.",
+      "attention",
+      course.repositoryId
+    );
   const workspace = await factory.open(root);
   if (!sameFilesystemRoot(workspace.root, root)) unsafe();
   const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
@@ -191,11 +200,27 @@ export const validateOperationalCourseSource = async (request: {
     state.head.branch !== course.defaultBranch ||
     state.upstream.kind !== "configured" ||
     state.upstream.remote !== "origin" ||
-    state.upstream.branch !== `origin/${course.defaultBranch}` ||
-    state.workingTree.conflicts.length
+    state.upstream.branch !== `origin/${course.defaultBranch}`
   )
     unsafe();
+  if (state.workingTree.conflicts.length)
+    blockMutation(
+      "operational_source_unsafe",
+      "The registered source contains unresolved file conflicts. All files are preserved. Ask the course administrator to resolve the conflicts before retrying.",
+      "attention",
+      course.repositoryId
+    );
   if (state.head.kind !== "attached") return unsafe();
+  const head = state.head.commit;
+  reportCourseSynchronization({
+    stage: "source",
+    repositoryId: course.repositoryId,
+    organizationId: course.organizationId,
+    source: "registered",
+    expectedSha: authoritativeCommit,
+    localSha: head,
+    managedCacheSha: request.managedCacheSha ?? authoritativeCommit
+  });
   const changed = [...state.workingTree.trackedChanges, ...state.workingTree.stagedChanges];
   const clean = !changed.length && !state.workingTree.untrackedPaths.length;
   if ((mode === "source_update" || mode === "cutover") && !clean) unsafe();
@@ -217,18 +242,17 @@ export const validateOperationalCourseSource = async (request: {
       "attention",
       course.repositoryId
     );
-  const head = state.head.commit;
   if (head !== authoritativeCommit) {
     const behind =
-      clean &&
+      (clean || (request.allowBehind && !pending)) &&
       state.upstream.kind === "configured" &&
-      state.upstream.relation !== "ahead" &&
-      state.upstream.relation !== "diverged" &&
+      (request.allowBehind ||
+        (state.upstream.relation !== "ahead" && state.upstream.relation !== "diverged")) &&
       (await (request.isAuthoritativeAncestor ?? workspace.isAncestor.bind(workspace))(
         head,
         authoritativeCommit
       ).catch(() => false));
-    if (behind && mode === "source_update") return head;
+    if (behind && (mode === "source_update" || request.allowBehind)) return head;
     if (behind)
       blockMutation(
         "operational_source_updateable",
@@ -236,15 +260,23 @@ export const validateOperationalCourseSource = async (request: {
         "update_source",
         course.repositoryId
       );
-    const safelyAhead =
-      mode === "publication_retry" && (await workspace.isAncestor(authoritativeCommit, head));
-    if (!safelyAhead)
+    const ahead = await workspace.isAncestor(authoritativeCommit, head).catch(() => false);
+    if (!(mode === "publication_retry" && ahead)) {
+      const targetAvailable = await workspace
+        .resolveRevision(authoritativeCommit)
+        .then((commit) => commit === authoritativeCommit)
+        .catch(() => false);
       blockMutation(
         "operational_source_stale",
-        "The registered operational course source is not based on the latest authoritative course state. Update or resolve it before retrying. Graider has preserved the local source.",
+        ahead
+          ? "The registered source has unpublished local commits. Local files are preserved. Use Publish Course Changes to publish or resolve them before creating another change."
+          : targetAvailable
+            ? "The registered source history has diverged from GitHub. All files are preserved. Ask the course administrator to reconcile the histories before retrying."
+            : "The registered source history cannot be verified against the current GitHub revision. All files are preserved. Ask the course administrator to review repository history before retrying.",
         "attention",
         course.repositoryId
       );
+    }
   }
   return head;
 };
@@ -1046,7 +1078,76 @@ export class ManagedCourseMutationGuard {
               "operational_source_mismatch",
               "Course registration no longer matches authorized discovery."
             );
-          const authoritativeCommit = requireSynchronizedCommit(input.course, sync);
+          let authoritativeCommit = requireSynchronizedCommit(input.course, sync);
+          // A cache result is evidence of an earlier observation. Establish current remote
+          // authority before classifying a different operational HEAD as unpublished work.
+          const reader = createRemoteRepositoryReader(input.token, input.signal);
+          const observe = async () => {
+            const repo = await reader.resolveId(input.course.repositoryId);
+            if (
+              !repo ||
+              repo.id !== input.course.repositoryId ||
+              repo.disabled ||
+              repo.organizationId !== input.course.organizationId ||
+              repo.defaultBranch !== input.course.defaultBranch ||
+              !(await input.revalidateSession())
+            )
+              blockMutation(
+                "course_access_lost",
+                "Course identity or access changed. Refresh courses before retrying.",
+                "authorization"
+              );
+            const access = await readRemoteCourseAccess(
+              reader,
+              repo!,
+              input.userId,
+              this.deps.username()
+            );
+            if (access.status === "unsupported_schema" || access.status === "client_incompatible")
+              blockMutation(
+                "remote_only_mutation_unavailable",
+                "This client cannot operate the authoritative course schema. Update Graider before retrying."
+              );
+            if (
+              access.status !== "valid" ||
+              access.authorization !== "authorized" ||
+              access.incomplete
+            )
+              blockMutation(
+                "course_access_lost",
+                "Current remote course authority could not be verified. Refresh course access and retry.",
+                "authorization"
+              );
+            reportCourseSynchronization({
+              stage: "remote",
+              repositoryId: input.course.repositoryId,
+              organizationId: input.course.organizationId,
+              source: remote || binding ? "managed" : "registered",
+              expectedSha: access.revision,
+              managedCacheSha: authoritativeCommit
+            });
+            return access.revision;
+          };
+          let remoteRevision = await observe();
+          if (remoteRevision !== authoritativeCommit) {
+            if (!input.resynchronize)
+              blockMutation(
+                "synchronization_retry_required",
+                "GitHub advanced beyond the managed cache. Retry synchronization; your files and form are preserved.",
+                "retry"
+              );
+            authoritativeCommit = requireSynchronizedCommit(
+              input.course,
+              await input.resynchronize!()
+            );
+            remoteRevision = await observe();
+            if (remoteRevision !== authoritativeCommit)
+              blockMutation(
+                "remote_version_conflict",
+                "GitHub changed again during synchronization. Retry against the latest course state; your files are preserved.",
+                "refresh_view"
+              );
+          }
           // Inspect declared operation support on the freshly synchronized source;
           // discovery schema, parser support and local usernames cannot enable an adapter.
           const operational = loadMetadata().inspectManagedOperationCourse(
@@ -1193,25 +1294,69 @@ export class ManagedCourseMutationGuard {
               "remote_only_mutation_unavailable",
               "Managed-course editing is not enabled yet. Use a verified registered legacy source."
             );
-          const operationalCommit = useManaged
+          const validateSource = (allowBehind = false) =>
+            validateOperationalCourseSource({
+              root: folder.path,
+              course: input.course,
+              authoritativeCommit,
+              mode,
+              allowBehind,
+              managedCacheSha: authoritativeCommit,
+              factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
+              isAuthoritativeAncestor: async (head, target) => {
+                const oracle = await (this.deps.factory ?? getProductionGitWorkspaceFactory()).open(
+                  source
+                );
+                return oracle.isAncestor(head, target);
+              },
+              resolveOrigin: (owner, name) => reader.resolve(owner, name)
+            });
+          let operationalCommit = useManaged
             ? authoritativeCommit
-            : await validateOperationalCourseSource({
-                root: folder.path,
-                course: input.course,
-                authoritativeCommit,
-                mode,
-                factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
-                isAuthoritativeAncestor: async (head, target) => {
-                  const oracle = await (
-                    this.deps.factory ?? getProductionGitWorkspaceFactory()
-                  ).open(
-                    managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId)
-                  );
-                  return oracle.isAncestor(head, target);
-                },
-                resolveOrigin: (owner, name) =>
-                  createRemoteRepositoryReader(input.token, input.signal).resolve(owner, name)
-              });
+            : await validateSource(mode === "new_mutation");
+          if (!useManaged && mode === "new_mutation" && operationalCommit !== authoritativeCommit) {
+            const auth = (this.deps.authenticate ?? createAuthenticatedProductionGitWorkspace)(
+              input.token
+            );
+            const workspace = (await auth.factory.open(folder.path)) as GitWorkspaceWriter &
+              GitWorkspaceSynchronizer;
+            let fetching = true;
+            try {
+              await workspace.fetchOrigin({ authentication: auth.authentication });
+              fetching = false;
+              await revalidate();
+              if (
+                !this.deps
+                  .folders()
+                  .some((item) => item.id === folder.id && item.path === folder.path)
+              )
+                blockMutation(
+                  "operational_source_mismatch",
+                  "Course registration changed. Refresh courses before retrying."
+                );
+              operationalCommit = await validateSource(true);
+              if (operationalCommit !== authoritativeCommit)
+                await workspace.fastForwardToCommit({
+                  expectedHead: operationalCommit,
+                  expectedBranch: input.course.defaultBranch,
+                  targetCommit: authoritativeCommit,
+                  preserveLocalChanges: true,
+                  signal: input.signal
+                });
+              operationalCommit = await validateSource();
+            } catch (error) {
+              if (error instanceof CourseMutationBlocked) throw error;
+              const problem = (error as { cause?: { code?: string } })?.cause?.code;
+              const message = fetching
+                ? `${synchronizationFailure(error).diagnostic} Local files and assignment inputs are preserved.`
+                : problem === "local_overlap"
+                  ? "Local working files overlap incoming GitHub changes, or their safety cannot be proven. All files are preserved. Ask the course administrator to reconcile the overlapping files, then retry."
+                  : problem === "preservation_unverified"
+                    ? "The source advanced, but preservation of local files could not be verified. No rollback was attempted. Ask the course administrator to review the local files before retrying."
+                    : "The registered repository changed or its fast-forward safety could not be proven. Local files are preserved. Review the source with the course administrator, then retry.";
+              blockMutation("operational_source_unsafe", message, fetching ? "retry" : "attention");
+            }
+          }
           if (!(await input.revalidateSession()))
             blockMutation(
               "authorization_required",

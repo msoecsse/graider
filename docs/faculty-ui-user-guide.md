@@ -56,6 +56,20 @@ a temporary discovery failure preserves them with an error message. Account chan
 clear the previous account's loaded results. Schema 2 operation availability and section/role restrictions
 remain unchanged.
 
+Before saving a new course configuration change, Graider verifies the current GitHub
+revision and synchronizes its managed cache. If a registered course folder is safely
+behind, Graider updates it automatically. Unrelated grading manifests, grading data,
+and editor files are preserved and do not make a current source stale. Normal
+grading navigation continues to use local cached state.
+
+If GitHub changes during a save, retry against the latest course state. A failed
+synchronization keeps the assignment form and local files. Connection failures can
+be retried; unpublished course configuration must be published or resolved through
+**Publish Course Changes** first. If local files overlap incoming changes, history
+has diverged, or Graider cannot prove synchronization is safe, ask the course
+administrator to review the reported problem. Graider does not reset, discard, or
+force-push local work; faculty do not need to run Git commands for normal updates.
+
 ## Publish Course Changes
 
 Roster CSVs, term files, assignments, and course settings are saved locally in
