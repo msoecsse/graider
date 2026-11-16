@@ -185,12 +185,12 @@ describe("production artifact provenance", () => {
       );
   });
 
-  it("pauses Windows only for development pushes and preserves release gates", () => {
+  it("keeps the signing development pause, requires both migration targets and preserves release gates", () => {
     const workflow = parse(fs.readFileSync("../.github/workflows/ci.yml", "utf8"));
     expect(workflow.on.push.branches).toEqual(
       expect.arrayContaining(["master", "release/**", "remote-course-v2"])
     );
-    for (const name of ["grading-cache-safety", "migration-regression"]) {
+    for (const name of ["grading-cache-safety"]) {
       const job = workflow.jobs[name];
       expect(job.needs).toBeUndefined();
       const expression = job.strategy.matrix.include.slice(3, -2);
@@ -207,6 +207,15 @@ describe("production artifact provenance", () => {
         expect(rows.map((row: { target: string }) => row.target)).toEqual(targets);
       }
     }
+    const migration = workflow.jobs["migration-regression"];
+    expect(migration.needs).toBeUndefined();
+    expect(migration.strategy.matrix.include).toEqual([
+      { runner: "macos-15", architecture: "arm64", target: "macOS arm64" },
+      { runner: "windows-latest", architecture: "x64", target: "Windows x64" }
+    ]);
+    expect(
+      migration.steps.some((step: { run?: string }) => step.run === "npm run test:migration")
+    ).toBe(true);
     expect(workflow.jobs["normal-checks"].needs).toBeUndefined();
     const signing = parse(
       fs.readFileSync("../.github/workflows/macos-production-signing.yml", "utf8")
