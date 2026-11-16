@@ -2,6 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  beginAuthoritativeLegacyCliMutation,
+  endAuthoritativeLegacyCliMutation
+} from "../../src/execution/authoritative-legacy-course.js";
 import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { OctokitGitHubClient } from "../../src/github/octokit-github-client.js";
@@ -19,6 +23,11 @@ const EMPTY = 204;
 const MISSING = 404;
 const FORBIDDEN = 403;
 const TEMPLATE = "lab04-template";
+const COURSE = "se2030-graider";
+const AUTHORITY_FIRST_REQUESTS = 1394;
+const AUTHORITY_RESUME_REQUESTS = 254;
+const AUTHORITY_FIRST_MS = 135_000;
+const AUTHORITY_RESUME_MS = 21_000;
 const ASSIGNMENT = "terms/27s1/assignments/lab04/assignment.yml";
 const TOKEN = "ghp_latency_test_secret";
 const roots: string[] = [];
@@ -47,6 +56,7 @@ const measurements = (summary: Readonly<Record<string, unknown>>): PerformanceSn
 
 /** Real Octokit requests, entirely local transport. Every request costs controllable time. */
 class ApplyTransport {
+  courseContent: string | undefined;
   workflowWriteForbidden = false;
   requests = 0;
   missing = 0;
@@ -111,6 +121,11 @@ class ApplyTransport {
       return reply({ permission: "admin" }, this.permissions.has(key) ? OK : MISSING);
     }
     if (route === "actions/permissions") return reply({ enabled: true });
+    if (repo === COURSE && route === "contents/course.yml" && this.courseContent !== undefined)
+      return reply({
+        content: Buffer.from(this.courseContent).toString("base64"),
+        encoding: "base64"
+      });
     if (route.startsWith("contents/")) {
       if (!read) {
         if (this.workflowWriteForbidden) return reply({ message: "Forbidden" }, FORBIDDEN);
@@ -178,6 +193,7 @@ const fixture = (grading: boolean): string => {
 };
 
 afterEach(() => {
+  endAuthoritativeLegacyCliMutation();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   for (const root of roots.splice(0))
@@ -338,6 +354,50 @@ describe(
       expect(transport.repositories.size).toBe(STUDENTS + 1);
       expect(transport.files.size).toBe(STUDENTS);
       expect(transport.peakWrites).toBe(1);
+    });
+    it("measures Apply including real authoritative validation before every write", async () => {
+      vi.useFakeTimers();
+      const transport = new ApplyTransport(true);
+      transport.repositories.add(COURSE);
+      vi.stubGlobal("fetch", transport.fetch);
+      const cwd = fixture(true);
+      transport.courseContent = fs.readFileSync(path.join(cwd, "course.yml"), "utf8");
+      const githubClient = new OctokitGitHubClient({ token: TOKEN });
+      const run = async () => {
+        await beginAuthoritativeLegacyCliMutation({
+          root: cwd,
+          client: githubClient,
+          remoteUrl: `https://github.com/example-org/${COURSE}.git`,
+          localRevision: "baseline-sha"
+        });
+        return runApplyCommand({
+          cwd,
+          assignmentFile: ASSIGNMENT,
+          options: normalizeCommonCommandOptions({ yes: true }),
+          githubClient
+        });
+      };
+      const start = Date.now();
+      const pending = run();
+      await vi.runAllTimersAsync();
+      const first = await pending;
+      expect(first.errors).toEqual([]);
+      expect(first.summary.created).toBe(STUDENTS);
+      expect(transport.requests).toBe(AUTHORITY_FIRST_REQUESTS);
+      expect(Date.now() - start).toBe(AUTHORITY_FIRST_MS);
+      const firstRequests = transport.requests;
+      const resumeStart = Date.now();
+      const resumed = run();
+      await vi.runAllTimersAsync();
+      const second = await resumed;
+      expect(second.errors).toEqual([]);
+      expect(second.summary.created).toBe(0);
+      expect(transport.requests - firstRequests).toBe(AUTHORITY_RESUME_REQUESTS);
+      expect(Date.now() - resumeStart).toBe(AUTHORITY_RESUME_MS);
+      expect(transport.peakWrites).toBe(1);
+      process.stdout.write(
+        `${JSON.stringify({ authority: true, first: { requests: firstRequests, elapsedMs: AUTHORITY_FIRST_MS }, second: { requests: transport.requests - firstRequests, elapsedMs: Date.now() - resumeStart } })}\n`
+      );
     });
   }
 );

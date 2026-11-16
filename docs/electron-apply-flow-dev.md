@@ -153,6 +153,26 @@ Readiness still completes authentication before scheduling student-account
 reads. No cross-Apply negative cache, polling
 loop, retry-limit reduction or authorization cache was introduced.
 
+The authority-inclusive benchmark runs the actual authoritative validator on
+the fake course initially and before every write. It supplies fixed local Git
+identity/revision inputs, includes the initial validation in its measurement,
+and excludes UI session setup and local Git overhead. Both baseline and current
+code were measured with the same transport; the baseline was replayed from the
+parent source in a disposable directory.
+
+| Managed preset with authority validation | HTTP before → after | Elapsed before → after |
+| ---------------------------------------- | ------------------- | ---------------------- |
+| New repositories                         | 1,460 → 1,394       | 146.0 s → 135.0 s      |
+| Manifest-tracked rerun                   | 285 → 254           | 28.5 s → 21.0 s        |
+
+This is a **7.5%** improvement for new provisioning and **26.3%** on rerun in
+the controlled model. New provisioning retains 968 authority requests: eight
+initial checks plus eight for each of 120 writes. These checks dominate the
+remaining latency. The larger 22.4% gain above describes the provisioning core;
+it should not be presented as a measured end-to-end GUI speedup. Improving this
+remaining cost would require a separate review of authorization validation,
+without weakening live identity, schema or revision checks.
+
 Reproduce with `npx vitest run tests/performance/apply-latency.test.ts` and
 `npx vitest run tests/unit/github/bounded-github-reads.test.ts`. Tests pin request
 counts, phase counts, elapsed fake time, peak read/write concurrency, collision
