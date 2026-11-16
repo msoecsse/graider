@@ -1,3 +1,4 @@
+import path from "node:path";
 import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
 import type {
   AssignmentApplyJsonResponse,
@@ -7,6 +8,11 @@ import type {
 } from "./ipc.js";
 import { MAX_COMMAND_OUTPUT_SNIPPET_LENGTH } from "./dashboardRunner.js";
 import { GITHUB_TOKEN_ENV_NAME, resolveGithubToken } from "./tokenResolver.js";
+import {
+  managedCourseOperation,
+  courseOperationAuthentication
+} from "./managedCourseOperationContext.js";
+import { runManagedAssignmentApply } from "./assignmentApplyBackend.js";
 
 const GRAIDER_COMMAND = "graider";
 const ASSIGNMENT_APPLY_ARGS_PREFIX = ["assignment", "apply"] as const;
@@ -269,6 +275,43 @@ export const applyAssignment = async (
   request: AssignmentApplyRequest,
   options: AssignmentApplyRunnerOptions
 ): Promise<AssignmentApplyResult> => {
+  const operation = managedCourseOperation.getStore();
+  const authentication = courseOperationAuthentication.getStore();
+  if (
+    operation?.mode === "local_read" ||
+    operation?.mode === "local_grading" ||
+    operation?.mode === "evidence_read"
+  )
+    throw new Error("A current course mutation authorization is required for Apply.");
+  if (operation && !authentication)
+    throw new Error("The guarded GitHub OAuth session is required for Apply.");
+  if (authentication && operation) {
+    const apply = await runManagedAssignmentApply({
+      root: operation.courseFolderPath,
+      assignmentFile: request.assignmentFile,
+      token: authentication.token,
+      runtimeRoot: operation.managed
+        ? path.join(path.dirname(operation.courseFolderPath), "runtime")
+        : undefined,
+      binding: {
+        userId: operation.userId,
+        repositoryId: operation.repositoryId,
+        revision: operation.authoritativeCommit
+      },
+      revalidate: async () => {
+        if (!operation.revalidate) throw new Error("Current course authorization is required.");
+        await operation.revalidate();
+      },
+      onProgress: options.onProgress
+    });
+    return {
+      ...request,
+      status: getResultStatus(apply.exitCode, apply),
+      apply,
+      error: null,
+      appliedAt: (options.now ?? DEFAULT_NOW)().toISOString()
+    };
+  }
   const tokenResult = await resolveGithubToken({
     runner: options.runner,
     ...(options.env === undefined ? {} : { env: options.env })

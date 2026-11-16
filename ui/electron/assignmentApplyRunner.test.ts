@@ -7,6 +7,13 @@ import {
 } from "./assignmentApplyRunner.js";
 import type { AssignmentApplyJsonResponse, AssignmentApplyRequest } from "./ipc.js";
 import { GITHUB_TOKEN_ENV_NAME } from "./tokenResolver.js";
+import {
+  courseOperationAuthentication,
+  managedCourseOperation
+} from "./managedCourseOperationContext.js";
+
+import { runManagedAssignmentApply } from "./assignmentApplyBackend.js";
+vi.mock("./assignmentApplyBackend.js", () => ({ runManagedAssignmentApply: vi.fn() }));
 
 const SUCCESS_EXIT_CODE = 0;
 const FAILURE_EXIT_CODE = 1;
@@ -71,6 +78,87 @@ const createRunner = (results: readonly ProcessRunResult[]): ProcessRunner => {
 };
 
 describe("assignmentApplyRunner", () => {
+  it("requires the guard-owned credential when a GUI mutation context exists", async () => {
+    const runner = createRunner([createProcessResult()]);
+    await expect(
+      managedCourseOperation.run(
+        {
+          ...APPLY_REQUEST,
+          userId: 42,
+          repositoryId: 20,
+          authoritativeCommit: "a".repeat(40),
+          operationalCommit: "a".repeat(40),
+          mode: "new_mutation"
+        },
+        () =>
+          applyAssignment(APPLY_REQUEST, { runner, env: { GRAIDER_GITHUB_TOKEN: "ambient-token" } })
+      )
+    ).rejects.toThrow("guarded GitHub OAuth session");
+    expect(runner).not.toHaveBeenCalled();
+    expect(runManagedAssignmentApply).not.toHaveBeenCalled();
+  });
+  it.each([{}, { GRAIDER_GITHUB_TOKEN: "other-account", GITHUB_TOKEN: "also-other" }])(
+    "uses the guarded OAuth credential without gh, pins the verified course and revalidates before launch (%j)",
+    async (env) => {
+      vi.mocked(runManagedAssignmentApply).mockImplementation(async (request) => {
+        await request.revalidate();
+        return createApplyJson();
+      });
+      const runner = createRunner([createProcessResult()]);
+      const revalidate = vi.fn(async () => {});
+      const revision = "a".repeat(40);
+      const result = await courseOperationAuthentication.run({ token: "oauth-session-token" }, () =>
+        managedCourseOperation.run(
+          {
+            ...APPLY_REQUEST,
+            userId: 42,
+            repositoryId: 20,
+            authoritativeCommit: revision,
+            operationalCommit: revision,
+            mode: "new_mutation",
+            revalidate
+          },
+          () => applyAssignment(APPLY_REQUEST, { runner, env })
+        )
+      );
+      expect(result.status).toBe("success");
+      expect(revalidate).toHaveBeenCalledOnce();
+      expect(runner).not.toHaveBeenCalled();
+      expect(runManagedAssignmentApply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          token: "oauth-session-token",
+          binding: { userId: 42, repositoryId: 20, revision }
+        })
+      );
+      expect(JSON.stringify(result)).not.toContain("oauth-session-token");
+    }
+  );
+  it("starts no child process when the guarded course becomes unauthorized before launch", async () => {
+    vi.mocked(runManagedAssignmentApply).mockImplementation(async (request) => {
+      await request.revalidate();
+      return createApplyJson();
+    });
+    const runner = createRunner([createProcessResult()]);
+    await expect(
+      courseOperationAuthentication.run({ token: "oauth-session-token" }, () =>
+        managedCourseOperation.run(
+          {
+            ...APPLY_REQUEST,
+            userId: 42,
+            repositoryId: 20,
+            authoritativeCommit: "a".repeat(40),
+            operationalCommit: "a".repeat(40),
+            mode: "new_mutation",
+            revalidate: async () => {
+              throw new Error("Account authorization changed");
+            }
+          },
+          () => applyAssignment(APPLY_REQUEST, { runner, env: {} })
+        )
+      )
+    ).rejects.toThrow("Account authorization changed");
+    expect(runner).not.toHaveBeenCalled();
+  });
   it("parses split and multiple trusted Apply progress records while ignoring malformed records", () => {
     const progress = vi.fn();
     const parse = createAssignmentApplyProgressParser(progress);

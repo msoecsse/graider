@@ -30,6 +30,12 @@ import {
 import { IPC_CHANNELS } from "./ipc";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
+import { applyAssignment } from "./assignmentApplyRunner";
+import type { AssignmentApplyRequest } from "./ipc";
+import type { ProcessRunner } from "./commandRunner";
+
+import { runManagedAssignmentApply } from "./assignmentApplyBackend";
+vi.mock("./assignmentApplyBackend.js", () => ({ runManagedAssignmentApply: vi.fn() }));
 
 const remote = vi.hoisted(() => ({ reader: null as RemoteRepositoryReader | null }));
 vi.mock("./githubRemoteRepositories.js", async (original) => ({
@@ -544,6 +550,47 @@ describe("course admin transaction inventory", () => {
         )
       ).toMatchObject({ status: "success", publication: { status: "success" } });
       const file = "terms/27s1/assignments/lab01/assignment.yml";
+      const publishedRevision = await git(f.cache, ["rev-parse", "HEAD"]);
+      expect(publishedRevision).not.toBe(f.head);
+      const applyRunner: ProcessRunner = vi.fn();
+      vi.mocked(runManagedAssignmentApply).mockImplementation(async (request) => {
+        expect(request.root).toBe(f.cache);
+        expect(request.token).toBe("oauth-fixture-secret");
+        expect(request.binding).toEqual({
+          userId: 42,
+          repositoryId: 20,
+          revision: publishedRevision
+        });
+        await request.revalidate();
+        return {
+          schemaVersion: 1,
+          commandName: "assignment apply",
+          assignmentFile: file,
+          status: "success",
+          exitCode: 0,
+          diagnostics: [],
+          warnings: [],
+          errors: [],
+          generatedFiles: [],
+          summary: {}
+        };
+      });
+      const a = adapter(f);
+      a.ipc.handle(IPC_CHANNELS.applyAssignment, (_event, request: unknown) =>
+        applyAssignment(request as AssignmentApplyRequest, { runner: applyRunner, env: {} })
+      );
+      const applied = await a.call(IPC_CHANNELS.applyAssignment, {
+        courseFolderId: "registered",
+        courseFolderPath: f.legacy,
+        assignmentFile: file,
+        token: "renderer-assertion",
+        userId: 999,
+        authoritativeCommit: f.head
+      });
+      expect(applied).toMatchObject({ status: "success" });
+      expect(applyRunner).not.toHaveBeenCalled();
+      expect(runManagedAssignmentApply).toHaveBeenCalledOnce();
+      expect(JSON.stringify(applied)).not.toContain("oauth-fixture-secret");
       const original = getAssignmentForEdit(f.cache, file).model!;
       expect(
         await run(IPC_CHANNELS.saveAssignmentEdit, { assignmentFile: file }, (root) =>

@@ -34,6 +34,12 @@ privileges in an existing GitHub organization. The packaged app includes Graider
 and its Git engine; you do not need a separate CLI install. Separate legacy CLI/local
 workflows retain their existing authentication requirements.
 
+**Apply Assignment** uses the GitHub account signed in to Graider, including
+immediately after creating an assignment. It does not require `gh auth login` or
+manual Git synchronization. Apply checks current course access and revision before
+changing student repositories. If those checks fail, its diagnostic identifies
+the account, repository, schema, revision or access requirement to resolve.
+
 After sign-in and course authorization are established, opening supported cached
 course details, roster sections, and the Comment Library does not check GitHub or
 fetch the course again. Supported local assignment and configuration views also use

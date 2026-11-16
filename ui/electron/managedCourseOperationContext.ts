@@ -1,6 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { VerifiedCourseOperationContext } from "./managedCourseMutationTypes.js";
 
+/** Guard-owned credential scope. Never part of operation DTOs or renderer input/output. */
+export const courseOperationAuthentication = new AsyncLocalStorage<{
+  readonly token: string;
+}>();
+
 /** Main-only projection for services that historically resolved paths via the registry. */
 export const managedCourseOperation = new AsyncLocalStorage<
   VerifiedCourseOperationContext & {

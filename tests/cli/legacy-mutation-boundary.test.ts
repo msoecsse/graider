@@ -22,7 +22,7 @@ describe("CLI authoritative mutation refusal envelope", () => {
       commandName: "workflow generate",
       status: "failure",
       exitCode: 1,
-      errors: [{ code: "course_operation_unavailable", severity: "error" }],
+      errors: [{ code: "course_account_unverified", severity: "error" }],
       generatedFiles: [],
       summary: { operationAvailable: false }
     });

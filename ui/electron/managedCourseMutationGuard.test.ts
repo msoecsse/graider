@@ -15,6 +15,7 @@ import type { RemoteCourse, ManagedSynchronizationState } from "./remoteCourseTy
 import type { GithubOAuthSession } from "./githubOAuthSession";
 import { getProductionGitWorkspaceFactory } from "./gitWorkspaceReader";
 import { managedCoursePath } from "./managedCourses";
+import { courseOperationAuthentication } from "./managedCourseOperationContext";
 
 const sha = "a".repeat(40);
 const course: RemoteCourse = {
@@ -460,11 +461,15 @@ describe("guard execution and account isolation", () => {
   );
   it("ready context stays internal and still targets legacy", async () => {
     const f = await execution();
-    const operation = vi.fn(async (context) => context.courseFolderPath);
+    const operation = vi.fn(async (context) => {
+      expect(courseOperationAuthentication.getStore()?.token).toBe("never-rendered");
+      return context.courseFolderPath;
+    });
     expect(await f.guard.run("registered", f.root, "new_mutation", operation)).toBe(f.root);
     expect(f.sync).toHaveBeenCalledOnce();
     expect(operation).toHaveBeenCalledOnce();
     expect(operation.mock.calls[0][0]).not.toHaveProperty("token");
+    expect(courseOperationAuthentication.getStore()).toBeUndefined();
   });
   it("requires fresh remote evidence after local validation before invoking a legacy writer", async () => {
     const f = await execution();

@@ -2,9 +2,26 @@
 
 Production mutation commands additionally enforce authoritative legacy compatibility.
 If the current remote schema, revision, repository or account cannot be established,
-the CLI returns the existing failure envelope with diagnostic
-`course_operation_unavailable` and `summary.operationAvailable: false`, before running
-the action. Schema 2 operations are available only through the closed main-process
+the CLI returns the existing failure envelope and `summary.operationAvailable: false`
+before running the action. Requirement-specific diagnostics replace the former
+catch-all `course_operation_unavailable`:
+
+- `course_account_unverified` / `course_account_mismatch`: authentication or account binding.
+- `course_repository_unavailable` / `course_repository_mismatch`: repository access or immutable identity.
+- `course_repository_locator_mismatch`: configured repository name differs from Git origin.
+- `course_local_schema_invalid` / `course_authoritative_schema_invalid`: incompatible or invalid metadata.
+- `course_metadata_unavailable`: authoritative `course.yml` cannot be read.
+- `course_revision_unavailable` / `course_revision_mismatch` / `course_revision_changed`: missing, stale or racing revision evidence.
+- `course_authorization_changed`: the live GUI course/account guard was invalidated.
+- `course_access_denied` / `course_verification_unavailable`: permissions or GitHub verification failure.
+- `course_local_state_unavailable`: local Git identity or revision cannot be read safely.
+
+Messages never include raw API exceptions, credentials or headers. The same safe
+codes can appear in target diagnostics when a later mutation revalidation fails;
+previously checkpointed results remain available for retry. GUI Apply uses a live
+main-process authorization capability; standalone CLI operations cannot acquire
+that capability through environment variables or serialized assertions.
+Schema 2 operations are available only through the closed main-process
 adapters in the [support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
 
 Reusable Codex instructions for changing backend JSON commands live in the

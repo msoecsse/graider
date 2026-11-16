@@ -1,3 +1,4 @@
+import { courseOperationAuthentication } from "./managedCourseOperationContext.js";
 import { reportCourseSynchronization } from "./courseSynchronizationDiagnostics.js";
 import { isTransientCourseDiagnostic } from "./remoteCourseTypes.js";
 import { classifyGradingOperation, measureGradingPhase } from "./gradingPerformance.js";
@@ -1387,23 +1388,25 @@ export class ManagedCourseMutationGuard {
           }
           await revalidate();
           operationStarted = true;
-          return operation(
-            {
-              revalidate,
-              managed: useManaged,
-              legacyFolderPath: folder.path,
-              sessionGeneration: generation,
-              userId: input.userId,
-              repositoryId: course.repositoryId,
-              authoritativeCommit,
-              operationalCommit,
-              courseFolderId: folder.id,
-              courseFolderPath: useManaged
-                ? managedCoursePath(this.deps.userData, input.userId, course.repositoryId)
-                : folder.path,
-              mode
-            },
-            input
+          return courseOperationAuthentication.run({ token: input.token }, () =>
+            operation(
+              {
+                revalidate,
+                managed: useManaged,
+                legacyFolderPath: folder.path,
+                sessionGeneration: generation,
+                userId: input.userId,
+                repositoryId: course.repositoryId,
+                authoritativeCommit,
+                operationalCommit,
+                courseFolderId: folder.id,
+                courseFolderPath: useManaged
+                  ? managedCoursePath(this.deps.userData, input.userId, course.repositoryId)
+                  : folder.path,
+                mode
+              },
+              input
+            )
           );
         });
       })

@@ -3,6 +3,9 @@ import { build } from "tsup";
 
 await build({
   entry: {
+    assignmentApplyBackend: fileURLToPath(
+      new URL("../../src/execution/assignment-apply-context.ts", import.meta.url)
+    ),
     githubClientCompositionBackend: fileURLToPath(
       new URL("../../src/github/github-client-composition.ts", import.meta.url)
     )
@@ -16,7 +19,8 @@ await build({
     compilerOptions: { rootDir: fileURLToPath(new URL("../../", import.meta.url)) }
   },
   tsconfig: fileURLToPath(new URL("../../tsconfig.json", import.meta.url)),
-  noExternal: ["@octokit/rest"]
+  noExternal: ["@octokit/rest", "yaml", "zod", "fast-xml-parser", "yauzl"],
+  external: ["dugite"]
 });
 
 await build({

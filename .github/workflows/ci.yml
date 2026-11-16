@@ -156,6 +156,13 @@ jobs:
       - name: Test actual student Git updates and grading preservation
         run: npx vitest run --maxWorkers=2 tests/unit/grading/grading-student-repository-update.test.ts tests/unit/git/git-command-workspace.test.ts
 
+      - name: Test Apply OAuth authority and standalone CLI refusal
+        run: npx vitest run --maxWorkers=2 tests/cli/gui-assignment-apply.test.ts tests/cli/legacy-mutation-boundary.test.ts tests/unit/execution/authoritative-legacy-course.test.ts
+
+      - name: Test Apply IPC and immediate assignment publication
+        working-directory: ui
+        run: npx vitest run --maxWorkers=2 electron/assignmentApplyRunner.test.ts electron/tokenResolver.test.ts electron/managedCourseMutationGuard.test.ts electron/managedOperational.integration.test.ts
+
       - name: Test Review Import local Git evidence and faculty recovery workflow
         run: npx vitest run --maxWorkers=2 tests/unit/review-import
 

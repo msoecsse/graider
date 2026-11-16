@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ProcessRunner } from "./commandRunner.js";
 import type { DashboardCommandError } from "./ipc.js";
+import { courseOperationAuthentication } from "./managedCourseOperationContext.js";
 
 export const GITHUB_TOKEN_ENV_NAME = "GRAIDER_GITHUB_TOKEN";
 export const GITHUB_TOKEN_FALLBACK_ENV_NAME = "GITHUB_TOKEN";
@@ -107,6 +108,8 @@ export const resolveGithubToken = async ({
   platform = process.platform,
   runner
 }: GithubTokenResolverOptions): Promise<GithubTokenResolution> => {
+  const authenticated = courseOperationAuthentication.getStore();
+  if (authenticated) return { status: "success", token: authenticated.token };
   const graiderEnvironmentToken = env[GITHUB_TOKEN_ENV_NAME]?.trim();
   const fallbackEnvironmentToken = env[GITHUB_TOKEN_FALLBACK_ENV_NAME]?.trim();
   const environmentToken =

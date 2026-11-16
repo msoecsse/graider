@@ -26,18 +26,19 @@ happens after explicit user confirmation.
 
 ## Commands
 
-The apply flow uses two assignment-scoped CLI commands:
+Apply Preview uses the assignment-scoped read-only CLI command. Standalone Apply
+remains available through the CLI:
 
 ```bash
 graider assignment apply-preview <assignment.yml> --json
 graider assignment apply <assignment.yml> --json
 ```
 
-Both commands are run by the Electron main process with:
+Preview commands are run by the Electron main process with:
 
 - `cwd = registered course folder`
 - argv arrays, not shell-interpolated strings
-- the existing token resolver
+- the existing token resolver (a guard-owned OAuth credential takes precedence)
 - stdout JSON parsed in the main process
 - structured result/error objects returned to the renderer
 
@@ -45,16 +46,33 @@ The apply-preview command is preview-only and must not create repositories,
 write manifests, push files, dispatch workflows, publish reports, or generate
 workflow files.
 
-The apply command is the canonical UI-3B mutation command. The current main
-process runner invokes it as:
+Confirmed GUI Apply uses `assignmentApplyBackend.cjs` in the main process and
+delegates to the same assignment Apply orchestrator as the standalone CLI. The
+course mutation guard supplies its OAuth credential through a separate main-only
+scope, plus a live revalidation callback and the expected numeric account ID,
+repository ID and course revision. No token or authorization capability is accepted
+from the renderer or serialized as an environment assertion. Confirmation remains
+required before entering this path.
 
-```ts
-["assignment", "apply", assignmentFile, "--json", "--yes"];
-```
+The backend independently checks the token's account, repository identity,
+authoritative Schema 1 metadata and default-branch revision. It rereads local Git
+HEAD/origin and rechecks the live guard before each GitHub mutation. Managed
+manifest paths use the separate runtime root; source repositories stay clean.
+Retries, individual/group checkpoints, progress and partial recovery use the
+existing Apply implementation.
 
-`--yes` is supplied only after the renderer confirmation checkbox is accepted.
-The assignment command delegates to the same Apply orchestrator as the legacy
-CLI alias, including initial and per-repository durable manifest checkpoints.
+Schema 1 GUI authorization binds to the discovered numeric repository ID. A stale
+`course.repository` name does not replace that identity. The standalone CLI has no
+live GUI capability and still requires configured repository locators to match
+origin, independently verified authentication, schema and revision. Environment
+flags cannot grant managed authorization. Schema 2 continues through its explicit
+managed operation adapter.
+
+Issue #58 reproduced a stale `course.repository` value with current source/cache
+SHAs. GUI creation passed its numeric-ID guard, but GUI Apply launched the legacy
+CLI and failed its configured-name/origin comparison. That CLI also independently
+resolved environment/`gh` credentials, losing the verified GUI session. GUI Apply
+now keeps the live guarded context through execution.
 
 ## IPC Boundary
 

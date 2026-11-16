@@ -1,6 +1,7 @@
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ProcessRunner } from "./commandRunner.js";
+import { courseOperationAuthentication } from "./managedCourseOperationContext.js";
 import {
   GITHUB_CLI_AUTH_FAILED_CODE,
   GITHUB_CLI_NOT_FOUND_CODE,
@@ -16,6 +17,18 @@ const FAILURE_EXIT_CODE = 1;
 const createRunner = (runner: ProcessRunner): ProcessRunner => vi.fn(runner);
 
 describe("tokenResolver", () => {
+  it("keeps the guarded OAuth account authoritative for derived GUI publication", async () => {
+    const runner: ProcessRunner = vi.fn();
+    const result = await courseOperationAuthentication.run({ token: "guarded-oauth-token" }, () =>
+      resolveGithubToken({
+        runner,
+        env: { GRAIDER_GITHUB_TOKEN: "other-account", GITHUB_TOKEN: "fallback-account" }
+      })
+    );
+    expect(result).toEqual({ status: "success", token: "guarded-oauth-token" });
+    expect(runner).not.toHaveBeenCalled();
+    expect(courseOperationAuthentication.getStore()).toBeUndefined();
+  });
   it("uses GRAIDER_GITHUB_TOKEN before GITHUB_TOKEN and GitHub CLI", async () => {
     const runner = createRunner(async () => ({
       stdout: "",

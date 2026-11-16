@@ -7,7 +7,7 @@ import {
 } from "./legacy-mutation-boundary.js";
 import { endAuthoritativeLegacyCliMutation } from "../execution/authoritative-legacy-course.js";
 import { createCommandResult } from "../core/command-result.js";
-import { createConfigDiagnostic, DiagnosticCode } from "../diagnostics/error-catalog.js";
+import { createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import { writeCommandResult } from "./output.js";
 import { registerAssignmentCommand } from "./commands/assignment.command.js";
 import { registerApplyCommand } from "./commands/apply.command.js";
@@ -55,7 +55,7 @@ try {
     assignmentFile: error.assignmentFile,
     status: "failure",
     warnings: [],
-    errors: [createConfigDiagnostic(DiagnosticCode.CourseOperationUnavailable, error.message)],
+    errors: [createConfigDiagnostic(error.diagnosticCode, error.message)],
     generatedFiles: [],
     summary: { operationAvailable: false }
   });
