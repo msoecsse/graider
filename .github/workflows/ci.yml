@@ -109,6 +109,8 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix ui
       - run: npm run build:electron-backends
+      - run: npm run typecheck:prepared
+      - run: npm --prefix ui run typecheck:prepared
       - name: Apply latency, ordering, diagnostics, OAuth and recovery regressions
         run: >-
           npx vitest run --maxWorkers=2
