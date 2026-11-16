@@ -16,7 +16,9 @@ wording is safe for display but may evolve.
 GitHub diagnostics retain safe `kind`, `retryable`, and (when supplied by
 Octokit) `statusCode` context. Apply adds `operationType`, `repositoryName`,
 `student_id`, `github_username`, and `section` for target operations, plus
-`teamSlug` or `workflowPath` where applicable. Short GitHub response messages
+`teamSlug` or `workflowPath` where applicable. Actions and workflow read failures
+also identify a fixed `endpoint` template and `requestMethod`; `remediation`
+describes recovery without treating a persistent 404 as harmless. Short GitHub response messages
 may appear in display text after redaction; headers, raw bodies, credentials,
 request payloads, and signed URLs are not copied into diagnostics.
 
@@ -179,6 +181,7 @@ Exit-code precedence is centralized. Warnings alone exit `0`.
 | `workflow_dispatch_missing`                     | error          | Dispatch configuration is missing.                                 | `1`               | Fix grading workflow config.                                                                                                                   |
 | `workflow_dispatch_failed`                      | error          | Workflow dispatch failed.                                          | `1`, `3`, or `4`  | Check per-error context.                                                                                                                       |
 | `permission_not_downgraded`                     | warning        | Existing higher permission was preserved.                          | `0`               | No action needed unless permission is unexpected.                                                                                              |
+| `student_invitation_pending`                    | warning        | Student access awaits repository invitation acceptance.            | `0`               | Ask the student to accept the invitation, then rerun Apply to verify access; the repository and pending invitation remain tracked.             |
 | `grading_not_configured`                        | warning/error  | Assignment has no grading workflow.                                | `0` or `1`        | Enable grading, or treat grade as a no-op for no-grading assignments.                                                                          |
 | `assignment_status_blocks_grade`                | error          | Assignment lifecycle blocks grade.                                 | `1`               | Grade only supported lifecycle states.                                                                                                         |
 | `target_selector_missing`                       | error          | Grade target selector missing.                                     | `1`               | Use exactly one selector.                                                                                                                      |
