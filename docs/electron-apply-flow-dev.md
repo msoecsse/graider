@@ -74,6 +74,91 @@ CLI and failed its configured-name/origin comparison. That CLI also independentl
 resolved environment/`gh` credentials, losing the verified GUI session. GUI Apply
 now keeps the live guarded context through execution.
 
+## Apply performance and safety
+
+`summary.githubPerformance` reports aggregate phase timings and actual HTTP
+attempt counts; its fields are defined in the
+[CLI JSON contract](cli-json-contract.md#assignment-apply-assignmentyml---json).
+The managed backend includes initial authoritative validation in readiness.
+Authorization rechecks before each write are attributed to that write's phase.
+CLI preAction validation, UI preview and UI session setup happen outside the
+Apply command's timer. Total time also includes local configuration, manifest
+and Git work. Phase time includes retry waits and, for individual operations,
+manifest checkpoints. Group phase time covers its GitHub calls; local group
+checkpoint time is included in the total.
+
+Expected nullable 404s no longer produce Octokit console errors. Normalized
+operation diagnostics still report authentication, authorization, rate limits,
+missing required resources and other failures. Compatibility warnings use a
+fixed message without request metadata. An Actions indexing 404 on a newly
+created individual repository retains the existing deferred-verification
+behavior; an existing tracked repository still receives missing-workflow and
+dispatch diagnostics. Apply verifies dispatch support; it does not dispatch a
+grading run.
+
+Individual planning checks at most four repositories concurrently, in bounded
+batches, and retains deterministic plan order. Readiness uses the same bound
+for independent student-account lookups after authentication succeeds. Writes,
+permission reads/writes,
+Actions configuration, workflow deployment and manifest updates remain serial.
+The readiness template snapshot is reused for initial manifest metadata within
+one Apply; the adapter also avoids fetching identical template metadata twice.
+Managed workflow deployment reuses a successful repository creation response.
+Workflow existence and dispatch checks share one successful verification
+observation, including a missing result. Failed reads are never cached, and a
+new Apply obtains fresh observations. Account, OAuth, course authority,
+collision and recovery checks are never memoized. Workflow ownership/content
+checks and the prewrite file-SHA read remain intact.
+
+### Controlled 30-student measurement (#59)
+
+Measured with real Octokit and an entirely local fake HTTP transport, using
+100 ms per request and virtual time. The baseline was measured before changing
+production code at `69a842008a8e679b13e0ceba82b58beb8e150e0c` on
+`remote-course-v2`. The assignment uses a template,
+30 active students, no existing permissions, Actions already enabled, and the
+managed Java preset when grading is enabled. Reruns use the saved manifest and
+permissions. These are reproducible network-latency measurements, not live
+GitHub wall times. They exclude the managed authority wrapper's additional
+HTTP requests; its checks remain intact and add workload-dependent cost.
+
+| Scenario                        | HTTP before → after | Elapsed before → after | Nullable 404s before → after |
+| ------------------------------- | ------------------- | ---------------------- | ---------------------------- |
+| New, grading disabled           | 312 → 306           | 31.2 s → 26.2 s        | 90 → 90                      |
+| Rerun, grading disabled         | 157 → 156           | 15.7 s → 11.2 s        | 0 → 0                        |
+| New, managed workflow indexed   | 492 → 426           | 49.2 s → 38.2 s        | 150 → 150                    |
+| Rerun, managed workflow indexed | 277 → 246           | 27.7 s → 20.2 s        | 0 → 0                        |
+| New, workflow not yet indexed   | 492 → 426           | 49.2 s → 38.2 s        | 210 → 180                    |
+| Rerun, workflow still missing   | 277 → 246           | 27.7 s → 20.2 s        | 60 → 30                      |
+
+For new managed provisioning, phase requests are 36 readiness, 30 planning,
+90 creation, 120 permissions, 30 Actions, 90 deployment and 30 verification.
+Both missing-workflow diagnostics per tracked repository remain present in the
+last row, despite reading each workflow only once.
+
+The measured gains are separable: bounded planning lowers its 30 unchanged
+requests from 3.0 s to 0.8 s; bounded student-account lookups save another
+2.2 s during readiness; template read elimination saves six requests
+(0.6 s) on new Apply and one on rerun; creation-response reuse saves 30 reads
+(3.0 s) for new managed provisioning; shared workflow verification saves 30
+reads (3.0 s) whenever grading is enabled. Total managed provisioning improves
+22.4%; rerun improves 27.1%. Reclassifying console 404s improves diagnostics,
+without reducing requests. Remaining expected 404s include collision probes,
+absent permissions and workflow content/SHA probes.
+
+Further write concurrency was deliberately left out: each mutation revalidates
+live authority, may fail after a remote side effect, and must checkpoint shared
+manifest state. Parallel writes would require a separate correctness design.
+Readiness still completes authentication before scheduling student-account
+reads. No cross-Apply negative cache, polling
+loop, retry-limit reduction or authorization cache was introduced.
+
+Reproduce with `npx vitest run tests/performance/apply-latency.test.ts` and
+`npx vitest run tests/unit/github/bounded-github-reads.test.ts`. Tests pin request
+counts, phase counts, elapsed fake time, peak read/write concurrency, collision
+blocking, and recovery from forbidden workflow writes. Existing behavioral,
+OAuth, manifest-checkpoint and partial-failure suites remain required.
+
 ## IPC Boundary
 
 The renderer uses narrow preload APIs:

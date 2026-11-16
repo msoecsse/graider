@@ -526,6 +526,26 @@ Useful fields include:
 
 `generatedFiles` includes the manifest path when a manifest was written.
 
+Apply results also include `summary.githubPerformance`, including blocked and
+partial results. It contains total monotonic `elapsedMs` and a `phases` object:
+`readiness`, `planning`, `repositoryCreation`, `permissions`,
+`actionsConfiguration`, `workflowDeployment`, and `verification`. Each phase has
+`elapsedMs`, `httpRequests`, `httpReadRequests`, `httpWriteRequests`,
+`expectedMissingResponses`, `failedResponses`, `networkFailures`, and
+`requestElapsedMs`. Counts describe actual HTTP transport attempts, including
+pagination and retries; an injected client without HTTP transport reports zero
+HTTP requests. Request time ends when response headers arrive; summed request
+time can exceed phase elapsed time when reads overlap. Unused phases are zero.
+
+`expectedMissingResponses` counts 404s from nullable lookup endpoints, including
+repository, permission, file and workflow lookups. It describes API semantics,
+not whether Apply can proceed: missing tracked repositories and required
+workflows still produce their existing operation errors. Other HTTP errors
+increment `failedResponses`; transport exceptions increment `networkFailures`.
+No URLs, request/response bodies, headers, tokens or exceptions enter these
+measurements. See [Apply performance and safety](electron-apply-flow-dev.md#apply-performance-and-safety)
+for timing scope, optimization boundaries and measured examples.
+
 For `repository_mode: group`, Apply runs group preflight, then executes one
 repository target per `group_id`. It creates each shared repository, gives every
 group member `admin` access, applies configured faculty team, and writes

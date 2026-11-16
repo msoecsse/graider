@@ -1,3 +1,4 @@
+import { mapGitHubReads } from "../github/bounded-github-reads.js";
 import {
   createSourceFingerprint,
   getSourceFingerprintPaths
@@ -519,13 +520,9 @@ export const buildPlan = async ({
       rosterFiles: rosterSummary.rosterFiles
     })
   });
-  const operationGroups: PlanOperation[][] = [];
-
-  for (const student of students) {
-    operationGroups.push(
-      ...[await buildStudentOperations(config, student, githubClient, manifest)]
-    );
-  }
+  const operationGroups = await mapGitHubReads(students, (student) =>
+    buildStudentOperations(config, student, githubClient, manifest)
+  );
 
   const operations = operationGroups.flat().sort(comparePlanOperations);
   const summary = createPlanSummary(rosterSummary, operations);

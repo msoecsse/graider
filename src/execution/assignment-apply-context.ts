@@ -1,3 +1,4 @@
+import { withApplyPerformance, measureApplyPhase } from "../github/apply-performance.js";
 import { runAssignmentApplyCommand } from "../cli/commands/assignment.command.js";
 import { normalizeCommonCommandOptions } from "../core/command-context.js";
 import { createCommandResult } from "../core/command-result.js";
@@ -35,7 +36,7 @@ export interface ManagedAssignmentApplyResult extends Omit<
 }
 
 /** Electron backend adapter; standalone CLI retains its independent preAction boundary. */
-export const runManagedAssignmentApply = async (
+const runManagedAssignmentApplyInternal = async (
   request: ManagedAssignmentApplyRequest,
   dependencies: { readonly githubClient?: GitHubClient } = {}
 ): Promise<ManagedAssignmentApplyResult> => {
@@ -79,7 +80,7 @@ export const runManagedAssignmentApply = async (
         managedAuthorization: { binding: request.binding, revalidate }
       });
     };
-    await validate();
+    await measureApplyPhase("readiness", validate);
     if (request.runtimeRoot) registerCourseRuntimeRoot(request.root, request.runtimeRoot);
     const guarded = new Proxy(client, {
       get(target, key) {
@@ -121,3 +122,9 @@ export const runManagedAssignmentApply = async (
     ) as ManagedAssignmentApplyResult;
   }
 };
+
+export const runManagedAssignmentApply = (
+  request: ManagedAssignmentApplyRequest,
+  dependencies: { readonly githubClient?: GitHubClient } = {}
+): Promise<ManagedAssignmentApplyResult> =>
+  withApplyPerformance(() => runManagedAssignmentApplyInternal(request, dependencies));

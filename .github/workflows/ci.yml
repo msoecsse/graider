@@ -77,6 +77,55 @@ jobs:
       - name: Audit dependencies
         run: npm run audit
 
+  apply-regression:
+    name: Apply workflow (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: ${{ matrix.architecture }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Verify native architecture
+        run: node -e "if (process.arch !== '${{ matrix.architecture }}') process.exit(1)"
+      - run: npm ci
+      - run: npm ci --prefix ui
+      - run: npm run build:electron-backends
+      - name: Apply latency, ordering, diagnostics, OAuth and recovery regressions
+        run: >-
+          npx vitest run --maxWorkers=2
+          tests/performance
+          tests/unit/planning
+          tests/unit/github
+          tests/unit/github-readiness-validation.test.ts
+          tests/unit/workflows/managed-workflow-deployment.test.ts
+          tests/unit/groups/group-target-executor.test.ts
+          tests/cli/apply.test.ts
+          tests/cli/assignment-apply.test.ts
+          tests/cli/gui-assignment-apply.test.ts
+          tests/cli/legacy-mutation-boundary.test.ts
+          tests/unit/execution/authoritative-legacy-course.test.ts
+          tests/recovery/apply-recovery.test.ts
+          tests/architecture/github-host-boundary.test.ts
+
   grading-cache-safety:
     name: Grading local boundary (${{ matrix.target }})
     strategy:

@@ -1,3 +1,4 @@
+import { mapGitHubReads } from "./bounded-github-reads.js";
 import type {
   RawAssignmentConfig,
   RawCourseConfig,
@@ -389,13 +390,9 @@ const validateGithubUsers = async (
   githubClient: GitHubClient,
   students: readonly RosterStudent[]
 ): Promise<Diagnostic[]> => {
-  const diagnostics: Diagnostic[] = [];
-
-  for (const student of students) {
-    diagnostics.push(...(await validateGithubUser(githubClient, student)));
-  }
-
-  return diagnostics;
+  return (
+    await mapGitHubReads(students, (student) => validateGithubUser(githubClient, student))
+  ).flat();
 };
 
 export const validateGitHubReadiness = async ({

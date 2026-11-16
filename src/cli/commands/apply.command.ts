@@ -1,3 +1,5 @@
+import { withApplyPerformance, measureApplyPhase } from "../../github/apply-performance.js";
+import { createApplyReadClient } from "../../github/apply-read-client.js";
 import fs from "node:fs";
 import type { Command } from "commander";
 import { loadGraiderConfig } from "../../config/config-loader.js";
@@ -75,7 +77,7 @@ const getExecutionStatus = (
   return successfulWorkCount > EMPTY_COUNT ? "partial_success" : "failure";
 };
 
-export const runApplyCommand = async ({
+const runApplyCommandInternal = async ({
   cwd,
   assignmentFile,
   options,
@@ -147,7 +149,7 @@ export const runApplyCommand = async ({
       summary: { options, ...configResult.config.summary, ...rosterResult.summary }
     });
   }
-  const effectiveGitHubClient = githubResolution.githubClient;
+  const effectiveGitHubClient = createApplyReadClient(githubResolution.githubClient);
   const manifestPath = createManifestPath(
     configResult.config.summary.repoRoot,
     configResult.config.summary.termCode,
@@ -199,12 +201,14 @@ export const runApplyCommand = async ({
         }
       });
     }
-    const preflight = await runGroupApplyPreflight({
-      config: configResult.config,
-      students: rosterResult.students,
-      githubClient: effectiveGitHubClient,
-      ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {})
-    });
+    const preflight = await measureApplyPhase("planning", () =>
+      runGroupApplyPreflight({
+        config: configResult.config,
+        students: rosterResult.students,
+        githubClient: effectiveGitHubClient,
+        ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {})
+      })
+    );
     const groupTargetSummary = preflight.targets.map((target) => ({
       groupId: target.groupId,
       repositoryName: target.repositoryName,
@@ -400,13 +404,15 @@ export const runApplyCommand = async ({
       }
     });
   }
-  const readinessResult = await validateGitHubReadiness({
-    courseConfig: configResult.config.course,
-    termConfig: configResult.config.term,
-    assignmentConfig: configResult.config.assignment,
-    students: rosterResult.students,
-    githubClient: effectiveGitHubClient
-  });
+  const readinessResult = await measureApplyPhase("readiness", () =>
+    validateGitHubReadiness({
+      courseConfig: configResult.config.course,
+      termConfig: configResult.config.term,
+      assignmentConfig: configResult.config.assignment,
+      students: rosterResult.students,
+      githubClient: effectiveGitHubClient
+    })
+  );
 
   if (readinessResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
@@ -425,14 +431,16 @@ export const runApplyCommand = async ({
     });
   }
 
-  const plan = await buildPlan({
-    config: configResult.config,
-    students: rosterResult.students,
-    rosterSummary: rosterResult.summary,
-    githubClient: effectiveGitHubClient,
-    createdAt: formatPlanCreatedAt(clock.now()),
-    ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {})
-  });
+  const plan = await measureApplyPhase("planning", () =>
+    buildPlan({
+      config: configResult.config,
+      students: rosterResult.students,
+      rosterSummary: rosterResult.summary,
+      githubClient: effectiveGitHubClient,
+      createdAt: formatPlanCreatedAt(clock.now()),
+      ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {})
+    })
+  );
   const guardResult = evaluateMutationGuard({ plan, options });
 
   if (!guardResult.allowed) {
@@ -515,6 +523,11 @@ export const runApplyCommand = async ({
       repositories: executionResult.repositories
     }
   });
+};
+
+/** Diagnostics also survive blocked preflight and partial execution results. */
+export const runApplyCommand = async (request: ApplyCommandRequest): Promise<CommandResult> => {
+  return withApplyPerformance(() => runApplyCommandInternal(request));
 };
 
 export const registerApplyCommand = (program: Command): void => {

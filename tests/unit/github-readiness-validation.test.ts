@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   RawAssignmentConfig,
   RawCourseConfig,
@@ -419,8 +419,12 @@ describe("GitHub readiness validation", () => {
   it("auth missing maps to GitHub auth diagnostic", async () => {
     const client = createReadyClient();
     client.failNext("getAuthenticatedUser", "auth_missing");
+    const userReads = vi.spyOn(client, "getUser");
+    const templateReads = vi.spyOn(client, "getTemplateRepository");
 
     await expectErrorCode(client, "github_auth_missing");
+    expect(userReads).not.toHaveBeenCalled();
+    expect(templateReads).not.toHaveBeenCalled();
   });
 
   it("permission denied maps to GitHub auth diagnostic", async () => {

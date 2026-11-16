@@ -1,3 +1,4 @@
+import { measureApplyHttpRequest, withNullableGitHubRead } from "./apply-performance.js";
 import { Buffer } from "node:buffer";
 import { inflateRawSync } from "node:zlib";
 
@@ -104,7 +105,10 @@ const fetchWithGitHubApiVersion = (
   const headers = new Headers(init?.headers);
   headers.set("X-GitHub-Api-Version", GITHUB_REST_API_VERSION);
 
-  return fetch(input, { ...init, headers });
+  return measureApplyHttpRequest(
+    init?.method === undefined || init.method === "GET" || init.method === "HEAD",
+    () => fetch(input, { ...init, headers })
+  );
 };
 
 type OctokitParameters = Record<string, unknown>;
@@ -200,6 +204,16 @@ export class OctokitGitHubClient implements GitHubClient {
       options.octokit ??
       (new Octokit({
         auth: this.token,
+        // Adapter errors are normalized and returned to callers. Octokit's request logger
+        // labels nullable 404s as errors and can print untrusted request metadata.
+        log: {
+          debug: () => {},
+          info: () => {},
+          error: () => {},
+          warn: () => {
+            console.warn("GitHub API compatibility warning; check the supported API version.");
+          }
+        },
         request: {
           fetch: fetchWithGitHubApiVersion
         }
@@ -751,13 +765,9 @@ export class OctokitGitHubClient implements GitHubClient {
     owner: string,
     repo: string
   ): Promise<GitHubTemplateRepository | null> {
-    const repository = await this.getRepository(owner, repo);
-
-    if (repository === null) {
-      return null;
-    }
-
-    const repoData = await this.run(() => this.octokit.rest.repos.get({ owner, repo }));
+    const repoData = await this.runNullable(() => this.octokit.rest.repos.get({ owner, repo }));
+    if (repoData === null) return null;
+    const repository = mapRepository(repoData);
     const repoRecord = asRecord(repoData);
     const branches = await this.listBranchNames(owner, repo);
     const files = await this.listRootFiles(owner, repo);
@@ -1380,7 +1390,7 @@ export class OctokitGitHubClient implements GitHubClient {
     this.ensureAuthenticated();
 
     try {
-      const response = await operation();
+      const response = await withNullableGitHubRead(operation);
       return response.data as T;
     } catch (error) {
       if (getErrorStatus(error) === HTTP_STATUS_NOT_FOUND) {

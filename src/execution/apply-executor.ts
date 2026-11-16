@@ -1,3 +1,4 @@
+import { measureApplyPhase, type ApplyPhase } from "../github/apply-performance.js";
 import { reconcileRepositoryCreation } from "../github/reconcile-repository-creation.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
@@ -11,7 +12,11 @@ import {
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError, createGitHubDiagnostic } from "../github/github-errors.js";
-import type { GitHubPermission, GitHubRepository } from "../github/github-models.js";
+import type {
+  GitHubPermission,
+  GitHubRepository,
+  GitHubWorkflow
+} from "../github/github-models.js";
 import { type RetryOptions, withGitHubRetry } from "../github/github-retry.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { writeManifest } from "../manifest/manifest-renderer.js";
@@ -82,6 +87,46 @@ export interface ApplyExecutionInput {
   retryOptions?: Partial<RetryOptions>;
   onRepositoryProgress?: ApplyRepositoryProgressObserver;
 }
+
+// Observations are private to one execution. No cached authorization or failed requests.
+interface ApplyExecutionContext extends ApplyExecutionInput {
+  readonly createdRepositories: Map<string, GitHubRepository>;
+  readonly verifiedWorkflows: Map<string, GitHubWorkflow | null>;
+}
+
+const getVerificationWorkflow = async (
+  input: ApplyExecutionContext,
+  repositoryName: string,
+  workflowIdentifier: string
+): Promise<GitHubWorkflow | null> => {
+  const key = JSON.stringify([
+    input.config.course.github.organization,
+    repositoryName,
+    workflowIdentifier
+  ]);
+  if (input.verifiedWorkflows.has(key)) return input.verifiedWorkflows.get(key) ?? null;
+  const workflow = await runGitHubOperation(input, () =>
+    input.githubClient.getWorkflow(
+      input.config.course.github.organization,
+      repositoryName,
+      workflowIdentifier
+    )
+  );
+  input.verifiedWorkflows.set(key, workflow);
+  return workflow;
+};
+
+const operationPhase = (operation: PlanOperation): ApplyPhase => {
+  if (isRepositoryCreationOperation(operation)) return "repositoryCreation";
+  if (
+    operation.type === "add_student_collaborator" ||
+    operation.type === "add_faculty_team_permission"
+  )
+    return "permissions";
+  if (operation.type === "enable_actions") return "actionsConfiguration";
+  if (operation.type === "ensure_managed_grading_workflow") return "workflowDeployment";
+  return "verification";
+};
 
 export interface ApplySummary {
   created: number;
@@ -209,12 +254,12 @@ const normalizeGitHubError = (
   );
 
 const runGitHubOperation = async <T>(
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   operation: () => Promise<T>
 ): Promise<T> => withGitHubRetry(operation, input.retryOptions);
 
 const runFreshRepositoryActionsRead = async <T>(
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   operation: PlanOperation,
   read: () => Promise<T>
 ): Promise<T> =>
@@ -284,7 +329,7 @@ const getEffectiveWorkflowPath = (config: LoadedGraiderConfig): string | undefin
 };
 
 const wasRepositoryCreatedInPlan = (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   operation: PlanOperation
 ): boolean =>
   input.plan.operations.some(
@@ -309,13 +354,13 @@ const createPermissionWarning = (
   );
 
 const findTarget = (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   operation: PlanOperation
 ): ApplyRepositoryTarget | undefined =>
   (input.targets ?? input.plan.targets).find((target) => target.targetId === operation.target_id);
 
 const findStudent = (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   students: readonly RosterStudent[],
   operation: PlanOperation
 ): RosterStudent | undefined =>
@@ -325,7 +370,7 @@ const findStudent = (
   );
 
 const findManifestRecord = (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   manifest: Manifest,
   operation: PlanOperation
 ): ManifestRepositoryRecord | undefined =>
@@ -499,7 +544,7 @@ const hasHigherPermission = (
 ): boolean => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
 
 const executeCreateRepository = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string
@@ -551,6 +596,7 @@ const executeCreateRepository = async (
         )
       );
 
+      input.createdRepositories.set(repositoryName, repository);
       const templateCommitSha = state.manifest.template?.commitSha;
       nextState = persistManifest(
         incrementSummary(
@@ -611,6 +657,7 @@ const executeCreateRepository = async (
         )
       );
 
+      input.createdRepositories.set(repositoryName, repository);
       return persistManifest(
         incrementSummary(
           {
@@ -631,7 +678,7 @@ const executeCreateRepository = async (
 };
 
 const executeStudentCollaborator = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string
@@ -705,7 +752,7 @@ const executeStudentCollaborator = async (
 };
 
 const executeTeamPermission = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   teamSlug: string,
@@ -779,7 +826,7 @@ const executeTeamPermission = async (
 };
 
 const executeEnableActions = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string
@@ -828,7 +875,7 @@ const executeEnableActions = async (
 };
 
 const executeVerifyWorkflow = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string,
@@ -852,12 +899,10 @@ const executeVerifyWorkflow = async (
   }
 
   try {
-    const workflow = await runGitHubOperation(input, () =>
-      input.githubClient.getWorkflow(
-        input.config.course.github.organization,
-        repositoryName,
-        workflowDispatchIdentifier
-      )
+    const workflow = await getVerificationWorkflow(
+      input,
+      repositoryName,
+      workflowDispatchIdentifier
     );
 
     if (workflow === null) {
@@ -916,7 +961,7 @@ const executeVerifyWorkflow = async (
 };
 
 const executeVerifyDispatch = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string,
@@ -940,12 +985,10 @@ const executeVerifyDispatch = async (
   }
 
   try {
-    const workflow = await runGitHubOperation(input, () =>
-      input.githubClient.getWorkflow(
-        input.config.course.github.organization,
-        repositoryName,
-        workflowDispatchIdentifier
-      )
+    const workflow = await getVerificationWorkflow(
+      input,
+      repositoryName,
+      workflowDispatchIdentifier
     );
 
     if (workflow === null || !workflow.supportsDispatch) {
@@ -1002,7 +1045,7 @@ const executeVerifyDispatch = async (
 };
 
 const executeEnsureManagedWorkflow = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   blockedWorkflowTargets: Set<string>
@@ -1016,9 +1059,11 @@ const executeEnsureManagedWorkflow = async (
   const repositoryName = operation.repository_name;
 
   try {
-    const repository = await runGitHubOperation(input, () =>
-      input.githubClient.getRepository(owner, repositoryName)
-    );
+    const repository =
+      input.createdRepositories.get(repositoryName) ??
+      (await runGitHubOperation(input, () =>
+        input.githubClient.getRepository(owner, repositoryName)
+      ));
     if (repository === null) {
       blockedWorkflowTargets.add(operationTargetKey(operation));
       return recordError(
@@ -1069,7 +1114,7 @@ const executeEnsureManagedWorkflow = async (
 };
 
 const executeOperation = async (
-  input: ApplyExecutionInput,
+  input: ApplyExecutionContext,
   state: ApplyState,
   operation: PlanOperation,
   observedAt: string,
@@ -1127,10 +1172,18 @@ const executeOperation = async (
 };
 
 export const executeApplyPlan = async (
-  input: ApplyExecutionInput
+  request: ApplyExecutionInput
 ): Promise<ApplyExecutionResult> => {
+  const input: ApplyExecutionContext = {
+    ...request,
+    createdRepositories: new Map(),
+    verifiedWorkflows: new Map()
+  };
   const initialManifest =
-    input.manifest ?? (await createInitialManifest(input.config, input.plan, input.githubClient));
+    input.manifest ??
+    (await measureApplyPhase("repositoryCreation", () =>
+      createInitialManifest(input.config, input.plan, input.githubClient)
+    ));
   let state: ApplyState = {
     manifest: initialManifest,
     summary: createEmptySummary(),
@@ -1197,13 +1250,15 @@ export const executeApplyPlan = async (
     const warningsBefore = state.warnings.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;
-    state = await executeOperation(
-      input,
-      state,
-      operation,
-      observedAt,
-      blockedWorkflowTargets,
-      durabilityBlockedTargets
+    state = await measureApplyPhase(operationPhase(operation), () =>
+      executeOperation(
+        input,
+        state,
+        operation,
+        observedAt,
+        blockedWorkflowTargets,
+        durabilityBlockedTargets
+      )
     );
     state = {
       ...state,
