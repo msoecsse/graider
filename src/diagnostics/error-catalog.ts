@@ -91,6 +91,7 @@ export const DiagnosticCode = {
   WorkflowDispatchMissing: "workflow_dispatch_missing",
   WorkflowDispatchFailed: "workflow_dispatch_failed",
   PermissionNotDowngraded: "permission_not_downgraded",
+  StudentInvitationPending: "student_invitation_pending",
   GradingNotConfigured: "grading_not_configured",
   AssignmentStatusBlocksGrade: "assignment_status_blocks_grade",
   TargetSelectorMissing: "target_selector_missing",

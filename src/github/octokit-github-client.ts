@@ -7,6 +7,8 @@ import { Octokit } from "@octokit/rest";
 import { GitHubClient, type GitHubOrganizationResponse } from "./github-client.js";
 import { GitHubClientError } from "./github-errors.js";
 import { withGitHubRetry } from "./github-retry.js";
+import { parseYaml } from "../io/stable-yaml.js";
+import { hasWorkflowDispatchTrigger } from "../workflows/workflow-dispatch-validation.js";
 import {
   ConditionalWriteRepositoryFileInput,
   ConditionalWriteRepositoryFileResult,
@@ -947,25 +949,38 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   async getActionsState(owner: string, repo: string): Promise<GitHubActionsState> {
-    const data = await this.run(() =>
-      this.octokit.rest.actions.getGithubActionsPermissionsRepository({
-        owner,
-        repo
-      })
+    const data = await this.atEndpoint("GET", "/repos/{owner}/{repo}/actions/permissions", () =>
+      this.run(() =>
+        this.octokit.rest.actions.getGithubActionsPermissionsRepository({
+          owner,
+          repo
+        })
+      )
     );
     const record = asRecord(data);
-
-    return asBoolean(record.enabled) === false ? "disabled" : "enabled";
+    const enabled = asBoolean(record.enabled);
+    if (enabled === undefined)
+      throw new GitHubClientError(
+        "api_error",
+        "GitHub did not return a verifiable Actions enabled state.",
+        {
+          endpoint: "/repos/{owner}/{repo}/actions/permissions",
+          requestMethod: "GET"
+        }
+      );
+    return enabled ? "enabled" : "disabled";
   }
 
   async enableActions(owner: string, repo: string): Promise<void> {
-    await this.run(() =>
-      this.octokit.rest.actions.setGithubActionsPermissionsRepository({
-        allowed_actions: "all",
-        enabled: true,
-        owner,
-        repo
-      })
+    await this.atEndpoint("PUT", "/repos/{owner}/{repo}/actions/permissions", () =>
+      this.run(() =>
+        this.octokit.rest.actions.setGithubActionsPermissionsRepository({
+          allowed_actions: "all",
+          enabled: true,
+          owner,
+          repo
+        })
+      )
     );
   }
 
@@ -1043,15 +1058,17 @@ export class OctokitGitHubClient implements GitHubClient {
     owner: string,
     repo: string,
     filePath: string,
-    ref: string
+    ref?: string
   ): Promise<string | null> {
-    const data = await this.runNullable(() =>
-      this.octokit.rest.repos.getContent({
-        owner,
-        path: filePath,
-        ref,
-        repo
-      })
+    const data = await this.atEndpoint("GET", "/repos/{owner}/{repo}/contents/{path}", () =>
+      this.runNullable(() =>
+        this.octokit.rest.repos.getContent({
+          owner,
+          path: filePath,
+          ref,
+          repo
+        })
+      )
     );
 
     if (data === null || Array.isArray(data)) {
@@ -1071,12 +1088,17 @@ export class OctokitGitHubClient implements GitHubClient {
     repo: string,
     workflowPath: string
   ): Promise<GitHubWorkflow | null> {
-    const data = await this.runNullable(() =>
-      this.octokit.rest.actions.getWorkflow({
-        owner,
-        repo,
-        workflow_id: workflowPath
-      })
+    const data = await this.atEndpoint(
+      "GET",
+      "/repos/{owner}/{repo}/actions/workflows/{workflow_id}",
+      () =>
+        this.runNullable(() =>
+          this.octokit.rest.actions.getWorkflow({
+            owner,
+            repo,
+            workflow_id: workflowPath
+          })
+        )
     );
 
     if (data === null) {
@@ -1084,11 +1106,27 @@ export class OctokitGitHubClient implements GitHubClient {
     }
 
     const record = asRecord(data);
+    const resolvedPath = asString(record.path) ?? `.github/workflows/${workflowPath}`;
+    const content = await this.getRepositoryFileContent(owner, repo, resolvedPath);
+    if (content === null)
+      throw new GitHubClientError(
+        "api_error",
+        "Workflow metadata exists but its contents could not be read. Check the workflow file and repository access, then rerun Apply.",
+        {
+          statusCode: HTTP_STATUS_NOT_FOUND,
+          endpoint: "/repos/{owner}/{repo}/contents/{path}",
+          requestMethod: "GET"
+        }
+      );
+    const parsed = parseYaml(content, resolvedPath);
     return {
       id: asNumber(record.id) ?? UNKNOWN_ID,
       name: asString(record.name) ?? workflowPath,
       path: asString(record.path) ?? workflowPath,
-      supportsDispatch: asString(record.state) !== "disabled_manually"
+      supportsDispatch:
+        asString(record.state) === "active" &&
+        parsed.status === "success" &&
+        hasWorkflowDispatchTrigger(parsed.value)
     };
   }
 
@@ -1383,6 +1421,27 @@ export class OctokitGitHubClient implements GitHubClient {
   private async run<T>(operation: () => Promise<OctokitResponseLike>): Promise<T> {
     const response = await this.runResponse(operation);
     return response.data as T;
+  }
+
+  // Fixed route templates only: never copy request URLs, headers or bodies into diagnostics.
+  private async atEndpoint<T>(
+    requestMethod: "GET" | "PUT",
+    endpoint: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      const normalized = normalizeOctokitError(error);
+      throw new GitHubClientError(normalized.kind, normalized.message, {
+        ...(normalized.statusCode === undefined ? {} : { statusCode: normalized.statusCode }),
+        ...(normalized.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: normalized.retryAfterSeconds }),
+        endpoint,
+        requestMethod
+      });
+    }
   }
 
   private async runNullable<T>(operation: () => Promise<OctokitResponseLike>): Promise<T | null> {

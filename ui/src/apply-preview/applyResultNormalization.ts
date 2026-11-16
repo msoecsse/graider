@@ -144,7 +144,26 @@ export const normalizeApplyResult = (
   apply: AssignmentApplyJsonResponse,
   appliedAt: string | null
 ): NormalizedApplyResult => {
-  const rows = normalizeRows(apply.summary);
+  const diagnostics = normalizeAssignmentDetailDiagnostics(apply.diagnostics);
+  const rows = normalizeRows(apply.summary).map((row) => {
+    const scoped = diagnostics.filter(
+      (diagnostic) =>
+        (row.repository !== null && diagnostic.context.repositoryName === row.repository) ||
+        (row.studentId !== null && diagnostic.context.student_id === row.studentId)
+    );
+    return {
+      ...row,
+      diagnostics: [
+        ...row.diagnostics,
+        ...scoped.filter(
+          (diagnostic) =>
+            !row.diagnostics.some(
+              (existing) => JSON.stringify(existing) === JSON.stringify(diagnostic)
+            )
+        )
+      ]
+    };
+  });
   const repositoryMode =
     getString(apply.summary, "repositoryMode") === "group" ? "group" : "individual";
   const groupTargets = Array.isArray(apply.summary.groupTargets)
@@ -156,7 +175,7 @@ export const normalizeApplyResult = (
     exitCode: apply.exitCode,
     appliedAt,
     assignmentFile: apply.assignmentFile,
-    diagnostics: normalizeAssignmentDetailDiagnostics(apply.diagnostics),
+    diagnostics,
     generatedFiles: apply.generatedFiles,
     summary: normalizeSummary(apply.summary, rows),
     rows,

@@ -64,11 +64,11 @@ export const mergeApplyRows = (
       githubUsername: previewRow.githubUsername,
       section: previewRow.section,
       repository: resultRow?.repository ?? previewRow.repository,
-      previewStatus: previewRow.status,
-      previewReason: previewRow.reason,
+      previewStatus: result === null || resultRow !== undefined ? previewRow.status : "unknown",
+      previewReason: result === null ? previewRow.reason : null,
       resultStatus: resultRow?.status ?? null,
       resultReason: resultRow?.reason ?? null,
-      diagnostics: resultRow?.diagnostics ?? previewRow.diagnostics
+      diagnostics: resultRow?.diagnostics ?? (result === null ? previewRow.diagnostics : [])
     };
   });
 
@@ -134,7 +134,7 @@ export const mergeApplyGroupRows = (
       plannedStudentPermission: target.plannedStudentPermission,
       facultyTeam: target.facultyTeam,
       facultyTeamPermission: target.facultyTeamPermission,
-      previewStatus,
+      previewStatus: result !== null && resultTarget === undefined ? "unknown" : previewStatus,
       resultStatus: resultTarget?.status ?? null,
       htmlUrl: resultTarget?.htmlUrl ?? null,
       diagnostics: resultTarget?.diagnostics ?? []
@@ -183,7 +183,9 @@ const agnosticVerb = (phrase: string): CountPhrase["verbPhrase"] => verb(phrase,
 const SINGULAR_COUNT = 1;
 
 const rowHasErrorDiagnostic = (row: ApplyRowState): boolean =>
-  row.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  row.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error" || diagnostic.severity === "warning"
+  );
 
 /**
  * README section 2.3's own example: "2 repositories will be created, 1
@@ -256,10 +258,10 @@ const getPreviewRowSummary = (rows: readonly ApplyRowState[]): string => {
  * of rows shown per README section 5.4.
  */
 const getResultRowSummary = (rows: readonly ApplyRowState[]): string => {
-  const counts = { created: 0, updated: 0, skipped: 0, failed: 0, blocked: 0 };
+  const counts = { created: 0, updated: 0, skipped: 0, failed: 0, blocked: 0, unknown: 0 };
 
   for (const row of rows) {
-    const status = row.resultStatus ?? "blocked";
+    const status = row.resultStatus ?? "unknown";
     counts[status] += 1;
   }
 
@@ -284,6 +286,11 @@ const getResultRowSummary = (rows: readonly ApplyRowState[]): string => {
       count: counts.blocked,
       verbPhrase: verb("was blocked", "were blocked"),
       shortLabel: "blocked"
+    },
+    {
+      count: counts.unknown,
+      verbPhrase: verb("has no confirmed outcome", "have no confirmed outcome"),
+      shortLabel: "without a confirmed outcome"
     }
   ]);
   const issueCount = rows.filter(

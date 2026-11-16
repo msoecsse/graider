@@ -115,6 +115,35 @@ describe("normalizeApplyResult", () => {
     });
   });
 
+  it("reconciles repository diagnostics supplied only at the top level without duplicating row issues", () => {
+    const diagnostic = {
+      code: "github_permission_denied",
+      severity: "error",
+      message: "Faculty permission failed.",
+      context: { operationType: "add_faculty_team_permission", repositoryName: "org/repo" }
+    };
+    const apply = {
+      schemaVersion: 1,
+      commandName: "assignment apply",
+      assignmentFile: "assignment.yml",
+      status: "partial_success",
+      exitCode: 4,
+      diagnostics: [diagnostic],
+      warnings: [],
+      errors: [diagnostic],
+      generatedFiles: [],
+      summary: { repositories: [{ repository: "org/repo", status: "created", diagnostics: [] }] }
+    } as AssignmentApplyJsonResponse;
+    expect(normalizeApplyResult(apply, null).rows[0]?.diagnostics).toHaveLength(1);
+    const withRowIssue = {
+      ...apply,
+      summary: {
+        repositories: [{ repository: "org/repo", status: "created", diagnostics: [diagnostic] }]
+      }
+    };
+    expect(normalizeApplyResult(withRowIssue, null).rows[0]?.diagnostics).toHaveLength(1);
+  });
+
   it("uses a safe failed fallback for an unknown row status", () => {
     const apply = {
       schemaVersion: 1,

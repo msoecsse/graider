@@ -127,6 +127,9 @@ jobs:
           tests/unit/execution/authoritative-legacy-course.test.ts
           tests/recovery/apply-recovery.test.ts
           tests/architecture/github-host-boundary.test.ts
+      - name: Immediate Apply outcome and reconciliation regressions
+        working-directory: ui
+        run: npx vitest run --maxWorkers=2 src/apply-preview
 
   grading-cache-safety:
     name: Grading local boundary (${{ matrix.target }})
@@ -229,8 +232,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary #54 pause for branch pushes only; every PR keeps both platforms.
-        include: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/remote-course-v2' && '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"}]' || '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"},{"runner":"windows-latest","architecture":"x64","target":"Windows x64"}]') }}
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read

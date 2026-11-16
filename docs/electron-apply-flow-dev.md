@@ -90,11 +90,11 @@ checkpoint time is included in the total.
 Expected nullable 404s no longer produce Octokit console errors. Normalized
 operation diagnostics still report authentication, authorization, rate limits,
 missing required resources and other failures. Compatibility warnings use a
-fixed message without request metadata. An Actions indexing 404 on a newly
-created individual repository retains the existing deferred-verification
-behavior; an existing tracked repository still receives missing-workflow and
-dispatch diagnostics. Apply verifies dispatch support; it does not dispatch a
-grading run.
+fixed message without request metadata. Actions permissions reads
+(`GET /repos/{owner}/{repo}/actions/permissions`) are distinct from workflow
+indexing reads (`GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}`).
+Persistent failures retain successful creation and produce setup diagnostics.
+Apply verifies dispatch support; it does not dispatch a grading run.
 
 Individual planning checks at most four repositories concurrently, in bounded
 batches, and retains deterministic plan order. Readiness uses the same bound
@@ -105,7 +105,7 @@ The readiness template snapshot is reused for initial manifest metadata within
 one Apply; the adapter also avoids fetching identical template metadata twice.
 Managed workflow deployment reuses a successful repository creation response.
 Workflow existence and dispatch checks share one successful verification
-observation, including a missing result. Failed reads are never cached, and a
+observation, including an exhausted indexing miss. Failed reads are never cached, and a
 new Apply obtains fresh observations. Account, OAuth, course authority,
 collision and recovery checks are never memoized. Workflow ownership/content
 checks and the prewrite file-SHA read remain intact.
@@ -262,6 +262,49 @@ Reproduce with `npx vitest run tests/performance/apply-latency.test.ts` and
 counts, phase counts, elapsed fake time, peak read/write concurrency, collision
 blocking, and recovery from forbidden workflow writes. Existing behavioral,
 OAuth, manifest-checkpoint and partial-failure suites remain required.
+
+### Immediate outcomes and verification (#61)
+
+The deterministic Octokit transport reproduces the post-create API error at
+`GET /repos/{owner}/{repo}/actions/permissions`. The former four-attempt window
+waited only 250 + 500 + 1,000 ms and was selected by planned creation. The new
+window uses confirmed creation and waits 1 + 2 + 4 seconds. A three-second
+propagation regression now resolves successfully. A persistent 404 is not proof
+of eventual consistency: it remains an error with Actions access/policy guidance.
+401/403 failures stop that read immediately; rate-limit handling is unchanged.
+
+Workflow indexing 404s previously returned null, were shared with dispatch
+verification, and were silently accepted for new repositories. New repository
+or successfully installed workflow indexing now uses the same bounded window.
+Persistent misses report missing workflow and dispatch diagnostics. Metadata
+success followed by unreadable contents identifies the contents endpoint.
+Dispatch support requires active metadata and an actual YAML
+`workflow_dispatch` trigger. Student/faculty permission writes and Actions
+enablement are read back; pending invitations are preserved and warned about.
+Permission readbacks use the existing three-attempt bounded retry policy.
+
+Repository creation stays durable before later reads, including the template
+baseline. Later setup failures preserve `created` with scoped diagnostics and
+recovery guidance. UI normalization also attaches top-level repository diagnostics
+to their outcomes. Unmatched diagnostics stay visible. After Apply, one automatic
+read-only preview refresh reconciles the target list; authoritative outcomes remain
+visible even if that refresh fails. Old preview readiness and unmatched `would_*`
+statuses do not become final results. Selection changes clear previous outcomes.
+
+For the 30-student indexed managed benchmark, actual verification adds 60
+permission reads and 30 workflow-content reads. Core first Apply is 486 requests /
+44.2 simulated seconds; rerun is 276 / 23.2 seconds. Including authority: 1,212 /
+80.5 seconds and 282 / 23.5 seconds. The #60 authority count remains 726 on new
+Apply; writes remain serial and read concurrency remains four. These additional
+checks do not restore redundant metadata reads or duplicate workflow verification.
+Actions enablement adds one readback only when changed. Each missing Actions-permissions or workflow-indexing read can
+add up to three retry requests and seven seconds of backoff (excluding HTTP and
+rate-limit waits). A workflow-content retry repeats metadata and content reads;
+failed requests are not shared with dispatch verification. Fully unindexed new
+workflows across 30 students cost 546 requests / 260.2 seconds, with explicit
+errors; this persistent-indexing benchmark is not live timing. The UI adds one preview request through existing IPC,
+outside the Apply timer. All tests use local fake transports; no provisioning
+or production incident trace was performed.
 
 ## IPC Boundary
 

@@ -27,31 +27,38 @@ const CREATED = 201;
 const EMPTY = 204;
 const MISSING = 404;
 const FORBIDDEN = 403;
+const UNAUTHORIZED = 401;
+const READINESS_DELAY_MS = 3_000;
+const PROPAGATION_BACKOFF_MS = 7_000;
 const TEMPLATE = "lab04-template";
 const COURSE = "se2030-graider";
-const AUTHORITY_FIRST_REQUESTS = 1122;
-const AUTHORITY_RESUME_REQUESTS = 252;
-const AUTHORITY_FIRST_MS = 71_500;
-const AUTHORITY_RESUME_MS = 20_500;
+const AUTHORITY_FIRST_REQUESTS = 1212;
+const AUTHORITY_RESUME_REQUESTS = 282;
+const AUTHORITY_FIRST_MS = 80_500;
+const AUTHORITY_RESUME_MS = 23_500;
 const AUTHORITY_REQUESTS_PER_VALIDATION = 6;
 const WRITES_PER_STUDENT = 4;
 const ASSIGNMENT = "terms/27s1/assignments/lab04/assignment.yml";
 const TOKEN = "ghp_latency_test_secret";
 const roots: string[] = [];
-const FIRST_REQUESTS_WITH_GRADING = 396;
-const FIRST_REQUESTS_WITHOUT_GRADING = 276;
-const RESUME_REQUESTS_WITH_GRADING = 246;
+const FIRST_REQUESTS_WITH_GRADING = 486;
+const FIRST_REQUESTS_WITHOUT_GRADING = 336;
+const RESUME_REQUESTS_WITH_GRADING = 276;
 const RESUME_REQUESTS_WITHOUT_GRADING = 156;
-const FIRST_MS_WITH_GRADING = 35_200;
-const FIRST_MS_WITHOUT_GRADING = 23_200;
-const RESUME_MS_WITH_GRADING = 20_200;
+const FIRST_MS_WITH_GRADING = 44_200;
+const FIRST_MS_WITHOUT_GRADING = 29_200;
+const RESUME_MS_WITH_GRADING = 23_200;
 const RESUME_MS_WITHOUT_GRADING = 11_200;
 const READINESS_REQUESTS = 36;
-const PERMISSIONS_REQUESTS = 120;
+const PERMISSIONS_REQUESTS = 180;
 const CREATION_REQUESTS = 60;
 const DEPLOYMENT_REQUESTS = 90;
 const FIRST_EXPECTED_MISSING_GRADING = 150;
-const FIRST_EXPECTED_MISSING_UNINDEXED = 180;
+const FIRST_EXPECTED_MISSING_UNINDEXED = 270;
+const UNINDEXED_FIRST_REQUESTS = 546;
+const UNINDEXED_FIRST_MS = 260_200;
+const UNINDEXED_RESUME_REQUESTS = 246;
+const UNINDEXED_RESUME_MS = 20_200;
 const FIRST_EXPECTED_MISSING_DISABLED = 90;
 
 // Measured at b40becc before this change; includes initial validation in readiness.
@@ -63,10 +70,10 @@ const AUTHORITY_FIRST_PHASES = {
   readiness: { beforeRequests: 44, beforeMs: 2200, requests: 42, ms: 1700 },
   planning: { beforeRequests: 30, beforeMs: 800, requests: 30, ms: 800 },
   repositoryCreation: { beforeRequests: 330, beforeMs: 33_000, requests: 240, ms: 15_000 },
-  permissions: { beforeRequests: 600, beforeMs: 60_000, requests: 480, ms: 30_000 },
+  permissions: { beforeRequests: 600, beforeMs: 60_000, requests: 540, ms: 36_000 },
   actionsConfiguration: { beforeRequests: 30, beforeMs: 3000, requests: 30, ms: 3000 },
   workflowDeployment: { beforeRequests: 330, beforeMs: 33_000, requests: 270, ms: 18_000 },
-  verification: { beforeRequests: 30, beforeMs: 3000, requests: 30, ms: 3000 }
+  verification: { beforeRequests: 30, beforeMs: 3000, requests: 60, ms: 6000 }
 };
 const AUTHORITY_RESUME_PHASES = {
   ...AUTHORITY_FIRST_PHASES,
@@ -85,6 +92,9 @@ const measurements = (summary: Readonly<Record<string, unknown>>): PerformanceSn
 
 /** Real Octokit requests, entirely local transport. Every request costs controllable time. */
 class ApplyTransport {
+  readonly calls: string[] = [];
+  readonly failures = new Map<string, number[]>();
+  readonly readiness = new Map<string, { delayMs: number; readyAt?: number }>();
   courseContent: string | undefined;
   workflowWriteForbidden = false;
   requests = 0;
@@ -104,6 +114,8 @@ class ApplyTransport {
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url
     );
     const method = init?.method ?? "GET";
+    const operation = `${method} ${url.pathname}`;
+    this.calls.push(operation);
     const read = method === "GET";
     this.requests += 1;
     this.activeReads += read ? 1 : 0;
@@ -123,6 +135,13 @@ class ApplyTransport {
         headers: { "content-type": "application/json" }
       });
     };
+    const failure = this.failures.get(operation)?.shift();
+    if (failure !== undefined) return reply({ message: "Injected endpoint failure" }, failure);
+    const readiness = this.readiness.get(operation);
+    if (readiness !== undefined) {
+      readiness.readyAt ??= Date.now() + readiness.delayMs;
+      if (Date.now() < readiness.readyAt) return reply({ message: "Not Found" }, MISSING);
+    }
     if (url.pathname === "/user") return reply({ login: "faculty", id: 1 });
     if (url.pathname.startsWith("/users/")) return reply({ login: parts[2], id: 1 });
     if (url.pathname === "/orgs/example-org/teams/faculty")
@@ -233,6 +252,110 @@ describe(
   "Apply latency with 30 students and 100ms per HTTP request",
   { timeout: APPLY_TEST_TIMEOUT_MS },
   () => {
+    it("waits through a three-second Actions and workflow propagation delay, exceeding the former retry window", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+      const transport = new ApplyTransport(true);
+      const repo = "27s1-se2030-lab04-student0";
+      const actions = `GET /repos/example-org/${repo}/actions/permissions`;
+      const workflow = `GET /repos/example-org/${repo}/actions/workflows/grade.yml`;
+      transport.readiness.set(actions, { delayMs: READINESS_DELAY_MS });
+      transport.readiness.set(workflow, { delayMs: READINESS_DELAY_MS });
+      vi.stubGlobal("fetch", transport.fetch);
+      const pending = runApplyCommand({
+        cwd: fixture(true),
+        assignmentFile: ASSIGNMENT,
+        options: normalizeCommonCommandOptions({ yes: true }),
+        githubClient: new OctokitGitHubClient({ token: TOKEN })
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      expect(result.errors).toEqual([]);
+      expect(transport.calls.filter((call) => call === actions)).toHaveLength(3);
+      expect(transport.calls.filter((call) => call === workflow)).toHaveLength(3);
+      expect(result.summary.created).toBe(STUDENTS);
+    });
+
+    it.each(["transient", "persistent", "forbidden", "unauthorized", "workflow"] as const)(
+      "attributes post-create %s failures to their exact endpoint and retains durable creation",
+      async (scenario) => {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+        const transport = new ApplyTransport(true);
+        const repo = "27s1-se2030-lab04-student0";
+        const actions = `GET /repos/example-org/${repo}/actions/permissions`;
+        const workflow = `GET /repos/example-org/${repo}/actions/workflows/grade.yml`;
+        transport.failures.set(
+          actions,
+          scenario === "forbidden" || scenario === "unauthorized"
+            ? [scenario === "forbidden" ? FORBIDDEN : UNAUTHORIZED]
+            : scenario === "workflow"
+              ? []
+              : Array.from({ length: scenario === "persistent" ? 4 : 3 }, () => MISSING)
+        );
+        if (scenario === "transient" || scenario === "workflow")
+          transport.failures.set(
+            workflow,
+            Array.from({ length: scenario === "workflow" ? 4 : 2 }, () => MISSING)
+          );
+        vi.stubGlobal("fetch", transport.fetch);
+        const cwd = fixture(true);
+        const pending = runApplyCommand({
+          cwd,
+          assignmentFile: ASSIGNMENT,
+          options: normalizeCommonCommandOptions({ yes: true }),
+          githubClient: new OctokitGitHubClient({ token: TOKEN })
+        });
+        await vi.runAllTimersAsync();
+        const result = await pending;
+        expect(result.summary.created).toBe(STUDENTS);
+        const outcomes = result.summary.repositories as {
+          status: string;
+          diagnostics: { context?: Record<string, unknown> }[];
+        }[];
+        expect(outcomes[0]?.status).toBe("created");
+        const checkpoint = loadManifest(createManifestPath(cwd, "27s1", "lab04").absolutePath);
+        expect(checkpoint.manifest?.repositories).toHaveLength(STUDENTS);
+        expect(transport.calls.filter((call) => call === actions)).toHaveLength(
+          scenario === "forbidden" || scenario === "unauthorized" || scenario === "workflow" ? 1 : 4
+        );
+        if (scenario === "transient") {
+          expect(result.errors).toEqual([]);
+          expect(transport.calls.filter((call) => call === workflow)).toHaveLength(3);
+          expect(checkpoint.manifest?.repositories[0]?.actions).toMatchObject({
+            enabled: true,
+            gradingWorkflowFound: true,
+            workflowDispatchSupported: true
+          });
+        } else {
+          expect(result.status).toBe("partial_success");
+          expect(
+            outcomes[0]?.diagnostics.some(
+              (diagnostic) =>
+                diagnostic.context?.operationType ===
+                  (scenario === "workflow" ? "verify_grading_workflow" : "enable_actions") &&
+                diagnostic.context.endpoint ===
+                  (scenario === "workflow"
+                    ? "/repos/{owner}/{repo}/actions/workflows/{workflow_id}"
+                    : "/repos/{owner}/{repo}/actions/permissions")
+            )
+          ).toBe(true);
+        }
+        expect(transport.peakWrites).toBe(1);
+        expect(JSON.stringify(result)).not.toContain(TOKEN);
+        if (scenario === "persistent" || scenario === "workflow") {
+          const resume = runApplyCommand({
+            cwd,
+            assignmentFile: ASSIGNMENT,
+            options: normalizeCommonCommandOptions({ yes: true }),
+            githubClient: new OctokitGitHubClient({ token: TOKEN })
+          });
+          await vi.runAllTimersAsync();
+          const recovered = await resume;
+          expect(recovered.errors).toEqual([]);
+          expect(recovered.summary.created).toBe(0);
+          expect(transport.repositories.size).toBe(STUDENTS + 1);
+        }
+      }
+    );
     it.each([
       { grading: false, indexed: false },
       { grading: true, indexed: true },
@@ -253,7 +376,7 @@ describe(
       const pending = runApplyCommand(request);
       await vi.runAllTimersAsync();
       const result = await pending;
-      expect(result.errors).toEqual([]);
+      expect(result.errors).toHaveLength(grading && !indexed ? STUDENTS * 2 : 0);
       expect(result.summary.created).toBe(STUDENTS);
       const first = {
         requests: transport.requests,
@@ -261,9 +384,15 @@ describe(
         elapsedMs: Date.now() - start
       };
       expect(first.requests).toBe(
-        grading ? FIRST_REQUESTS_WITH_GRADING : FIRST_REQUESTS_WITHOUT_GRADING
+        grading
+          ? indexed
+            ? FIRST_REQUESTS_WITH_GRADING
+            : UNINDEXED_FIRST_REQUESTS
+          : FIRST_REQUESTS_WITHOUT_GRADING
       );
-      expect(first.elapsedMs).toBe(grading ? FIRST_MS_WITH_GRADING : FIRST_MS_WITHOUT_GRADING);
+      expect(first.elapsedMs).toBe(
+        grading ? (indexed ? FIRST_MS_WITH_GRADING : UNINDEXED_FIRST_MS) : FIRST_MS_WITHOUT_GRADING
+      );
       expect(first.missing).toBe(
         grading
           ? indexed
@@ -287,7 +416,9 @@ describe(
       expect(profile.phases.workflowDeployment.httpRequests).toBe(
         grading ? DEPLOYMENT_REQUESTS : 0
       );
-      expect(profile.phases.verification.httpRequests).toBe(grading ? STUDENTS : 0);
+      expect(profile.phases.verification.httpRequests).toBe(
+        grading ? STUDENTS * (indexed ? 2 : 4) : 0
+      );
       expect(
         APPLY_PHASES.reduce((count, phase) => count + profile.phases[phase].httpRequests, 0)
       ).toBe(first.requests);
@@ -310,9 +441,19 @@ describe(
         elapsedMs: Date.now() - resumeStart
       };
       expect(second.requests).toBe(
-        grading ? RESUME_REQUESTS_WITH_GRADING : RESUME_REQUESTS_WITHOUT_GRADING
+        grading
+          ? indexed
+            ? RESUME_REQUESTS_WITH_GRADING
+            : UNINDEXED_RESUME_REQUESTS
+          : RESUME_REQUESTS_WITHOUT_GRADING
       );
-      expect(second.elapsedMs).toBe(grading ? RESUME_MS_WITH_GRADING : RESUME_MS_WITHOUT_GRADING);
+      expect(second.elapsedMs).toBe(
+        grading
+          ? indexed
+            ? RESUME_MS_WITH_GRADING
+            : UNINDEXED_RESUME_MS
+          : RESUME_MS_WITHOUT_GRADING
+      );
       expect(transport.peakReads).toBe(GITHUB_READ_CONCURRENCY);
       expect(consoleErrors).not.toHaveBeenCalled();
       process.stdout.write(
@@ -320,7 +461,8 @@ describe(
       );
       expect(transport.peakWrites).toBe(1);
       expect(first.elapsedMs - first.requests * LATENCY_MS).toBe(
-        -(2 * (STUDENTS - Math.ceil(STUDENTS / GITHUB_READ_CONCURRENCY)) * LATENCY_MS)
+        -(2 * (STUDENTS - Math.ceil(STUDENTS / GITHUB_READ_CONCURRENCY)) * LATENCY_MS) +
+          (grading && !indexed ? STUDENTS * PROPAGATION_BACKOFF_MS : 0)
       );
       const manifest = loadManifest(createManifestPath(cwd, "27s1", "lab04").absolutePath);
       expect(manifest.status).toBe("loaded");

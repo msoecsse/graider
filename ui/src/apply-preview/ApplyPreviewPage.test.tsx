@@ -851,6 +851,67 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getByText("1 repository was created, 1 updated, 1 skipped.")).toBeInTheDocument();
   });
 
+  it.each([false, true])(
+    "automatically reconciles after Apply and retains authoritative outcomes when refresh fails: %s",
+    async (refreshFails) => {
+      const getPreview = vi
+        .fn()
+        .mockResolvedValueOnce(createApplyPreviewResult(createReadyApplyPreviewJson()))
+        .mockResolvedValue(
+          createApplyPreviewResult(refreshFails ? null : createApplyPreviewJson())
+        );
+      mockGraiderUI({
+        getAssignmentApplyPreview: getPreview,
+        applyAssignment: vi.fn().mockResolvedValue(createApplyResult())
+      });
+      renderApplyPreviewPage();
+      fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+      fireEvent.click(
+        screen.getByLabelText("I understand this will apply changes to student repositories")
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+      await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("Created")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Preview status" })).toBeNull();
+      expect(screen.queryByText("Would create")).toBeNull();
+      expect(screen.queryByText("Archived assignments cannot be applied.")).toBeNull();
+    }
+  );
+
+  it("ignores an Apply completion from a previous selection even after returning to that assignment", async () => {
+    let complete: ((result: AssignmentApplyResult) => void) | undefined;
+    const pending = new Promise<AssignmentApplyResult>((resolve) => {
+      complete = resolve;
+    });
+    const getPreview = vi
+      .fn()
+      .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson()));
+    mockGraiderUI({
+      getAssignmentApplyPreview: getPreview,
+      applyAssignment: vi.fn().mockReturnValue(pending)
+    });
+    const view = render(<ApplyPreviewPage selection={SELECTION} assignmentDetail={null} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    view.rerender(
+      <ApplyPreviewPage
+        selection={{ ...SELECTION, assignmentFile: "another-assignment.yml" }}
+        assignmentDetail={null}
+      />
+    );
+    await screen.findByRole("button", { name: "Review apply changes" });
+    view.rerender(<ApplyPreviewPage selection={SELECTION} assignmentDetail={null} />);
+    await screen.findByRole("button", { name: "Review apply changes" });
+    if (complete === undefined) throw new Error("Missing Apply completion callback.");
+    complete(createApplyResult());
+    await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText("Created")).toBeNull();
+    expect(screen.getByRole("button", { name: "Review apply changes" })).toBeInTheDocument();
+  });
+
   it("shows durable success with row issues and keeps repository diagnostics out of the global panel", async () => {
     const createdIssue = {
       code: "github_api_error",
@@ -860,7 +921,10 @@ describe("ApplyPreviewPage", () => {
         operationType: "enable_actions",
         repositoryName: "graider-sandbox/csc1120-lab02-ada",
         student_id: "s001",
-        statusCode: 404
+        statusCode: 404,
+        endpoint: "/repos/{owner}/{repo}/actions/permissions",
+        requestMethod: "GET",
+        remediation: "Check Actions access and rerun Apply."
       }
     };
     const updatedIssue = {
@@ -953,6 +1017,10 @@ describe("ApplyPreviewPage", () => {
     expect(within(adaRow!).getByText("Created with issues")).toBeInTheDocument();
     expect(within(adaRow!).queryByText("Failed")).toBeNull();
     expect(within(adaRow!).getByText("Operation: Enable Actions")).toBeInTheDocument();
+    expect(
+      within(adaRow!).getByText("GET /repos/{owner}/{repo}/actions/permissions")
+    ).toBeInTheDocument();
+    expect(within(adaRow!).getByText("Check Actions access and rerun Apply.")).toBeInTheDocument();
     expect(within(graceRow!).getByText("Updated with issues")).toBeInTheDocument();
     expect(within(katherineRow!).getByText("Failed")).toBeInTheDocument();
     expect(

@@ -52,6 +52,17 @@ const CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
 const CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
 const FIRST_REPOSITORY_POSITION = 1;
 export const FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS = 4;
+const FRESH_REPOSITORY_READ_BACKOFF_MS = 1_000;
+const HTTP_NOT_FOUND = 404;
+const WORKFLOW_ENDPOINT = "/repos/{owner}/{repo}/actions/workflows/{workflow_id}";
+
+class WorkflowNotIndexedError extends GitHubClientError {
+  constructor() {
+    super("api_error", "The grading workflow is not yet visible to GitHub Actions.", {
+      statusCode: HTTP_NOT_FOUND
+    });
+  }
+}
 
 const isRepositoryCreationOperation = (operation: PlanOperation): boolean =>
   operation.type === CREATE_REPOSITORY_PLAN_TYPE ||
@@ -92,26 +103,50 @@ export interface ApplyExecutionInput {
 interface ApplyExecutionContext extends ApplyExecutionInput {
   readonly createdRepositories: Map<string, GitHubRepository>;
   readonly verifiedWorkflows: Map<string, GitHubWorkflow | null>;
+  readonly deployedWorkflowRepositories: Set<string>;
 }
 
 const getVerificationWorkflow = async (
   input: ApplyExecutionContext,
-  repositoryName: string,
+  operation: PlanOperation,
   workflowIdentifier: string
 ): Promise<GitHubWorkflow | null> => {
+  const repositoryName = operation.repository_name ?? "";
   const key = JSON.stringify([
     input.config.course.github.organization,
     repositoryName,
     workflowIdentifier
   ]);
   if (input.verifiedWorkflows.has(key)) return input.verifiedWorkflows.get(key) ?? null;
-  const workflow = await runGitHubOperation(input, () =>
-    input.githubClient.getWorkflow(
-      input.config.course.github.organization,
-      repositoryName,
-      workflowIdentifier
-    )
-  );
+  const recentlyWritten =
+    input.createdRepositories.has(repositoryName) ||
+    input.deployedWorkflowRepositories.has(repositoryName);
+  let workflow: GitHubWorkflow | null;
+  try {
+    workflow = await withGitHubRetry(
+      async () => {
+        const observation = await input.githubClient.getWorkflow(
+          input.config.course.github.organization,
+          repositoryName,
+          workflowIdentifier
+        );
+        if (observation === null && recentlyWritten) throw new WorkflowNotIndexedError();
+        return observation;
+      },
+      {
+        ...input.retryOptions,
+        ...(recentlyWritten
+          ? {
+              maxAttempts: FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS,
+              initialBackoffMs: FRESH_REPOSITORY_READ_BACKOFF_MS
+            }
+          : {})
+      }
+    );
+  } catch (error: unknown) {
+    if (!(error instanceof WorkflowNotIndexedError)) throw error;
+    workflow = null;
+  }
   input.verifiedWorkflows.set(key, workflow);
   return workflow;
 };
@@ -183,12 +218,12 @@ const getRepositoryOutcomeReason = (
   planReason: string | undefined
 ): string => {
   if (status === "created") {
-    return hasErrorDiagnostic(diagnostics)
+    return diagnostics.length > EMPTY_COUNT
       ? "repository_created_with_issues"
       : "repository_created";
   }
   if (status === "updated") {
-    return hasErrorDiagnostic(diagnostics)
+    return diagnostics.length > EMPTY_COUNT
       ? "repository_updated_with_issues"
       : "repository_updated";
   }
@@ -250,7 +285,12 @@ const normalizeGitHubError = (
           "Unexpected GitHub client failure during apply."
         ),
     operation,
-    extraContext
+    {
+      ...extraContext,
+      ...(error instanceof GitHubClientError && error.endpoint !== undefined
+        ? { endpoint: error.endpoint, requestMethod: error.requestMethod }
+        : {})
+    }
   );
 
 const runGitHubOperation = async <T>(
@@ -265,29 +305,49 @@ const runFreshRepositoryActionsRead = async <T>(
 ): Promise<T> =>
   withGitHubRetry(read, {
     ...input.retryOptions,
-    ...(wasRepositoryCreatedInPlan(input, operation)
-      ? { maxAttempts: FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS }
+    ...(input.createdRepositories.has(operation.repository_name ?? "")
+      ? {
+          maxAttempts: FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS,
+          initialBackoffMs: FRESH_REPOSITORY_READ_BACKOFF_MS
+        }
       : {})
   });
 
-const createWorkflowMissingDiagnostic = (operation: PlanOperation): Diagnostic =>
+const createWorkflowMissingDiagnostic = (
+  operation: PlanOperation,
+  workflowPath: string
+): Diagnostic =>
   attachOperationContext(
     createConfigDiagnostic(
       DiagnosticCode.GradingWorkflowMissing,
       `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`
     ),
     operation,
-    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
+    {
+      workflowPath,
+      endpoint: WORKFLOW_ENDPOINT,
+      requestMethod: "GET",
+      remediation:
+        "Check the workflow file and Actions access, then rerun Apply to verify. Repository creation is retained."
+    }
   );
 
-const createWorkflowDispatchDiagnostic = (operation: PlanOperation): Diagnostic =>
+const createWorkflowDispatchDiagnostic = (
+  operation: PlanOperation,
+  workflowPath: string
+): Diagnostic =>
   attachOperationContext(
     createConfigDiagnostic(
       DiagnosticCode.WorkflowDispatchUnsupported,
       `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`
     ),
     operation,
-    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
+    {
+      workflowPath,
+      endpoint: WORKFLOW_ENDPOINT,
+      requestMethod: "GET",
+      remediation: "Check that the active workflow includes workflow_dispatch, then rerun Apply."
+    }
   );
 
 const createWorkflowDeploymentConflictDiagnostic = (
@@ -327,17 +387,6 @@ const getEffectiveWorkflowPath = (config: LoadedGraiderConfig): string | undefin
     ? GRAIDER_MANAGED_WORKFLOW_PATH
     : grading.workflow;
 };
-
-const wasRepositoryCreatedInPlan = (
-  input: ApplyExecutionContext,
-  operation: PlanOperation
-): boolean =>
-  input.plan.operations.some(
-    (candidate) =>
-      isRepositoryCreationOperation(candidate) &&
-      candidate.student_id === operation.student_id &&
-      candidate.status === "planned"
-  );
 
 const createPermissionWarning = (
   operation: PlanOperation,
@@ -673,7 +722,22 @@ const executeCreateRepository = async (
       );
     }
   } catch (error: unknown) {
-    return recordError(nextState, normalizeGitHubError(error, operation));
+    return recordError(
+      nextState,
+      normalizeGitHubError(
+        error,
+        operation,
+        input.createdRepositories.has(repositoryName)
+          ? {
+              operationType: "verify_repository_baseline",
+              endpoint: "/repos/{owner}/{repo}/commits",
+              requestMethod: "GET",
+              remediation:
+                "Repository creation is retained. Rerun Apply to reconcile the template baseline."
+            }
+          : {}
+      )
+    );
   }
 };
 
@@ -703,6 +767,7 @@ const executeStudentCollaborator = async (
       )
     );
     let nextState = state;
+    let appliedPermission = currentPermission;
 
     if (hasAtLeastPermission(currentPermission.permission, STUDENT_PERMISSION)) {
       nextState = incrementSummary(nextState, "noop");
@@ -714,7 +779,7 @@ const executeStudentCollaborator = async (
         );
       }
     } else {
-      await runGitHubOperation(input, () =>
+      appliedPermission = await runGitHubOperation(input, () =>
         input.githubClient.addCollaborator({
           owner: input.config.course.github.organization,
           repo: repositoryName,
@@ -722,8 +787,43 @@ const executeStudentCollaborator = async (
           permission: STUDENT_PERMISSION
         })
       );
+      if (!appliedPermission.pendingInvite) {
+        appliedPermission = await runGitHubOperation(input, async () => {
+          const permission = await input.githubClient.getCollaboratorPermission(
+            input.config.course.github.organization,
+            repositoryName,
+            githubUsername
+          );
+          if (!hasAtLeastPermission(permission.permission, STUDENT_PERMISSION))
+            throw new GitHubClientError(
+              "api_error",
+              "Student admin permission was not verified after the write. Check collaborator access and rerun Apply."
+            );
+          return permission;
+        });
+      }
       nextState = incrementSummary(nextState, "verified");
     }
+
+    if (appliedPermission.pendingInvite) {
+      nextState = recordWarning(
+        nextState,
+        attachOperationContext(
+          createWarningDiagnostic(
+            DiagnosticCode.StudentInvitationPending,
+            "Student access is pending invitation acceptance. Ask the student to accept the repository invitation, then rerun Apply."
+          ),
+          operation
+        )
+      );
+    }
+
+    const permission = appliedPermission.permission;
+    if (permission === "none")
+      throw new GitHubClientError(
+        "api_error",
+        "The student permission grant could not be confirmed. Check collaborator access and rerun Apply."
+      );
 
     return persistManifest(
       {
@@ -733,11 +833,8 @@ const executeStudentCollaborator = async (
           permissions: {
             student: {
               username: githubUsername,
-              permission:
-                currentPermission.permission === "none"
-                  ? STUDENT_PERMISSION
-                  : currentPermission.permission,
-              pendingInvite: currentPermission.pendingInvite,
+              permission,
+              pendingInvite: appliedPermission.pendingInvite,
               lastObservedAt: observedAt,
               lastAppliedAt: observedAt
             }
@@ -797,6 +894,18 @@ const executeTeamPermission = async (
           permission: expectedPermission
         })
       );
+      await runGitHubOperation(input, async () => {
+        const permission = await input.githubClient.getTeamPermission(
+          input.config.course.github.organization,
+          repositoryName,
+          teamSlug
+        );
+        if (!hasAtLeastPermission(permission.permission, expectedPermission))
+          throw new GitHubClientError(
+            "api_error",
+            "Faculty team permission was not verified after the write. Check team repository access and rerun Apply."
+          );
+      });
       nextState = incrementSummary(nextState, "verified");
     }
 
@@ -809,7 +918,8 @@ const executeTeamPermission = async (
             facultyTeam: {
               teamSlug,
               permission:
-                currentPermission.permission === "none"
+                currentPermission.permission === "none" ||
+                !hasAtLeastPermission(currentPermission.permission, expectedPermission)
                   ? expectedPermission
                   : currentPermission.permission,
               lastObservedAt: observedAt,
@@ -853,6 +963,18 @@ const executeEnableActions = async (
       await runGitHubOperation(input, () =>
         input.githubClient.enableActions(input.config.course.github.organization, repositoryName)
       );
+      await runFreshRepositoryActionsRead(input, operation, async () => {
+        const observed = await input.githubClient.getActionsState(
+          input.config.course.github.organization,
+          repositoryName
+        );
+        if (observed !== "enabled")
+          throw new GitHubClientError(
+            "api_error",
+            "Actions remain disabled after enablement. Check organization Actions policy and rerun Apply."
+          );
+        return observed;
+      });
       nextState = incrementSummary(nextState, "verified");
     }
 
@@ -870,7 +992,14 @@ const executeEnableActions = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error, operation));
+    return recordError(
+      state,
+      normalizeGitHubError(error, operation, {
+        endpoint: "/repos/{owner}/{repo}/actions/permissions",
+        remediation:
+          "Check repository administration access, OAuth repo scope and organization Actions policy, then rerun Apply. A persistent 404 may indicate missing access; repository creation is retained."
+      })
+    );
   }
 };
 
@@ -891,7 +1020,6 @@ const executeVerifyWorkflow = async (
     return incrementSummary(state, "skipped");
   }
 
-  const repositoryName = operation.repository_name;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(input, state.manifest, operation) === undefined) {
@@ -899,26 +1027,9 @@ const executeVerifyWorkflow = async (
   }
 
   try {
-    const workflow = await getVerificationWorkflow(
-      input,
-      repositoryName,
-      workflowDispatchIdentifier
-    );
+    const workflow = await getVerificationWorkflow(input, operation, workflowDispatchIdentifier);
 
     if (workflow === null) {
-      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      if (isNewRepository)
-        return persistManifest(
-          {
-            ...state,
-            manifest: updateActionsState(state.manifest, {
-              studentId: operation.student_id ?? "",
-              actions: { gradingWorkflowPath: workflowPath, lastObservedAt: observedAt }
-            })
-          },
-          input.manifestPath
-        );
-
       return persistManifest(
         recordError(
           {
@@ -932,7 +1043,7 @@ const executeVerifyWorkflow = async (
               }
             })
           },
-          createWorkflowMissingDiagnostic(operation)
+          createWorkflowMissingDiagnostic(operation, workflowPath)
         ),
         input.manifestPath
       );
@@ -956,7 +1067,14 @@ const executeVerifyWorkflow = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error, operation, { workflowPath }));
+    return recordError(
+      state,
+      normalizeGitHubError(error, operation, {
+        workflowPath,
+        endpoint: WORKFLOW_ENDPOINT,
+        requestMethod: "GET"
+      })
+    );
   }
 };
 
@@ -977,7 +1095,6 @@ const executeVerifyDispatch = async (
     return incrementSummary(state, "skipped");
   }
 
-  const repositoryName = operation.repository_name;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(input, state.manifest, operation) === undefined) {
@@ -985,26 +1102,9 @@ const executeVerifyDispatch = async (
   }
 
   try {
-    const workflow = await getVerificationWorkflow(
-      input,
-      repositoryName,
-      workflowDispatchIdentifier
-    );
+    const workflow = await getVerificationWorkflow(input, operation, workflowDispatchIdentifier);
 
     if (workflow === null || !workflow.supportsDispatch) {
-      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      if (workflow === null && isNewRepository)
-        return persistManifest(
-          {
-            ...state,
-            manifest: updateActionsState(state.manifest, {
-              studentId: operation.student_id ?? "",
-              actions: { lastObservedAt: observedAt }
-            })
-          },
-          input.manifestPath
-        );
-
       return persistManifest(
         recordError(
           {
@@ -1017,7 +1117,7 @@ const executeVerifyDispatch = async (
               }
             })
           },
-          createWorkflowDispatchDiagnostic(operation)
+          createWorkflowDispatchDiagnostic(operation, workflowPath)
         ),
         input.manifestPath
       );
@@ -1040,7 +1140,14 @@ const executeVerifyDispatch = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error, operation, { workflowPath }));
+    return recordError(
+      state,
+      normalizeGitHubError(error, operation, {
+        workflowPath,
+        endpoint: WORKFLOW_ENDPOINT,
+        requestMethod: "GET"
+      })
+    );
   }
 };
 
@@ -1098,6 +1205,9 @@ const executeEnsureManagedWorkflow = async (
       blockedWorkflowTargets.add(operationTargetKey(operation));
       return recordError(state, createWorkflowDeploymentConflictDiagnostic(operation, true));
     }
+
+    if (result.status === "created" || result.status === "updated")
+      input.deployedWorkflowRepositories.add(repositoryName);
 
     return incrementSummary(state, result.status === "noop" ? "noop" : "verified");
   } catch (error: unknown) {
@@ -1177,7 +1287,8 @@ export const executeApplyPlan = async (
   const input: ApplyExecutionContext = {
     ...request,
     createdRepositories: new Map(),
-    verifiedWorkflows: new Map()
+    verifiedWorkflows: new Map(),
+    deployedWorkflowRepositories: new Set()
   };
   const initialManifest =
     input.manifest ??

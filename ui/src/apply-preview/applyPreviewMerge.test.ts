@@ -178,7 +178,7 @@ describe("mergeApplyRows", () => {
     expect(formatMergedRowStatus(merged[0]!)).toBe("Created");
   });
 
-  it("keeps a row that apply never attempted (blocked pre-apply) as its preview status", () => {
+  it("marks a preview row without an Apply outcome as unknown", () => {
     const merged = mergeApplyRows(
       preview({
         plan: {
@@ -191,7 +191,7 @@ describe("mergeApplyRows", () => {
     );
 
     expect(merged[0]?.resultStatus).toBeNull();
-    expect(formatMergedRowStatus(merged[0]!)).toBe("Blocked");
+    expect(formatMergedRowStatus(merged[0]!)).toBe("Unknown");
     expect(mergedRowNeedsAttention(merged[0]!)).toBe(true);
   });
 
@@ -360,7 +360,7 @@ describe("getApplyPlanSummaryText", () => {
     expect(getApplyPlanSummaryText(preview(), false, rows, [])).toBe("1 repository is blocked.");
   });
 
-  it("switches to past tense and counts a never-attempted row as blocked once a result exists", () => {
+  it("uses past tense and explicitly counts missing outcomes after Apply", () => {
     const rows = mergeApplyRows(
       preview({
         plan: {
@@ -376,7 +376,7 @@ describe("getApplyPlanSummaryText", () => {
     );
 
     expect(getApplyPlanSummaryText(preview(), true, rows, [])).toBe(
-      "1 repository was created, 1 blocked."
+      "1 repository was created, 1 without a confirmed outcome."
     );
   });
 

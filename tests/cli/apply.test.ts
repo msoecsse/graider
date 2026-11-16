@@ -282,6 +282,33 @@ class ActionsPropagationGitHubClient extends FakeGitHubClient {
   }
 }
 
+class UnverifiedGrantGitHubClient extends FakeGitHubClient {
+  constructor(
+    private readonly grant: "student" | "faculty" | "invitation",
+    state: ConstructorParameters<typeof FakeGitHubClient>[0]
+  ) {
+    super(state);
+  }
+
+  override async addCollaborator(
+    input: Parameters<FakeGitHubClient["addCollaborator"]>[0]
+  ): ReturnType<FakeGitHubClient["addCollaborator"]> {
+    if (this.grant === "student" || this.grant === "invitation")
+      return {
+        username: input.username,
+        permission: input.permission,
+        pendingInvite: this.grant === "invitation"
+      };
+    return super.addCollaborator(input);
+  }
+
+  override async addTeamPermission(
+    input: Parameters<FakeGitHubClient["addTeamPermission"]>[0]
+  ): Promise<void> {
+    if (this.grant !== "faculty") await super.addTeamPermission(input);
+  }
+}
+
 const runApply = async (
   fixtureName: string,
   githubClient: FakeGitHubClient = createReadyClient(),
@@ -1125,6 +1152,40 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.createdRepositories).toHaveLength(createdCount);
   });
 
+  it.each(["student", "faculty", "invitation"] as const)(
+    "does not claim complete access after an unverified %s grant",
+    async (grant) => {
+      const githubClient = new UnverifiedGrantGitHubClient(grant, {
+        templateRepositories: [templateRepository],
+        users: [{ username: "seanjones" }],
+        teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
+      });
+      const { cwd, result } = await runApply("grading-disabled", githubClient);
+      expect(getRepositoryOutcomes(result)[0]?.status).toBe("created");
+      const record = loadWrittenManifest(cwd).manifest?.repositories[0];
+      if (grant === "invitation") {
+        expect(record?.permissions.student).toMatchObject({
+          permission: "admin",
+          pendingInvite: true
+        });
+        expect(result.warnings).toContainEqual(
+          expect.objectContaining({ code: "student_invitation_pending" })
+        );
+      } else {
+        expect(result.status).toBe("partial_success");
+        expect(
+          hasOutcomeDiagnostic(getRepositoryOutcomes(result)[0], "github_api_error", {
+            operationType:
+              grant === "student" ? "add_student_collaborator" : "add_faculty_team_permission"
+          })
+        ).toBe(true);
+        expect(
+          grant === "student" ? record?.permissions.student : record?.permissions.facultyTeam
+        ).toBeUndefined();
+      }
+    }
+  );
+
   it("retries fresh-repository Actions readiness within a bounded propagation window", async () => {
     const githubClient = new ActionsPropagationGitHubClient({
       templateRepositories: [templateRepository],
@@ -1136,7 +1197,7 @@ describe("graider apply command", () => {
     const { result } = await runApply("grading-disabled", githubClient);
 
     expect(result.status).toBe("success");
-    expect(githubClient.actionsStateReads).toBe(FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS);
+    expect(githubClient.actionsStateReads).toBe(FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS + 1);
     expect(githubClient.mutations.createdRepositories).toHaveLength(1);
     expect(result.summary.retryCount).toBe(3);
     expect(result.summary.repositories).toEqual([
@@ -1597,7 +1658,7 @@ describe("graider apply command", () => {
     ).toBeUndefined();
   });
 
-  it("new repositories with a workflow not yet observable omit the transient diagnostic", async () => {
+  it("reports incomplete grading setup when a new workflow remains unobservable", async () => {
     const githubClient = new FakeGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
@@ -1612,8 +1673,10 @@ describe("graider apply command", () => {
     });
     const { result } = await runApply("active-assignment", githubClient);
 
-    expect(result.status).toBe("success");
-    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.status).toBe("partial_success");
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({ code: "grading_workflow_missing" })
+    );
     expect(result.errors).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
     );

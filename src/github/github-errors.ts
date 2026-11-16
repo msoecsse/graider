@@ -14,6 +14,8 @@ export type GitHubErrorKind =
 interface GitHubClientErrorOptions {
   retryAfterSeconds?: number;
   statusCode?: number;
+  endpoint?: string;
+  requestMethod?: "GET" | "PUT";
 }
 
 const DIAGNOSTIC_CODE_BY_KIND = {
@@ -39,6 +41,8 @@ export class GitHubClientError extends Error {
   readonly retryAfterSeconds?: number;
   readonly statusCode?: number;
   readonly retryable: boolean;
+  readonly endpoint?: string;
+  readonly requestMethod?: "GET" | "PUT";
 
   constructor(kind: GitHubErrorKind, message: string, options?: GitHubClientErrorOptions) {
     super(redactString(message));
@@ -46,6 +50,8 @@ export class GitHubClientError extends Error {
     this.kind = kind;
     this.diagnosticCode = DIAGNOSTIC_CODE_BY_KIND[kind];
     this.retryable = RETRYABLE_ERROR_KINDS.has(kind);
+    if (options?.endpoint !== undefined) this.endpoint = options.endpoint;
+    if (options?.requestMethod !== undefined) this.requestMethod = options.requestMethod;
 
     if (options?.retryAfterSeconds !== undefined) {
       this.retryAfterSeconds = options.retryAfterSeconds;
@@ -67,6 +73,8 @@ export const createGitHubDiagnostic = (error: GitHubClientError): Diagnostic => 
   context: {
     kind: error.kind,
     retryable: error.retryable,
+    ...(error.endpoint === undefined ? {} : { endpoint: error.endpoint }),
+    ...(error.requestMethod === undefined ? {} : { requestMethod: error.requestMethod }),
     ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }),
     ...(error.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: error.retryAfterSeconds })
   }

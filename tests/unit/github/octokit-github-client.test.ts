@@ -701,6 +701,49 @@ describe("OctokitGitHubClient", () => {
     });
   });
 
+  it.each([
+    ["name: Grade\non: push\n", "active", false],
+    [WORKFLOW_CONTENT, "disabled_manually", false],
+    [WORKFLOW_CONTENT, "active", true],
+    ["on: [", "active", false]
+  ] as const)(
+    "checks dispatch support from workflow contents and state: %s / %s",
+    async (content, state, expected) => {
+      const octokit = createMockOctokit();
+      octokit.rest.actions.getWorkflow = () =>
+        resolvedResponse({ id: OctokitTestNumber.WorkflowId, path: TEMPLATE_WORKFLOW_PATH, state });
+      octokit.rest.repos.getContent = () =>
+        resolvedResponse({ content: Buffer.from(content).toString("base64") });
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.getWorkflow(OWNER, REPO, WORKFLOW_PATH)).resolves.toMatchObject({
+        supportsDispatch: expected
+      });
+    }
+  );
+
+  it("attributes a content 404 after successful workflow metadata to the contents endpoint", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getContent = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getWorkflow(OWNER, REPO, WORKFLOW_PATH)).rejects.toMatchObject({
+      statusCode: OctokitTestNumber.NotFoundStatus,
+      endpoint: "/repos/{owner}/{repo}/contents/{path}",
+      requestMethod: "GET"
+    });
+  });
+
+  it("does not infer enabled Actions from a malformed successful response", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.actions.getGithubActionsPermissionsRepository = () => resolvedResponse({});
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getActionsState(OWNER, REPO)).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubApiError,
+      endpoint: "/repos/{owner}/{repo}/actions/permissions",
+      requestMethod: "GET"
+    });
+  });
+
   it("429 maps to a status-bearing retryable rate-limit error", async () => {
     const octokit = createMockOctokit();
     octokit.rest.actions.getGithubActionsPermissionsRepository = () =>

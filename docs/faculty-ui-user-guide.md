@@ -295,6 +295,21 @@ For an assignment explicitly using Graider's managed
 conservative: it does not overwrite unmanaged or unsupported workflow content.
 Use the explicit workflow-replacement actions when replacement is intended.
 
+After Apply, the repository table shows the recorded outcomes and refreshes its
+read-only preview automatically. **Created with issues** means creation succeeded
+but permissions, Actions, or grading setup need attention. Each issue identifies
+the operation, endpoint when available, and recovery guidance. A failed refresh
+does not replace those outcomes. A row without a confirmed outcome shows
+**Unknown**, never the old **Would create** status as its final result.
+
+GitHub can briefly return 404 for a newly created repository's Actions settings
+or a newly installed workflow. Graider waits within a bounded window; persistent
+404s and authorization failures remain visible. Check repository administration
+access, GitHub sign-in permissions and organization Actions policy as directed,
+then rerun Apply to finish the tracked setup. Existing repositories are retained.
+An invitation warning means the student must accept the repository invitation.
+Confirm required permissions and grading checks before sharing repository links.
+
 ## Share Repository Links with Students Using Canvas
 
 Graider provides a static GitHub Pages access page for repository links.

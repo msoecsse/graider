@@ -526,6 +526,31 @@ Useful fields include:
 
 `generatedFiles` includes the manifest path when a manifest was written.
 
+Individual `summary.repositories` rows report durable creation/update separately
+from setup diagnostics. A `created` row with `repository_created_with_issues`
+means the repository exists but required setup failed; inspect its diagnostics
+before sharing it. Diagnostics carry `operationType` for creation, collaborator
+or faculty-team access, Actions configuration, workflow installation, and
+workflow/dispatch verification. Endpoint-bearing errors include a fixed
+`endpoint` template and `requestMethod`, never a raw request URL or headers.
+`remediation` provides recovery guidance. A baseline read failure after creation
+uses `verify_repository_baseline`, preserving the creation checkpoint.
+
+Fresh individual repository Actions reads and recently installed workflow
+indexing reads allow four attempts with 1, 2 and 4 second waits (seven seconds
+total, excluding HTTP/rate-limit time). Only confirmed creation or workflow
+installation enables that propagation window. Persistent 404s remain errors;
+missing new workflows are no longer silently accepted. Existing unchanged
+workflow misses are reported immediately. Successful workflow observations and
+exhausted indexing misses are shared with dispatch verification during one Apply.
+Authentication/authorization failures are never retried by the propagation window.
+
+Changed student/faculty grants and Actions enablement are read back before being
+recorded as verified. `student_invitation_pending` warns that an issued invitation
+still requires student acceptance; the manifest preserves `pendingInvite: true`.
+Workflow dispatch support requires active metadata and YAML containing
+`workflow_dispatch`. Apply never dispatches a run to verify setup.
+
 Apply results also include `summary.githubPerformance`, including blocked and
 partial results. It contains total monotonic `elapsedMs` and a `phases` object:
 `readiness`, `planning`, `repositoryCreation`, `permissions`,

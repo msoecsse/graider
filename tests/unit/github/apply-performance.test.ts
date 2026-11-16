@@ -154,7 +154,14 @@ describe("Apply HTTP diagnostics", () => {
   it("shares measurements across nested adapters and attributes group operations", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.resolve(response(OK)))
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ enabled: true }), {
+            status: OK,
+            headers: { "content-type": "application/json" }
+          })
+        )
+      )
     );
     const github = createApplyReadClient(client());
     const result = await withApplyPerformance(() =>

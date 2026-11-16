@@ -407,6 +407,14 @@ const RowDiagnostics = ({
           {diagnostic.context.operationType === undefined ? null : (
             <span>Operation: {formatApplyOperationLabel(diagnostic.context.operationType)}</span>
           )}
+          {diagnostic.context.endpoint === undefined ? null : (
+            <code>
+              {diagnostic.context.requestMethod ?? "GET"} {diagnostic.context.endpoint}
+            </code>
+          )}
+          {diagnostic.context.remediation === undefined ? null : (
+            <span>{diagnostic.context.remediation}</span>
+          )}
           {diagnostic.code === null ? null : <code>{diagnostic.code}</code>}
         </li>
       ))}
@@ -761,6 +769,18 @@ export const ApplyPreviewPage = ({
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
   const applyProgressActiveRef = useRef(false);
+  const selectionKey = JSON.stringify([
+    selection.courseFolderId,
+    selection.courseFolderPath,
+    selection.assignmentFile
+  ]);
+  const activeSelectionRef = useRef(selectionKey);
+  const selectionGenerationRef = useRef(0);
+  if (activeSelectionRef.current !== selectionKey) {
+    activeSelectionRef.current = selectionKey;
+    selectionGenerationRef.current += 1;
+  }
+  const previewRequestRef = useRef(0);
 
   const preview = useMemo(
     () =>
@@ -789,19 +809,25 @@ export const ApplyPreviewPage = ({
   );
 
   const loadPreview = async (): Promise<void> => {
+    const request = ++previewRequestRef.current;
     setIsLoading(true);
     setIsConfirmingApply(false);
     setIsApplyConfirmed(false);
 
     try {
-      setLoadResult(
-        await window.graiderUI.getAssignmentApplyPreview({
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          assignmentFile: selection.assignmentFile
-        })
-      );
+      const refreshed = await window.graiderUI.getAssignmentApplyPreview({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile
+      });
+      if (activeSelectionRef.current === selectionKey && request === previewRequestRef.current)
+        setLoadResult((current) => ({
+          ...refreshed,
+          preview: refreshed.preview ?? current?.preview ?? null
+        }));
     } catch {
+      if (activeSelectionRef.current !== selectionKey || request !== previewRequestRef.current)
+        return;
       setLoadResult((currentResult) => ({
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
@@ -818,7 +844,8 @@ export const ApplyPreviewPage = ({
         refreshedAt: currentResult?.refreshedAt ?? null
       }));
     } finally {
-      setIsLoading(false);
+      if (activeSelectionRef.current === selectionKey && request === previewRequestRef.current)
+        setIsLoading(false);
     }
   };
 
@@ -827,21 +854,25 @@ export const ApplyPreviewPage = ({
       return;
     }
 
+    const generation = selectionGenerationRef.current;
+
     setIsApplying(true);
     applyProgressActiveRef.current = true;
     setApplyProgress(null);
 
     try {
-      setApplyResult(
-        await window.graiderUI.applyAssignment({
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          assignmentFile: selection.assignmentFile
-        })
-      );
+      const completed = await window.graiderUI.applyAssignment({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile
+      });
+      if (selectionGenerationRef.current !== generation) return;
+      setApplyResult(completed);
       setIsConfirmingApply(false);
       setIsApplyConfirmed(false);
+      if (completed.apply !== null) await loadPreview();
     } catch {
+      if (selectionGenerationRef.current !== generation) return;
       setApplyResult({
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
@@ -858,9 +889,11 @@ export const ApplyPreviewPage = ({
         appliedAt: null
       });
     } finally {
-      setIsApplying(false);
-      applyProgressActiveRef.current = false;
-      setApplyProgress(null);
+      if (selectionGenerationRef.current === generation) {
+        setIsApplying(false);
+        applyProgressActiveRef.current = false;
+        setApplyProgress(null);
+      }
     }
   };
 
@@ -882,6 +915,10 @@ export const ApplyPreviewPage = ({
   };
 
   useEffect(() => {
+    setApplyResult(null);
+    setLoadResult(null);
+    setIsApplying(false);
+    setApplyProgress(null);
     void loadPreview();
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
@@ -919,6 +956,7 @@ export const ApplyPreviewPage = ({
   const commandErrorMessage = getCommandErrorMessage(loadResult);
   const applyErrorMessage = getApplyCommandErrorMessage(applyResult);
   const showTokenGuidance =
+    normalizedApplyResult === null &&
     preview !== null &&
     (preview.diagnostics.some((diagnostic) => diagnostic.code === "github_token_required") ||
       mergedRows.some(
@@ -931,7 +969,13 @@ export const ApplyPreviewPage = ({
   const globalDiagnostics =
     normalizedApplyResult === null
       ? activeDiagnostics
-      : activeDiagnostics.filter((diagnostic) => !isRepositoryScopedDiagnostic(diagnostic));
+      : activeDiagnostics.filter(
+          (diagnostic) =>
+            !isRepositoryScopedDiagnostic(diagnostic) ||
+            !(preview?.repositoryMode === "group" ? mergedGroupRows : mergedRows).some((row) =>
+              row.diagnostics.some((entry) => JSON.stringify(entry) === JSON.stringify(diagnostic))
+            )
+        );
   const repositoryIssueCount =
     normalizedApplyResult === null
       ? 0
@@ -1016,7 +1060,7 @@ export const ApplyPreviewPage = ({
           </section>
         ) : (
           <>
-            <ReadinessPanel preview={preview} />
+            {normalizedApplyResult === null ? <ReadinessPanel preview={preview} /> : null}
             <div className="assignment-detail-grid apply-preview-grid">
               <TargetPanel preview={preview} />
               <TemplatePanel preview={preview} copyState={copyState} onCopy={handleCopy} />
