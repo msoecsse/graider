@@ -150,5 +150,18 @@ describe("CI selector event and Git integration", () => {
       { GITHUB_SHA: git(directory, "rev-parse", "HEAD"), CI_BASE_SHA: baseline }
     );
     expect(Object.values(unsafe.jobs)).not.toContain(false);
+    writeFileSync(
+      path.join(directory, "ui/src/roster-manager/dynamic.ts"),
+      'const target = "../migration-review/review"; export const lazy = () => import(target);'
+    );
+    git(directory, "add", "ui/src");
+    git(directory, "commit", "--quiet", "-m", "untraceable renderer dependency");
+    const computed = select(
+      directory,
+      {},
+      { GITHUB_SHA: git(directory, "rev-parse", "HEAD"), CI_BASE_SHA: baseline }
+    );
+    expect(Object.values(computed.jobs)).not.toContain(false);
+    expect(computed.reasons[0]).toContain("Untraceable renderer import");
   });
 });

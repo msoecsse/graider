@@ -249,7 +249,7 @@ The initial allowlist is deliberately small. Backend production changes still
 select full regression because generated Electron bridges, CLI composition and
 shared services cross package/domain boundaries. Do not add a narrow backend rule
 without testing those consumers. Renderer import traversal includes static/dynamic
-literal TypeScript imports/re-exports and CSS imports; shared importers select full
+literal TypeScript imports/re-exports and CSS imports; shared importers and untraceable computed renderer imports select full
 regression. The App/AppRoutes/main composition roots are tested through Vitest's
 related graph without treating composition alone as a native domain change.
 

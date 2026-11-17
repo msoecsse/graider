@@ -51,6 +51,18 @@ try {
     };
     for (const file of files) {
       const source = readFileSync(file, "utf8");
+      if (file.startsWith("ui/src/") && !file.endsWith(".css")) {
+        const hasComputedImport = (node: ts.Node): boolean => {
+          if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+            const target = node.arguments[0];
+            if (!target || !ts.isStringLiteral(target)) return true;
+          }
+          return ts.forEachChild(node, hasComputedImport) ?? false;
+        };
+        if (hasComputedImport(ts.createSourceFile(file, source, ts.ScriptTarget.Latest)))
+          throw new Error(`Untraceable renderer import: ${file}`);
+      }
+
       const imports = file.endsWith(".css")
         ? [...source.matchAll(/@import\s+["']([^"']+)["']/g)].map((match) => ({
             fileName: match[1] ?? ""
