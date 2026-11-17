@@ -226,6 +226,12 @@ static transitive imports for renderer source changes; changed test files run
 directly. A nonempty focused request finding no tests fails rather than silently
 accepting missing coverage. The fast lane does not install Java or run GUI fixtures.
 
+Every run also requires `npm run audit` (`npm audit --audit-level=high`) in fast
+feedback, regardless of regression selection. It runs after the other fast checks
+and builds with `always()` so earlier failures cannot skip the audit and an audit
+failure cannot hide those diagnostics. Audit failures fail fast feedback and
+`CI required`; no exceptions, vulnerability allowlists or suppression are permitted.
+
 Development push selection compares the current SHA with the last **successful
 push CI** on the same branch, not merely `github.event.before`. This retains all
 unvalidated changes when earlier runs are cancelled. Both SHAs must exist and the
@@ -255,7 +261,7 @@ related graph without treating composition alone as a native domain change.
 
 Full regression runs for **every PR**, pushes to `master` or `release/**`, and
 `workflow_dispatch` with `full_regression: true` (the default). It retains complete
-root/UI suites (UI split into three independent shards), dependency audit, real
+root/UI suites (UI split into three independent shards), real
 JavaFX fixtures, and native macOS arm64/Windows x64 Apply, grading, security,
 credential-free signing and `npm run test:migration`. Native jobs verify OS and
 architecture. Typechecks run once in fast feedback; platform-independent compiler

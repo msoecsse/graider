@@ -112,6 +112,26 @@ describe("required CI gate", () => {
     ).toEqual([]);
     expect(gateFailures({}, successful)).not.toEqual([]);
   });
+  it.each([
+    "docs/codex-development-contract.md",
+    "ui/src/roster-manager/RosterManagerPage.tsx",
+    "tests/unit/ci-selection.test.ts"
+  ])("requires fast feedback including the audit for narrow change %s", (file) => {
+    const selection = selectChanges([{ status: "M", path: file }]);
+    expect(Object.values(selection.jobs)).not.toContain(true);
+    const outputs = Object.fromEntries(
+      Object.entries(selection.jobs).map(([job, value]) => [job, String(value)])
+    );
+    const results = {
+      ...Object.fromEntries(REGRESSION_JOBS.map((job) => [job, { result: "skipped" }])),
+      select: { result: "success" },
+      fast: { result: "success" }
+    };
+    expect(gateFailures(outputs, results)).toEqual([]);
+    for (const result of ["failure", "cancelled", "skipped"]) {
+      expect(gateFailures(outputs, { ...results, fast: { result } })).toEqual([`fast: ${result}`]);
+    }
+  });
   it("rejects a failed selector or missing fast path", () => {
     expect(gateFailures(selected, { ...successful, select: { result: "failure" } })).toContain(
       "select: failure"

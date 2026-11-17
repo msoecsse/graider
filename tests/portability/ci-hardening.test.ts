@@ -16,7 +16,20 @@ interface PackageJson {
 }
 
 interface ValidationWorkflow {
-  jobs: Record<string, { steps: { run?: string; uses?: string }[] }>;
+  jobs: Record<
+    string,
+    {
+      if?: string;
+      "continue-on-error"?: boolean;
+      steps: {
+        name?: string;
+        run?: string;
+        uses?: string;
+        if?: string;
+        "continue-on-error"?: boolean;
+      }[];
+    }
+  >;
 }
 
 const readPackageJson = (filename = PACKAGE_JSON_PATH): PackageJson =>
@@ -101,6 +114,28 @@ describe("CI and dependency hardening", () => {
 
   it("keeps package-lock.json available for npm ci", () => {
     expect(fs.existsSync(PACKAGE_MANAGER_LOCK)).toBe(true);
+  });
+
+  it("requires an unsuppressed audit after all fast checks even when earlier checks fail", () => {
+    const workflow = parse(fs.readFileSync(CI_WORKFLOW_PATH, "utf8")) as ValidationWorkflow;
+    const fast = workflow.jobs.fast;
+    expect(fast).toBeDefined();
+    expect(fast?.if).toBeUndefined();
+    expect(fast?.["continue-on-error"]).toBeUndefined();
+    const audit = fast?.steps.find((step) => step.run === "npm run audit");
+    expect(audit).toBeDefined();
+    expect(audit?.if).toBe("${{ always() }}");
+    expect(audit?.["continue-on-error"]).toBeUndefined();
+    const commands = fast?.steps.flatMap((step) => (step.run ? [step.run] : [])) ?? [];
+    expect(commands.indexOf("npm run audit")).toBeGreaterThan(
+      commands.indexOf("npm --prefix ui run build")
+    );
+    expect(fast?.steps.filter((step) => step.name !== "Job duration summary").pop()).toBe(audit);
+    expect(
+      Object.entries(workflow.jobs).flatMap(([job, value]) =>
+        value.steps.filter((step) => step.run === "npm run audit").map(() => job)
+      )
+    ).toEqual(["fast"]);
   });
 
   it("normal CI workflow runs required checks without live tests", () => {

@@ -93,6 +93,25 @@ describe("CI selector event and Git integration", () => {
     expect(Object.values(result.jobs)).not.toContain(false);
     expect(result.reasons[0]).toMatch(/Comprehensive/);
   });
+  it("rejects audit failure in fast feedback when every regression job is unselected", () => {
+    const directory = fixture();
+    const jobs = ["root", "ui", "gui", "apply", "grading", "safety", "signing", "migration"];
+    const values = {
+      ...Object.fromEntries(jobs.map((job) => [job, { result: "skipped" }])),
+      select: {
+        result: "success",
+        outputs: Object.fromEntries(jobs.map((job) => [job, "false"]))
+      },
+      fast: { result: "failure" }
+    };
+    const rejected = spawnSync(process.execPath, [path.join(projectRoot, "scripts/ci/gate.ts")], {
+      cwd: directory,
+      env: { ...process.env, CI_NEEDS: JSON.stringify(values) },
+      encoding: "utf8"
+    });
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr.trim()).toBe("fast: failure");
+  });
   it("fails full when the baseline lookup or event decoding fails", () => {
     const directory = fixture();
     expect(select(directory, {}).reasons[0]).toMatch(/Change detection failed/);
