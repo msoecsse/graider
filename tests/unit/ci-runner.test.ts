@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
@@ -58,6 +58,31 @@ afterEach(() => {
 });
 
 describe("CI selector event and Git integration", () => {
+  it("runs the required gate on native Node without dependency setup and rejects selected skips", () => {
+    const directory = fixture();
+    const jobs = ["root", "ui", "gui", "apply", "grading", "safety", "signing", "migration"];
+    const values: Record<string, { result: string; outputs?: Record<string, string> }> =
+      Object.fromEntries(["select", "fast", ...jobs].map((job) => [job, { result: "success" }]));
+    values.select = {
+      result: "success",
+      outputs: Object.fromEntries(jobs.map((job) => [job, "true"]))
+    };
+    const runGate = () =>
+      spawnSync(process.execPath, [path.join(projectRoot, "scripts/ci/gate.ts")], {
+        cwd: directory,
+        env: {
+          ...process.env,
+          CI_NEEDS: JSON.stringify(values),
+          GITHUB_STEP_SUMMARY: path.join(directory, "gate-summary")
+        },
+        encoding: "utf8"
+      });
+    expect(runGate().status).toBe(0);
+    values.migration = { result: "skipped" };
+    const rejected = runGate();
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("migration: skipped");
+  });
   it.each([
     [{}, { GITHUB_EVENT_NAME: "pull_request" }],
     [{ inputs: { full_regression: true } }, { GITHUB_EVENT_NAME: "workflow_dispatch" }],

@@ -88,7 +88,10 @@ jobs:
       - run: npm run format:check
       - run: npm --prefix ui run format:check
       - name: Selection and gate regressions
-        run: npx vitest run tests/unit/ci-selection.test.ts tests/unit/ci-runner.test.ts --maxWorkers=2
+        run: npx vitest run tests/unit/ci-selection.test.ts tests/unit/ci-runner.test.ts tests/portability/ci-hardening.test.ts tests/architecture --maxWorkers=2
+      - name: Renderer and IPC trust boundary
+        working-directory: ui
+        run: npx vitest run src/security-boundary.test.ts --maxWorkers=2
       - name: Focused changed-file and transitive importer tests
         run: node --import tsx scripts/ci/focused.ts
         env:
@@ -342,11 +345,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm ci --ignore-scripts
       - name: Reject failed, cancelled or unexpectedly skipped coverage
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
-        run: node --import tsx scripts/ci/gate.ts
+        run: node scripts/ci/gate.ts
       - name: Workflow job durations
         if: ${{ always() }}
         uses: actions/github-script@v7

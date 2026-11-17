@@ -123,11 +123,18 @@ describe("required CI gate", () => {
   it("wires every optional job into the always-run gate without workflow path filters", () => {
     const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8")) as {
       on: { push: Record<string, unknown>; pull_request: unknown; workflow_dispatch: unknown };
-      jobs: Record<string, { needs?: string[]; if?: string }>;
+      jobs: Record<string, { needs?: string[]; if?: string; steps?: { run?: string }[] }>;
     };
     expect(workflow.on.push.paths).toBeUndefined();
     expect(workflow.on.workflow_dispatch).toBeDefined();
     expect(workflow.jobs.required?.if).toBe("${{ always() }}");
+    expect(workflow.jobs.fast?.if).toBeUndefined();
+    expect(
+      workflow.jobs.fast?.steps?.some((step) => step.run?.includes("tests/architecture"))
+    ).toBe(true);
+    expect(
+      workflow.jobs.fast?.steps?.some((step) => step.run?.includes("src/security-boundary.test.ts"))
+    ).toBe(true);
     expect(workflow.jobs.required?.needs).toEqual(
       expect.arrayContaining(["select", "fast", ...REGRESSION_JOBS])
     );

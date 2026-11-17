@@ -1,5 +1,9 @@
 import { appendFileSync } from "node:fs";
-import { gateFailures } from "./selection.js";
+// Node 24 can erase this dependency-free policy's TypeScript directly. The URL
+// keeps native execution independent of tsx and avoids installing dependencies.
+const { gateFailures } = (await import(
+  new URL("./selection.ts", import.meta.url).href
+)) as typeof import("./selection.js");
 const results = JSON.parse(process.env.CI_NEEDS ?? "{}") as Record<
   string,
   { result: string; outputs?: Record<string, string> }

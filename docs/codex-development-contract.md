@@ -221,7 +221,7 @@ suite remains required after Phase 9. See
 
 `.github/workflows/ci.yml` owns automated CI. Every triggered run performs fast
 feedback: test hygiene, root/UI typechecks, lint, both format checks, both builds,
-CI selection/gate tests, and focused changed-file tests. Vitest `related` follows
+CI selection/gate and architecture/security tests, and focused changed-file tests. Vitest `related` follows
 static transitive imports for renderer source changes; changed test files run
 directly. A nonempty focused request finding no tests fails rather than silently
 accepting missing coverage. The fast lane does not install Java or run GUI fixtures.
@@ -309,3 +309,39 @@ caches both lockfiles, and removes duplicate native compiler/bridge work. Ordina
 narrow feedback targets **under five minutes**; required native regression may take
 longer. Record measured post-change run links and timings after exact-SHA validation;
 do not substitute estimates for measured results.
+
+First hosted candidate:
+[run 44141449129](https://github.com/msoecsse/graider/actions/runs/44141449129),
+commit `85554083db2efb7ad027c450de2896f3f7d4c5fa`:
+
+| Measurement           | Baseline                                | Candidate                                                       |
+| --------------------- | --------------------------------------- | --------------------------------------------------------------- |
+| Workflow overall      | 12m14s, success                         | 17m41s, failed audit; all test jobs passed                      |
+| Fast feedback job     | No separate job                         | 2m53s                                                           |
+| UI regression         | 6m06s tests inside serial Normal checks | Three complete-suite shards, 2m27s–3m28s each including setup   |
+| macOS grading job     | 11m46s                                  | 5m35s; independent signing/security work moved to parallel jobs |
+| macOS migration job   | 5m05s                                   | 5m08s (runner variability; no demonstrated improvement)         |
+| Windows migration job | 10m23s                                  | 15m23s (slower; full-regression speedup is not demonstrated)    |
+
+**Acceptance remains blocked by [#65](https://github.com/msoecsse/graider/issues/65).**
+The unchanged root lockfile now fails the preserved high-severity audit gate for
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), reviewed
+2026-11-17. The advisory lists no patched version; the registry's latest picomatch
+is 4.0.7, also affected. Root regression tests passed (3,226 tests; one existing
+macOS-only interoperability test skipped on Linux). All three UI shards passed.
+All native test jobs passed; Windows grading took 13m36s and Windows IPC/security took 10m24s.
+The original branch-push baseline omitted Windows grading, while the candidate
+full selection restores it. Overall full-regression timing is therefore not an
+apples-to-apples successful-run comparison, and the Windows migration increase
+also needs further measurement after the blocker is resolved.
+No dependency or audit threshold was changed. This candidate cannot be called a
+successful comprehensive run or release acceptance. The gate subsequently uses
+Node 24's native TypeScript erasure for its dependency-free policy, avoiding an
+unnecessary installation; a native-run regression checks success and rejection
+of selected skips.
+
+A successful comprehensive baseline is required before later narrow pushes can
+omit the unvalidated workflow changes. Therefore the external audit blocker also
+prevents a trustworthy end-to-end narrow-push timing demonstration. The 2m53s
+figure measures the fast job, not total workflow/queue time; the under-five-minute
+narrow-workflow target remains unverified until that blocker is resolved.
