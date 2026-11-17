@@ -26,6 +26,7 @@ export interface VerifiedLocalCourseReadContext extends Omit<
 > {
   readonly mode: "local_read";
   readonly cachedCommit: string;
+  readonly cachedLegacyMetadata?: true;
   readonly revalidate?: never;
 }
 /** Trusted local runtime write capability; never accepted by a remote publication boundary. */
@@ -92,6 +93,7 @@ export interface CourseMutationBlock {
 }
 export type CourseMutationNotice =
   | CourseMutationBlock
+  | { readonly status: "cached_course_read"; readonly commit: string }
   | { readonly status: "source_updated" | "view_invalidated" | "published_refresh_required" }
   | { readonly status: "checking" | "finished" };
 export const COURSE_MUTATION_NOTICE = "graider-ui:course-mutation:notice";

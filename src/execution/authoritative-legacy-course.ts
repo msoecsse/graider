@@ -34,7 +34,7 @@ const REQUIREMENT_MESSAGES = {
   course_local_state_unavailable:
     "The local Git origin or revision could not be verified. Check course registration and repository safety.",
   course_repository_locator_mismatch:
-    "The repository name in course.yml differs from Git origin. Correct the legacy CLI course locator or use the authorized Graider operation."
+    "Local legacy course identifiers differ from authoritative course.yml at the verified GitHub revision. Review course registration and configuration."
 } as const;
 export type LegacyCourseRequirement = keyof typeof REQUIREMENT_MESSAGES;
 
@@ -98,11 +98,6 @@ export const assertAuthoritativeLegacyCourse = async (
   const name = match?.[2];
   if (!owner || !name || owner.toLowerCase() !== local.value.github.organization.toLowerCase())
     return refuse("course_repository_mismatch");
-  if (
-    !request.managedAuthorization &&
-    name.toLowerCase() !== local.value.course.repository.toLowerCase()
-  )
-    return refuse("course_repository_locator_mismatch");
   const observe = async <T>(
     read: () => Promise<T>,
     unavailable: LegacyCourseRequirement
@@ -156,6 +151,12 @@ export const assertAuthoritativeLegacyCourse = async (
     repository.id <= 0
   )
     return refuse("course_repository_unavailable");
+  if (
+    repository.owner.toLowerCase() !== owner.toLowerCase() ||
+    repository.name.toLowerCase() !== name.toLowerCase() ||
+    repository.fullName.toLowerCase() !== `${owner}/${name}`.toLowerCase()
+  )
+    return refuse("course_repository_mismatch");
   if (expected && repository.id !== expected.repositoryId)
     return refuse("course_repository_mismatch");
   const revision = observed(revisionRead);
@@ -173,9 +174,13 @@ export const assertAuthoritativeLegacyCourse = async (
     return refuse("course_authoritative_schema_invalid");
   if (authoritative.value.github.organization.toLowerCase() !== owner.toLowerCase())
     return refuse("course_repository_mismatch");
+  // Schema 1 identifiers are course metadata, not a physical repository locator.
+  // Origin resolution, stable ID binding, pinned remote metadata and fresh HEAD
+  // establish authority independently of legacy naming conventions.
   if (
     !request.managedAuthorization &&
-    authoritative.value.course.repository.toLowerCase() !== name.toLowerCase()
+    (authoritative.value.course.repository !== local.value.course.repository ||
+      authoritative.value.course.code !== local.value.course.code)
   )
     return refuse("course_repository_locator_mismatch");
   if (

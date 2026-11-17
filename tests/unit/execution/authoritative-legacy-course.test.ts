@@ -182,6 +182,59 @@ describe("authoritative legacy mutation compatibility", () => {
     ).rejects.toThrow();
     expect(write).not.toHaveBeenCalled();
   });
+  it("accepts legacy csc1020 identifiers in the authoritative csc1120 repository", async () => {
+    const f = fixture();
+    const content = fs
+      .readFileSync(path.join(f.root, "course.yml"), "utf8")
+      .replaceAll("example-org", "csc1120")
+      .replaceAll("se2030-graider", "csc1020");
+    fs.writeFileSync(path.join(f.root, "course.yml"), content);
+    f.read.mockResolvedValue(content);
+    f.repository.mockResolvedValue({
+      id: 1342086585,
+      owner: "csc1120",
+      name: "csc1120",
+      fullName: "csc1120/csc1120",
+      private: true,
+      archived: false,
+      defaultBranch: "master",
+      htmlUrl: "https://github.com/csc1120/csc1120"
+    });
+    await expect(
+      assertAuthoritativeLegacyCourse({
+        ...f.request,
+        remoteUrl: "https://github.com/csc1120/csc1120",
+        expected: { userId: 42, repositoryId: 1342086585, revision: sha }
+      })
+    ).resolves.toMatchObject({ repositoryId: 1342086585, revision: sha });
+    expect(f.read).toHaveBeenCalledWith("csc1120", "csc1120", "course.yml", sha);
+  });
+  it.each(["locator", "metadata", "organization"] as const)(
+    "refuses genuinely incorrect %s evidence with a legacy metadata-name mismatch",
+    async (invalid) => {
+      const f = fixture();
+      const content = fs
+        .readFileSync(path.join(f.root, "course.yml"), "utf8")
+        .replaceAll("se2030-graider", "legacy-course-name");
+      fs.writeFileSync(path.join(f.root, "course.yml"), content);
+      f.read.mockResolvedValue(content);
+      if (invalid === "locator") {
+        const repo = await f.client.getRepository("example-org", "se2030-graider");
+        if (!repo) throw new Error("Missing fixture");
+        f.repository.mockResolvedValue({ ...repo, name: "wrong", fullName: "example-org/wrong" });
+      }
+      if (invalid === "metadata")
+        f.read.mockResolvedValue(content.replace("legacy-course-name", "another-course"));
+      if (invalid === "organization")
+        f.read.mockResolvedValue(content.replaceAll("example-org", "other-org"));
+      await expect(assertAuthoritativeLegacyCourse(f.request)).rejects.toMatchObject({
+        diagnosticCode:
+          invalid === "metadata"
+            ? "course_repository_locator_mismatch"
+            : "course_repository_mismatch"
+      });
+    }
+  );
   it("preserves verified Schema 1 operations", async () => {
     const f = fixture();
     await f.run();

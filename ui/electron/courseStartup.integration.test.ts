@@ -142,6 +142,33 @@ const setup = (cold = false, synchronize = false, identityLatencyMs = 0) => {
   };
 };
 describe("cache-first startup", () => {
+  it("explicit Refresh re-verifies and synchronizes a current course without restarting", async () => {
+    const f = setup(false, true);
+    await f.session.restore();
+    await f.session.waitForCourseStartup("folder");
+    expect(f.verifyCourse).toHaveBeenCalledOnce();
+    f.finish();
+    await f.session.refreshOrganizations(false);
+    expect(f.verifyCourse).toHaveBeenCalledOnce();
+    const published = "b".repeat(40);
+    f.synchronizeCourse.mockResolvedValueOnce({
+      status: "updated",
+      currentCommit: published,
+      diagnostic: null,
+      retryable: false
+    });
+    await f.session.refreshOrganizations();
+    expect(f.verifyCourse).toHaveBeenCalledTimes(2);
+    expect(f.synchronizeCourse).toHaveBeenCalledTimes(2);
+    expect(f.session.getState().courseDiscovery.courses[0]).toMatchObject({
+      freshness: "current",
+      synchronization: { currentCommit: published }
+    });
+    await f.session.waitForCourseStartup("folder");
+    expect(f.verifyCourse).toHaveBeenCalledTimes(2);
+    f.session.shutdown();
+  });
+
   it("displays cached cards and authorizes selected Schema 1 before discovery, then reuses session authority", async () => {
     const f = setup();
     f.verifyCourse.mockResolvedValueOnce({ ...course, title: "New targeted observation" });
@@ -158,7 +185,7 @@ describe("cache-first startup", () => {
     }
     expect(f.verifyCourse).toHaveBeenCalledOnce();
     expect(f.session.getState().courseDiscovery.status).toBe("idle");
-    const refresh = f.session.refreshOrganizations();
+    const refresh = f.session.refreshOrganizations(false);
     expect(f.session.getState().courseDiscovery.courses).toHaveLength(1);
     await vi.waitFor(() => expect(f.discoverCourses).toHaveBeenCalledOnce());
     f.finish([course, { ...course, repositoryId: 21, localFolderIds: [] }]);

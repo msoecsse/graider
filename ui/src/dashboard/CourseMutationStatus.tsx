@@ -3,9 +3,12 @@ import type { CourseMutationBlock } from "../../electron/managedCourseMutationTy
 import type { RemoteCourse } from "../../electron/remoteCourseTypes";
 import { ManagedCacheReview } from "./ManagedCacheReview";
 
+const DISPLAY_COMMIT_LENGTH = 12;
+
 /** Observational notifications cannot authorize or resume a mutation. */
 export const CourseMutationStatus = () => {
   const [publishedRefreshRequired, setPublishedRefreshRequired] = useState(false);
+  const [cachedCommit, setCachedCommit] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [blocked, setBlocked] = useState<CourseMutationBlock | null>(null);
   const [course, setCourse] = useState<RemoteCourse | null>(null);
@@ -20,6 +23,7 @@ export const CourseMutationStatus = () => {
           setInvalidated(true);
           if (notice.status === "source_updated") setUpdated(true);
         }
+        if (notice.status === "cached_course_read") setCachedCommit(notice.commit);
         if (notice.status === "published_refresh_required") setPublishedRefreshRequired(true);
         if (notice.status === "checking") {
           setChecking(true);
@@ -42,6 +46,14 @@ export const CourseMutationStatus = () => {
   );
   return (
     <>
+      {cachedCommit ? (
+        <aside role="status" className="detail-panel">
+          Viewing verified cached course data ({cachedCommit.slice(0, DISPLAY_COMMIT_LENGTH)}).
+          Changes in the registered folder are excluded. Refresh courses to check for newly
+          published assignments. Local commits are checked against GitHub before changes or
+          publication.
+        </aside>
+      ) : null}
       {publishedRefreshRequired ? (
         <aside role="alert" className="detail-panel">
           <p>

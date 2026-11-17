@@ -65,6 +65,42 @@ Assignment template, grading, deadline, and metadata configuration are optional.
 When absent, detail renders template/workflow checks as not required and leaves
 metadata values empty rather than inventing defaults.
 
+## Verified cached legacy metadata reads
+
+Registered Schema 1 Assignment Detail, Groups, dashboard display, and the other
+explicit `CACHED_LEGACY_METADATA_READ_CHANNELS` use the account-scoped verified
+managed cache. The registered directory selects course identity and its origin
+must still match the authorized registration. Its HEAD, working tree, and pending
+configuration do not supply read data or mutation evidence. The cache retains its
+storage, origin, clean-state, committed authorization metadata and session checks
+before and after the operation. Responses project internal paths back to the
+registered selector and report `courseReadRevisionSource: local_cache`.
+
+Explicit Refresh courses re-verifies and synchronizes already-current targeted
+courses. Automatic background discovery continues to preserve targeted startup
+results; it is not a substitute for the explicit refresh. Previously that preservation
+also applied to explicit refresh, leaving the cache at an older revision.
+
+The `cached_course_read` notice explains that registered-folder changes are
+excluded and Refresh courses checks for newly published assignments. A cached
+commit is an earlier observation, so a descendant legacy HEAD must never be
+classified as unpublished against that commit. Synchronized previews and mutations
+still observe fresh GitHub HEAD and authorization, synchronize the cache, and
+validate the registered source against that authoritative revision. IPC view
+bindings also reject stale writes to legacy sources after cached reads. Runtime
+and grading operations and legacy publication status retain their existing source
+validation; this change does not cut over a registered course or move grading files.
+
+Standalone legacy CLI validation resolves the actual Git origin and verifies its
+API locator/ID, authenticated account, fresh default-branch HEAD, and course.yml
+pinned at that HEAD. Schema 1 course code/repository identifiers must match that
+authoritative metadata, but need not equal the physical GitHub repository name.
+Every production API mutation retains the repeated identity and revision guard.
+
+Regression coverage: `registeredAssignmentRead.integration.test.ts` drives the
+production IPC adapter, detail runner/CLI process, and Groups service with bundled
+Git clones and a local bare remote. No live course repository is used.
+
 ## Student Repository Access Page
 
 Successful Apply generates or updates a static student-facing page at:

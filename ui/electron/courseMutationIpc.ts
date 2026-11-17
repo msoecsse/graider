@@ -399,6 +399,15 @@ export const createCourseMutationIpc = (
               },
               () => measureGradingPhase("service", async () => handler(event, ...projectedArgs))
             );
+            if (
+              context.mode === "local_read" &&
+              context.cachedLegacyMetadata &&
+              !event.sender.isDestroyed()
+            )
+              event.sender.send(COURSE_MUTATION_NOTICE, {
+                status: "cached_course_read",
+                commit: context.cachedCommit
+              });
             if (!context.managed) return result;
             const publicResult = projectManagedCourseResult(
               result,
@@ -563,7 +572,6 @@ export const createCourseMutationIpc = (
                     "Account authorization changed since this view was loaded. Refresh the view before continuing.",
                     "refresh_view"
                   );
-                if (!context?.managed) return invoke(context);
                 const loadedRevision = bindings.get(event.sender)?.get(courseKey(context));
                 if (loadedRevision && loadedRevision !== courseContextRevision(context))
                   blockMutation(
@@ -571,6 +579,7 @@ export const createCourseMutationIpc = (
                     "The authoritative course changed since this workspace was loaded. Reopen it before writing.",
                     "refresh_view"
                   );
+                if (!context?.managed) return invoke(context);
                 changed(event.sender, courseKey(context), courseContextRevision(context));
                 if (channel === IPC_CHANNELS.publishCourseChanges)
                   return {

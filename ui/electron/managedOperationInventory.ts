@@ -21,6 +21,20 @@ export const LOCAL_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.loadGradingStudentCommitHistory,
   IPC_CHANNELS.loadGradingStudentEvidence
 ]);
+/** Legacy metadata views read verified cache bytes; runtime/grading and publication
+ * status still use the registered source and its stronger local validation. */
+export const CACHED_LEGACY_METADATA_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.refreshCourseDisplay,
+  IPC_CHANNELS.loadAssignmentSetupTerms,
+  IPC_CHANNELS.getAssignmentForEdit,
+  IPC_CHANNELS.getAssignmentGroupConfig,
+  IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
+  IPC_CHANNELS.loadRosterTerms,
+  IPC_CHANNELS.getRosterForSection,
+  IPC_CHANNELS.getRosterSectionSummaries,
+  IPC_CHANNELS.loadGradingCommentLibrary,
+  IPC_CHANNELS.getAssignmentDetail
+]);
 export const MANAGED_V2_LOCAL_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.loadRosterTerms,
   IPC_CHANNELS.getRosterForSection,

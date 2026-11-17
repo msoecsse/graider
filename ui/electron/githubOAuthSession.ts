@@ -708,7 +708,8 @@ export class GithubOAuthSession {
         )
           await this.authorizeKnownCourse(course).catch(() => {});
       }
-      if (generation === this.accountGeneration && !this.stopped) await this.refreshOrganizations();
+      if (generation === this.accountGeneration && !this.stopped)
+        await this.refreshOrganizations(false);
     });
   }
   private targetQueue: Promise<unknown> = Promise.resolve();
@@ -913,7 +914,7 @@ export class GithubOAuthSession {
         !this.stopped &&
         this.state.courseDiscovery.courses.length === 0
       )
-        void this.refreshOrganizations();
+        void this.refreshOrganizations(false);
     }
   }
   async signIn(switchAccount = false): Promise<GithubOAuthState> {
@@ -1026,7 +1027,7 @@ export class GithubOAuthSession {
       if (this.authenticationCompletion === completion) this.authenticationCompletion = null;
       this.loadKnownCourses();
       complete();
-      if (this.token && !this.active && !this.stopped) void this.refreshOrganizations();
+      if (this.token && !this.active && !this.stopped) void this.refreshOrganizations(false);
     }
     return this.getState();
   }
@@ -1066,8 +1067,23 @@ export class GithubOAuthSession {
     await this.deps.openBrowser("https://github.com/settings/applications");
     return this.getState();
   }
-  refreshOrganizations(): Promise<GithubOAuthState> {
-    return measureStartup("background_discovery", () => this.runDiscovery());
+  refreshOrganizations(refreshKnownCourses = true): Promise<GithubOAuthState> {
+    return measureStartup("background_discovery", async () => {
+      const generation = this.accountGeneration;
+      await this.runDiscovery();
+      // An explicit Refresh must reobserve already-current courses as well. Broad
+      // discovery preserves targeted startup results and alone does not sync them.
+      if (refreshKnownCourses && this.deps.verifyCourse) {
+        const courses = this.state.courseDiscovery.courses.filter(
+          (course) => course.authorization === "authorized"
+        );
+        for (const course of courses) {
+          if (generation === this.accountGeneration && !this.stopped)
+            await this.authorizeKnownCourse(course);
+        }
+      }
+      return this.getState();
+    });
   }
   private async runDiscovery(): Promise<GithubOAuthState> {
     const token = this.token;

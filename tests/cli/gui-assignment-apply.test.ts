@@ -268,14 +268,13 @@ describe("GUI OAuth Apply backend boundary", () => {
     }
   );
 
-  it("preserves standalone CLI refusal of stale repository locators even with a valid token", async () => {
+  it("accepts standalone legacy metadata names after authoritative identity verification", async () => {
     const f = await fixture();
     const command = new Command("apply");
     command.args = [ASSIGNMENT_FILE];
     command.setOptionValue("json", true);
-    await expect(checkLegacyCliMutation(command)).rejects.toMatchObject({
-      diagnosticCode: "course_repository_locator_mismatch"
-    });
+    await expect(checkLegacyCliMutation(command)).resolves.toBeUndefined();
+    expect(f.getRevision).toHaveBeenCalledWith("example-org", "se2030-graider");
     expect(f.client.mutations.createdRepositoriesWithoutTemplate).toHaveLength(0);
   });
 

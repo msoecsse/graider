@@ -48,6 +48,20 @@ requirement for those reads. Cached content can be older than GitHub; opening a 
 does not verify remote freshness. Managed publication status describes pending local
 changes only.
 
+Assignment Detail and Assignment Groups also open from the verified cache for
+registered legacy courses. A cached-data notice identifies the revision and explains
+that local folder changes are excluded. Already-published commits, unpublished
+commits, uncommitted configuration, and untracked manifests in that folder do not
+block these views or become authoritative cached data. Use **Refresh courses** to
+load newly published assignments; no restart or manual cache cleanup is needed.
+Local grading and publication retain their source checks. A stale editor must reload
+before saving against a newer GitHub revision.
+
+Legacy CLI course codes and `course.repository` identifiers may differ from the
+physical GitHub repository name. Graider verifies the origin repository, current
+GitHub revision, account, and authoritative course metadata; do not rename the
+repository or rewrite these identifiers to work around an access error.
+
 Saving course configuration, publishing, lifecycle changes, synchronization, and explicit remote status
 or readiness checks still require current remote access. Sign-out, account changes,
 known loss of course access, or an unsafe cache prevent cached reads. Startup and

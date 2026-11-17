@@ -109,3 +109,21 @@ it("does not offer an update for a generic stale or unsafe source", () => {
   );
   expect(screen.queryByRole("button", { name: "Update course source" })).not.toBeInTheDocument();
 });
+
+it("shows a nonblocking cached-data warning without authorizing changes", () => {
+  let notify!: (notice: CourseMutationNotice) => void;
+  const mutate = vi.fn();
+  Object.assign(window.graiderUI, {
+    onCourseMutationNotice: (listener: typeof notify) => {
+      notify = listener;
+      return () => {};
+    },
+    applyAssignment: mutate
+  });
+  render(<CourseMutationStatus />);
+  act(() => notify({ status: "cached_course_read", commit: "a".repeat(40) }));
+  expect(screen.getByRole("status")).toHaveTextContent("Viewing verified cached course data");
+  expect(screen.getByRole("status")).toHaveTextContent("registered folder are excluded");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(mutate).not.toHaveBeenCalled();
+});

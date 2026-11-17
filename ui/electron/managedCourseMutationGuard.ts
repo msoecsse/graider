@@ -36,6 +36,7 @@ import {
   validateLocalManagedCourse
 } from "./managedCourseLocalRead.js";
 import {
+  CACHED_LEGACY_METADATA_READ_CHANNELS,
   LOCAL_COURSE_READ_CHANNELS,
   LOCAL_GRADING_READ_CHANNELS,
   LOCAL_GRADING_MUTATION_CHANNELS,
@@ -491,7 +492,8 @@ export class ManagedCourseMutationGuard {
       ].includes(managedRequest.channel);
     if (
       known?.schemaVersion === 1 &&
-      localRequest &&
+      (localRequest ||
+        (managedRequest && SYNCHRONIZED_COURSE_READ_CHANNELS.includes(managedRequest.channel))) &&
       state.identity &&
       state.courseDiscovery.userId === state.identity.id
     )
@@ -749,8 +751,35 @@ export class ManagedCourseMutationGuard {
             : "A safe managed cache is required. Review the cache or refresh courses."
         );
       }
+      const cachedLegacyMetadata =
+        legacy &&
+        !localGrading &&
+        request !== undefined &&
+        CACHED_LEGACY_METADATA_READ_CHANNELS.includes(request.channel);
       const validateLegacy = async () => {
         if (!legacy) return;
+        if (cachedLegacyMetadata) {
+          // The registered path is an identity selector only for these reads. Never
+          // read its working files or infer publication from the older cache SHA.
+          if (validateManagedStorage(path.dirname(folder.path), folder.path).length)
+            blockMutation("operational_source_unsafe", "The registered source requires review.");
+          const workspace = await (this.deps.factory ?? getProductionGitWorkspaceFactory()).open(
+            folder.path
+          );
+          const origin = parseGithubOrigin(await workspace.remoteUrl("origin"));
+          if (
+            !sameFilesystemRoot(workspace.root, folder.path) ||
+            !origin ||
+            `${origin.owner}/${origin.name}`.toLowerCase() !==
+              `${input.course.organizationLogin}/${input.course.name}`.toLowerCase()
+          )
+            blockMutation(
+              "operational_source_mismatch",
+              "The registered course origin does not match its authorized registration."
+            );
+          assertCurrent();
+          return;
+        }
         const commit = await validateOperationalCourseSource({
           root: folder.path,
           course: input.course,
@@ -826,7 +855,8 @@ export class ManagedCourseMutationGuard {
           : localGrading
             ? { mode: "local_grading" as const, revalidateLocal, assertCurrent }
             : { mode: "local_read" as const }),
-        managed: !legacy,
+        managed: !legacy || cachedLegacyMetadata,
+        ...(cachedLegacyMetadata ? { cachedLegacyMetadata: true as const } : {}),
         cachedCommit: local.commit,
         operationalCommit: local.commit,
         sessionGeneration: generation,
@@ -834,7 +864,7 @@ export class ManagedCourseMutationGuard {
         repositoryId: input.course.repositoryId,
         courseFolderId: folder.id,
         legacyFolderPath: folder.path,
-        courseFolderPath: legacy ? folder.path : local.root
+        courseFolderPath: legacy && !cachedLegacyMetadata ? folder.path : local.root
       };
       if (
         (context.mode === "local_grading" || context.mode === "evidence_read") &&
