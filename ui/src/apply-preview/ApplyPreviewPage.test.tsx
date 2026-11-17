@@ -577,6 +577,76 @@ describe("ApplyPreviewPage", () => {
     expect(screen.queryByRole("heading", { name: "Repository rows" })).toBeNull();
   });
 
+  it.each([
+    ["grading_workflow_missing", "verify_grading_workflow"],
+    ["workflow_dispatch_unsupported", "verify_workflow_dispatch"],
+    ["workflow_deployment_forbidden", "ensure_managed_grading_workflow"]
+  ])("shows failed group setup and recovery guidance for %s", async (code, operationType) => {
+    const issue = {
+      code,
+      severity: "error",
+      message: "Managed group workflow setup requires attention.",
+      context: {
+        operationType,
+        groupId: "team-1",
+        repositoryName: "27s2-csc1120-lab02-team-1",
+        workflowPath: ".github/workflows/grade.yml",
+        remediation: "Check the workflow and rerun Apply. Repository creation is retained."
+      }
+    };
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyGroupApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createGroupApplyJson({
+            status: "failure",
+            exitCode: 4,
+            diagnostics: [issue],
+            errors: [issue],
+            summary: {
+              repositoryMode: "group",
+              manifestWritten: true,
+              studentMappingCount: 2,
+              groupTargets: [
+                {
+                  groupId: "team-1",
+                  repositoryName: issue.context.repositoryName,
+                  htmlUrl: `https://github.com/csc1120/${issue.context.repositoryName}`,
+                  studentIds: ["alpha", "beta"],
+                  status: "failed",
+                  diagnostics: [issue]
+                }
+              ]
+            }
+          })
+        )
+      )
+    });
+    renderApplyPreviewPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to group repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    expect(
+      await screen.findByText("Apply failed. Review the diagnostics before retrying.")
+    ).toBeInTheDocument();
+    const row = screen
+      .getByRole("link", { name: issue.context.repositoryName })
+      .closest('[role="row"]');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Failed")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText(issue.message)).toBeInTheDocument();
+    expect(
+      within(row as HTMLElement).getByText("Workflow: .github/workflows/grade.yml")
+    ).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText(issue.context.remediation)).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText("Created")).toBeNull();
+    expect(within(row as HTMLElement).getByText("alpha, beta")).toBeInTheDocument();
+  });
+
   it("shows the durable-checkpoint warning after a failed group Apply", async () => {
     const incompleteMessage =
       "Group Apply did not complete. Every repository observed as created remains manifest-tracked, so retrying Apply can safely resume without recreating it.";

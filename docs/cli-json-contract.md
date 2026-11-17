@@ -620,9 +620,17 @@ the standard command result; group-specific data is in `summary`:
 }
 ```
 
-`cloneUrl` is included for an executed target when available. A workflow that
-is not observable immediately after repository creation is treated as
-transient and does not add a target warning.
+`cloneUrl` is included for an executed target when available. For managed preset
+grading, group Apply requires an observable workflow with dispatch support before
+reporting `created` or `updated`. A missing workflow, unsupported dispatch or
+rejected workflow deployment reports a `failed` target and a nonzero command
+result, retaining repository identity and student mappings. Target and global
+manifest-v2 diagnostics record the operation, repository, workflow path and safe
+remediation. Reopening shows `partially_applied`; successful reapplication clears
+the attempted target's errors, resumes tracked repositories without recreation
+and leaves valid managed workflow content unchanged. Ownership conflicts remain
+errors and preserve the existing file. Template workflows outside managed preset
+grading retain their existing transient-missing observation behavior.
 
 On a group preflight error, including an untracked-existing-repository
 collision, Apply performs no group mutation. Once execution begins, the

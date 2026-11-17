@@ -182,7 +182,15 @@ describe("group target executor", () => {
       }
     };
     delete config.assignment.template;
-    const githubClient = new FakeGitHubClient();
+    const githubClient = new FakeGitHubClient({
+      workflows: [
+        {
+          owner: "example-org",
+          repo: "27s1-se2030-lab04-team-1",
+          workflow: { id: 1, name: "Grade", path: "grade.yml", supportsDispatch: true }
+        }
+      ]
+    });
 
     const result = await executeGroupTargets({
       config,

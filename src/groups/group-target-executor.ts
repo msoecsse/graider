@@ -21,6 +21,29 @@ import {
 } from "../execution/apply-progress.js";
 
 const FIRST_REPOSITORY_POSITION = 1;
+type ManagedWorkflowOperation = "ensure_managed_grading_workflow" | "verify_grading_workflow";
+
+const withManagedWorkflowContext = (
+  diagnostic: Diagnostic,
+  target: GroupApplyPreviewTarget,
+  owner: string,
+  operationType: ManagedWorkflowOperation | "verify_workflow_dispatch"
+): Diagnostic => ({
+  ...diagnostic,
+  context: {
+    ...diagnostic.context,
+    targetId: target.targetId,
+    groupId: target.groupId,
+    repositoryName: target.repositoryName,
+    repositoryOwner: owner,
+    operationType,
+    workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+    remediation:
+      operationType === "ensure_managed_grading_workflow"
+        ? "Check repository Contents and workflow-file write authority and workflow ownership, including any required organization approval, then rerun Apply. Repository creation is retained."
+        : "Check the workflow file, Actions access and active workflow_dispatch trigger, then rerun Apply. Repository creation is retained."
+  }
+});
 
 export interface GroupTargetExecutionResult {
   readonly targets: readonly GroupTargetExecutionTargetResult[];
@@ -83,6 +106,7 @@ export const executeGroupTargets = async (input: {
     let repository: GitHubRepository | null = null;
     let repositoryCreated = false;
     let creationInProgress = false;
+    let workflowOperation: ManagedWorkflowOperation | undefined;
     try {
       const existing = await input.githubClient.getRepository(
         input.config.course.github.organization,
@@ -199,6 +223,7 @@ export const executeGroupTargets = async (input: {
         await input.githubClient.enableActions(repository.owner, repository.name);
       }
       if (deployManagedWorkflow) {
+        workflowOperation = "ensure_managed_grading_workflow";
         const deployment = await ensureManagedGradingWorkflow({
           githubClient: input.githubClient,
           owner: repository.owner,
@@ -210,14 +235,19 @@ export const executeGroupTargets = async (input: {
           deployment.status === "conflict_unmanaged" ||
           deployment.status === "conflict_unsupported_version"
         ) {
-          const diagnostic = failure(
+          const diagnostic = withManagedWorkflowContext(
+            failure(
+              target,
+              deployment.status === "conflict_unmanaged"
+                ? `Repository ${target.repositoryName} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`
+                : `Repository ${target.repositoryName} contains a Graider workflow with an unsupported ownership version; it was preserved.`,
+              deployment.status === "conflict_unmanaged"
+                ? DiagnosticCode.WorkflowDeploymentConflict
+                : DiagnosticCode.WorkflowDeploymentVersionUnsupported
+            ),
             target,
-            deployment.status === "conflict_unmanaged"
-              ? `Repository ${target.repositoryName} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`
-              : `Repository ${target.repositoryName} contains a Graider workflow with an unsupported ownership version; it was preserved.`,
-            deployment.status === "conflict_unmanaged"
-              ? DiagnosticCode.WorkflowDeploymentConflict
-              : DiagnosticCode.WorkflowDeploymentVersionUnsupported
+            repository.owner,
+            workflowOperation
           );
           return {
             targets: [
@@ -236,15 +266,41 @@ export const executeGroupTargets = async (input: {
         }
       }
       const workflowPath = deployManagedWorkflow ? GRAIDER_MANAGED_WORKFLOW_PATH : grading.workflow;
-      if (grading.enabled && workflowPath !== undefined)
-        await input.githubClient.getWorkflow(
+      if (grading.enabled && workflowPath !== undefined) {
+        if (deployManagedWorkflow) workflowOperation = "verify_grading_workflow";
+        const workflow = await input.githubClient.getWorkflow(
           repository.owner,
           repository.name,
           getWorkflowDispatchIdentifier(workflowPath)
         );
+        if (deployManagedWorkflow && (workflow === null || !workflow.supportsDispatch)) {
+          const diagnostic = withManagedWorkflowContext(
+            failure(
+              target,
+              workflow === null
+                ? `Managed grading workflow was not found for ${target.repositoryName}.`
+                : `Workflow dispatch is not supported for ${target.repositoryName}.`,
+              workflow === null
+                ? DiagnosticCode.GradingWorkflowMissing
+                : DiagnosticCode.WorkflowDispatchUnsupported
+            ),
+            target,
+            repository.owner,
+            workflow === null ? "verify_grading_workflow" : "verify_workflow_dispatch"
+          );
+          return {
+            targets: [
+              ...results,
+              { ...observedResult, status: "failed", diagnostics: [diagnostic] }
+            ],
+            warnings,
+            errors: [...errors, diagnostic]
+          };
+        }
+      }
       results.push(observedResult);
     } catch (error: unknown) {
-      const diagnostic =
+      const baseDiagnostic =
         creationInProgress && error instanceof GitHubClientError
           ? {
               ...createGitHubDiagnostic(error),
@@ -262,6 +318,38 @@ export const executeGroupTargets = async (input: {
               error instanceof WorkflowDeploymentPermissionError
                 ? DiagnosticCode.WorkflowDeploymentForbidden
                 : "group_target_execution_failed"
+            );
+      const diagnostic =
+        workflowOperation === undefined
+          ? baseDiagnostic
+          : withManagedWorkflowContext(
+              {
+                ...(error instanceof GitHubClientError
+                  ? createGitHubDiagnostic(error)
+                  : baseDiagnostic),
+                message:
+                  error instanceof GitHubClientError
+                    ? `GitHub could not ${workflowOperation === "ensure_managed_grading_workflow" ? "create or update" : "verify"} ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${target.repositoryName}.`
+                    : baseDiagnostic.message,
+                context: {
+                  ...(error instanceof GitHubClientError
+                    ? createGitHubDiagnostic(error).context
+                    : {}),
+                  endpoint:
+                    workflowOperation === "ensure_managed_grading_workflow"
+                      ? "/repos/{owner}/{repo}/contents/{path}"
+                      : "/repos/{owner}/{repo}/actions/workflows/{workflow_id}",
+                  requestMethod:
+                    workflowOperation === "verify_grading_workflow"
+                      ? "GET"
+                      : error instanceof GitHubClientError
+                        ? (error.requestMethod ?? "PUT")
+                        : "PUT"
+                }
+              },
+              target,
+              input.config.course.github.organization,
+              workflowOperation
             );
       return {
         targets: [

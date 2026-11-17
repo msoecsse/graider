@@ -15,6 +15,10 @@ import { DEFAULT_GITHUB_RETRY_ATTEMPTS } from "../../src/github/github-retry.js"
 import type { GitHubRepository, GitHubTemplateRepository } from "../../src/github/github-models.js";
 import { loadManifest } from "../../src/manifest/manifest-loader.js";
 import { createManifestPath } from "../../src/manifest/manifest-paths.js";
+import { readAssignmentApplyState } from "../../src/assignment-detail/assignment-apply-state.js";
+import { renderManifestV2Yaml } from "../../src/manifest/manifest-v2-renderer.js";
+import { GitHubClientError } from "../../src/github/github-errors.js";
+import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../../src/workflows/managed-workflow-policy.js";
 
 enum TestNumber {
   TemplateRepositoryId = 101
@@ -156,6 +160,124 @@ const getDiagnosticCodes = (diagnostics: readonly { readonly code: string }[]): 
   diagnostics.map((diagnostic) => diagnostic.code);
 
 describe("graider assignment apply command", () => {
+  it.each([
+    ["missing", "grading_workflow_missing", "verify_grading_workflow"],
+    ["unsupported", "workflow_dispatch_unsupported", "verify_workflow_dispatch"],
+    ["forbidden", "workflow_deployment_forbidden", "ensure_managed_grading_workflow"]
+  ])(
+    "persists incomplete managed group setup for %s and finishes on reapply",
+    async (scenario, code, operationType) => {
+      const cwd = copyFixtureToTemp("active-assignment");
+      activateSmith(cwd);
+      configureGroupAssignment(cwd, "team-1,jones\nteam-1,smith\nteam-2,patel\n");
+      fs.appendFileSync(
+        path.join(cwd, ASSIGNMENT_FILE),
+        `\ngrading:\n  enabled: true\n  mode: preset\n  preset: java-junit-checkstyle\n  workflow: ${GRAIDER_MANAGED_WORKFLOW_PATH}\n  artifact: grading-results\n  result_file: results.json\n`
+      );
+      const githubClient = createReadyClient();
+      const write = githubClient.writeRepositoryFile.bind(githubClient);
+      const workflow = { id: 1, name: "Grade", path: "grade.yml", supportsDispatch: true };
+      const lookup = vi
+        .spyOn(githubClient, "getWorkflow")
+        .mockResolvedValue(
+          scenario === "unsupported" ? { ...workflow, supportsDispatch: false } : null
+        );
+      if (scenario === "forbidden")
+        githubClient.writeRepositoryFile = () =>
+          Promise.reject(new GitHubClientError("permission_denied", "Write rejected"));
+
+      const result = await runCanonicalApply(cwd, githubClient);
+      expect(result.status).toBe("failure");
+      expect(result.exitCode).not.toBe(ExitCode.Success);
+      expect(result.summary).toMatchObject({
+        manifestWritten: true,
+        groupTargets: [
+          {
+            groupId: "team-1",
+            status: "failed",
+            diagnostics: [
+              {
+                code,
+                context: {
+                  operationType,
+                  workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH
+                }
+              }
+            ]
+          }
+        ]
+      });
+      expect(getDiagnosticCodes(result.warnings)).toContain(
+        "group_apply_incomplete_manifest_saved"
+      );
+      expect(githubClient.mutations.createdRepositories).toHaveLength(1);
+      expect(githubClient.mutations.addedCollaborators).toHaveLength(2);
+      expect(githubClient.mutations.teamPermissions).toHaveLength(1);
+      const loaded = loadWrittenManifest(cwd);
+      if (loaded.status !== "loaded") throw new Error("Expected checkpoint manifest.");
+      expect(loaded.manifest.targets).toEqual([
+        expect.objectContaining({
+          targetId: "team-1",
+          repositoryName: "27s1-se2030-lab04-team-1",
+          diagnostics: [expect.objectContaining({ code })]
+        })
+      ]);
+      expect(loaded.manifest.studentMappings?.map((mapping) => mapping.studentId)).toEqual([
+        "jones",
+        "smith"
+      ]);
+      expect(loaded.manifest.warnings).toEqual([
+        expect.objectContaining({ code, severity: "error" })
+      ]);
+      const manifestPath = createManifestPath(cwd, "27s1", "lab04").absolutePath;
+      const saved = fs.readFileSync(manifestPath, "utf8");
+      expect(readAssignmentApplyState(cwd, manifestPath)).toBe("partially_applied");
+      expect(fs.readFileSync(manifestPath, "utf8")).toBe(saved);
+      // Both normalized v2 diagnostic locations independently preserve incomplete state.
+      for (const location of ["target", "global"]) {
+        fs.writeFileSync(
+          manifestPath,
+          renderManifestV2Yaml({
+            repositoryMode: "group",
+            targets: (loaded.manifest.targets ?? []).map((target) => ({
+              ...target,
+              diagnostics: location === "target" ? target.diagnostics : []
+            })),
+            studentMappings: loaded.manifest.studentMappings ?? [],
+            diagnostics: location === "global" ? loaded.manifest.warnings : []
+          })
+        );
+        expect(readAssignmentApplyState(cwd, manifestPath)).toBe("partially_applied");
+      }
+      fs.writeFileSync(manifestPath, saved);
+      githubClient.writeRepositoryFile = write;
+      lookup.mockResolvedValue(workflow);
+      const writesBeforeRecovery = githubClient.mutations.fileWrites.length;
+      const retry = await runCanonicalApply(cwd, githubClient);
+      expect(retry.status).toBe("success");
+      expect(retry.summary).toMatchObject({
+        groupTargets: [
+          { groupId: "team-1", status: "updated", diagnostics: [] },
+          { groupId: "team-2", status: "created", diagnostics: [] }
+        ]
+      });
+      expect(githubClient.mutations.createdRepositories.map((entry) => entry.input.name)).toEqual([
+        "27s1-se2030-lab04-team-1",
+        "27s1-se2030-lab04-team-2"
+      ]);
+      // Only the new target needs a write unless the first target's original write was denied.
+      expect(githubClient.mutations.fileWrites).toHaveLength(
+        writesBeforeRecovery + (scenario === "forbidden" ? 2 : 1)
+      );
+      expect(readAssignmentApplyState(cwd, manifestPath)).toBe("applied");
+      expect(loadWrittenManifest(cwd)).toMatchObject({
+        status: "loaded",
+        manifest: { warnings: [], errors: [], targets: [{ diagnostics: [] }, { diagnostics: [] }] }
+      });
+      expect(githubClient.mutations.workflowDispatches).toEqual([]);
+    }
+  );
+
   it("applies group targets and writes a v2 manifest after full success", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     activateSmith(cwd);

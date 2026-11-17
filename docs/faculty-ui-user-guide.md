@@ -451,6 +451,12 @@ For a valid preview, confirm Apply in the UI to create one shared repository per
 group and give every member admin access. If Apply fails partway, Graider keeps
 every observed repository in the assignment manifest. Review the failing
 operation and retry Apply; tracked repositories are resumed without recreation.
+For managed preset grading, a missing workflow, unsupported dispatch or rejected
+workflow write marks the group **Failed**, even after repository creation.
+Its members and repository link remain available. Review the row's workflow
+and recovery guidance, then use **Finish Apply** after resolving the problem.
+Reapplying preserves valid managed workflows; reopening keeps setup incomplete
+until verification succeeds.
 Unknown repositories with matching names are still blocked and never adopted. Group
 grading and status/report views remain limited until their group-aware work is
 completed.

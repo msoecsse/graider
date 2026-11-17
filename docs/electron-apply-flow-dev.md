@@ -389,6 +389,13 @@ Electron-specific mutation API. Its result renders group target summaries,
 shared student mappings, workflow warnings, and safe no-manifest diagnostics.
 Individual result rows and manifest-v1 behavior remain unchanged.
 
+Managed preset group setup also verifies the workflow observation and dispatch
+support before reporting success. Missing workflows, unsupported dispatch and
+failed deployment produce a failed group row with operation, workflow path and
+recovery guidance. Manifest-v2 target and global diagnostics preserve incomplete
+setup when reopening; successful reapply clears recovered errors without
+recreating the tracked repository or rewriting a valid managed workflow.
+
 ## Preview vs Result Wording
 
 Preview rows use future-tense labels:

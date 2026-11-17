@@ -38,7 +38,7 @@ afterEach(() => {
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
-const fixture = async () => {
+const fixture = async (repositoryMode: "individual" | "group" = "individual") => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "graider-gui-apply-"));
   roots.push(base);
   const root = path.join(base, "repo");
@@ -79,6 +79,21 @@ const fixture = async () => {
       replaceExisting: false
     })
   ).toMatchObject({ status: "success" });
+  if (repositoryMode === "group") {
+    const assignmentPath = path.join(root, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/grading:\n[\s\S]*$/u, "")
+    );
+    fs.appendFileSync(
+      assignmentPath,
+      "\nrepository_mode: group\ngroups:\n  file: groups.csv\ngrading:\n  enabled: true\n  mode: preset\n  preset: java-junit-checkstyle\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: results.json\n"
+    );
+    fs.writeFileSync(
+      path.join(path.dirname(assignmentPath), "groups.csv"),
+      "group_id,student_id\nteam-1,jones\n"
+    );
+  }
   await git(root, ["add", "."]);
   await git(root, ["commit", "-m", "Publish new assignment"]);
   const revision = await git(root, ["rev-parse", "HEAD"]);
@@ -165,6 +180,29 @@ const fixture = async () => {
   };
 };
 describe("GUI OAuth Apply backend boundary", () => {
+  it("revalidates authority before a managed group workflow write and preserves its checkpoint", async () => {
+    const f = await fixture("group");
+    const enableActions = f.client.enableActions.bind(f.client);
+    vi.spyOn(f.client, "enableActions").mockImplementation(async (owner, repo) => {
+      await enableActions(owner, repo);
+      f.invalidate();
+    });
+    const result = await f.run({});
+    expect(result.apply?.status).toBe("failure");
+    expect(f.client.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
+    expect(f.client.mutations.addedCollaborators).toHaveLength(1);
+    expect(f.client.mutations.teamPermissions).toHaveLength(1);
+    expect(f.client.mutations.enabledActions).toHaveLength(1);
+    expect(f.client.mutations.fileWrites).toEqual([]);
+    expect(f.client.workflowReads).toEqual([]);
+    expect(result.apply?.summary).toMatchObject({
+      manifestWritten: true,
+      groupTargets: [{ status: "failed", groupId: "team-1" }]
+    });
+    expect(JSON.stringify(result)).not.toContain(OAUTH_TOKEN);
+    expect(await git(f.root, ["status", "--porcelain"])).toBe("");
+  });
+
   it("loads the bundled backend and applies using the same guarded capability and runtime layout", async () => {
     const f = await fixture();
     const backend = createRequire(import.meta.url)(BUNDLED_BACKEND) as {
