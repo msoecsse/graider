@@ -27,6 +27,10 @@ export interface VerifiedLocalCourseReadContext extends Omit<
   readonly mode: "local_read";
   readonly cachedCommit: string;
   readonly cachedLegacyMetadata?: true;
+  /** Main-owned runtime evidence, independent of the cached metadata source. Never a write capability. */
+  readonly readAssignmentApplyState?: () => Promise<
+    "not_applied" | "applied" | "partially_applied" | "unknown"
+  >;
   readonly revalidate?: never;
 }
 /** Trusted local runtime write capability; never accepted by a remote publication boundary. */

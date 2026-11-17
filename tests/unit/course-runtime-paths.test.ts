@@ -92,4 +92,28 @@ describe("managed course generated-artifact storage", () => {
     fs.symlinkSync(f.source, path.join(f.runtime, "link"));
     expect(() => courseRuntimePath(f.source, "link/course.yml")).toThrow();
   });
+
+  it.each(["environment", "registration"] as const)(
+    "resolves canonical source aliases for %s runtime mappings without affecting other courses",
+    (kind) => {
+      const f = fixture();
+      const alias = path.join(path.dirname(f.source), "source-alias");
+      fs.symlinkSync(f.source, alias, "junction");
+      expect(() => {
+        registerCourseRuntimeRoot(alias, fs.realpathSync.native(f.source));
+      }).toThrow();
+      if (kind === "environment") {
+        vi.stubEnv("GRAIDER_MANAGED_COURSE_SOURCE", alias);
+        vi.stubEnv("GRAIDER_MANAGED_COURSE_RUNTIME", f.runtime);
+      } else registerCourseRuntimeRoot(alias, f.runtime);
+      const canonical = fs.realpathSync.native(f.source);
+      expect(createManifestPath(canonical, "27s1", "lab01").absolutePath).toBe(
+        path.join(f.runtime, "terms", "27s1", "manifests", "lab01", "manifest.yml")
+      );
+      const other = fixture();
+      expect(createManifestPath(other.source, "27s1", "lab01").absolutePath).toBe(
+        path.join(other.source, "terms", "27s1", "manifests", "lab01", "manifest.yml")
+      );
+    }
+  );
 });

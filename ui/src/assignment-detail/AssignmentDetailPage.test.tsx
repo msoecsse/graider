@@ -2036,6 +2036,11 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
 
+    expect(screen.getByText("Applied").closest("li")).toHaveClass(
+      "lifecycle-strip__step--complete"
+    );
+    expect(screen.queryByRole("button", { name: "Apply to 3 students" })).not.toBeInTheDocument();
+
     expect(onPreviewGrade).toHaveBeenCalledTimes(1);
     expect(onPreviewGrade).toHaveBeenCalledWith(
       SELECTION,

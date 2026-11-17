@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import { courseRuntimeRoot } from "../core/course-runtime-paths.js";
+import { readAssignmentApplyState } from "./assignment-apply-state.js";
 import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
@@ -34,8 +35,6 @@ const ARCHIVED_ASSIGNMENT_STATUS = "archived";
 const NOT_CHECKED_STATUS: AssignmentDetailCheckStatus = "not_checked";
 const NOT_REQUIRED_STATUS: AssignmentDetailCheckStatus = "not_required";
 const AVAILABLE_STATUS: AssignmentDetailCheckStatus = "available";
-const APPLY_STATE_APPLIED: AssignmentDetailApplyState = "applied";
-const APPLY_STATE_NOT_APPLIED: AssignmentDetailApplyState = "not_applied";
 
 export interface BuildAssignmentDetailInput {
   readonly cwd: string;
@@ -95,14 +94,6 @@ const createRosterSummary = (
   };
 };
 
-const isFile = (filePath: string): boolean => {
-  try {
-    return fs.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-};
-
 const getApplyState = (config: LoadedGraiderConfig): AssignmentDetailApplyState => {
   const manifestPath = createManifestPath(
     config.summary.repoRoot,
@@ -110,7 +101,10 @@ const getApplyState = (config: LoadedGraiderConfig): AssignmentDetailApplyState 
     config.summary.assignmentSlug
   );
 
-  return isFile(manifestPath.absolutePath) ? APPLY_STATE_APPLIED : APPLY_STATE_NOT_APPLIED;
+  return readAssignmentApplyState(
+    courseRuntimeRoot(config.summary.repoRoot),
+    manifestPath.absolutePath
+  );
 };
 
 const createGradingDetail = (config: LoadedGraiderConfig): AssignmentDetailGrading => {

@@ -612,6 +612,18 @@ describe("graider assignment detail command", () => {
     expect(result.applyState).toEqual({ status: "applied" });
   });
 
+  it("does not mistake an invalid manifest for a completed Apply", async () => {
+    const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    fs.mkdirSync(path.dirname(manifestPath.absolutePath), { recursive: true });
+    fs.writeFileSync(manifestPath.absolutePath, "invalid: manifest\n");
+
+    const result = await runDetail(cwd);
+
+    expect(result.applyState).toEqual({ status: "unknown" });
+    expect(fs.readFileSync(manifestPath.absolutePath, "utf8")).toBe("invalid: manifest\n");
+  });
+
   it("returns local detail plus token_required readiness when token is missing", async () => {
     const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);
     const before = listFiles(cwd);

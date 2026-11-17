@@ -5,20 +5,36 @@ import path from "node:path";
 // source/runtime pair through its process environment, never a renderer parameter.
 const ROOTS: unique symbol = Symbol.for("graider.managed-course.runtime-roots");
 const shared = globalThis as typeof globalThis & { [ROOTS]?: Map<string, string> };
+const sourceIdentity = (source: string): string => {
+  try {
+    return fs.realpathSync.native(source);
+  } catch {
+    return path.resolve(source);
+  }
+};
 export const registerCourseRuntimeRoot = (source: string, runtime: string): void => {
-  const relative = path.relative(path.resolve(source), path.resolve(runtime));
-  if (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  const relatives = [
+    path.relative(path.resolve(source), path.resolve(runtime)),
+    path.relative(sourceIdentity(source), sourceIdentity(runtime))
+  ];
+  if (
+    relatives.some(
+      (relative) =>
+        !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)
+    )
+  )
     throw new Error("Course runtime storage must be outside the source repository.");
   let roots = shared[ROOTS];
   if (!roots) {
     roots = new Map<string, string>();
     shared[ROOTS] = roots;
   }
-  roots.set(path.resolve(source), path.resolve(runtime));
+  roots.set(sourceIdentity(source), path.resolve(runtime));
 };
 export const courseRuntimeRoot = (source: string): string =>
-  shared[ROOTS]?.get(path.resolve(source)) ??
-  (process.env.GRAIDER_MANAGED_COURSE_SOURCE === path.resolve(source) &&
+  shared[ROOTS]?.get(sourceIdentity(source)) ??
+  (process.env.GRAIDER_MANAGED_COURSE_SOURCE &&
+  sourceIdentity(process.env.GRAIDER_MANAGED_COURSE_SOURCE) === sourceIdentity(source) &&
   process.env.GRAIDER_MANAGED_COURSE_RUNTIME
     ? path.resolve(process.env.GRAIDER_MANAGED_COURSE_RUNTIME)
     : source);

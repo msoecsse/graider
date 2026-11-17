@@ -1,3 +1,4 @@
+import { createManagedCourseProcessRunner } from "./managedCourseProcessRunner.js";
 import { measureStartup } from "./gradingPerformance.js";
 import { loadDashboardDisplay, saveDashboardDisplay } from "./dashboardDisplayCache.js";
 import { loadCourseSnapshot, saveCourseSnapshot } from "./courseDiscoverySnapshot.js";
@@ -577,32 +578,7 @@ export const registerIpcHandlers = (): void => {
           mode: "external"
         }
   });
-  const processRunner: ProcessRunner = async (request) => {
-    const operation = managedCourseOperation.getStore();
-    if (
-      operation &&
-      request.command === "graider" &&
-      request.args.some((argument) =>
-        ["apply", "grade", "download-repositories", "report", "generate"].includes(argument)
-      )
-    )
-      await operation.revalidate?.();
-    return baseProcessRunner(
-      operation?.managed && !operation.transaction
-        ? {
-            ...request,
-            env: {
-              ...(request.env ?? process.env),
-              GRAIDER_MANAGED_COURSE_SOURCE: operation.courseFolderPath,
-              GRAIDER_MANAGED_COURSE_RUNTIME: path.join(
-                path.dirname(operation.courseFolderPath),
-                "runtime"
-              )
-            }
-          }
-        : request
-    );
-  };
+  const processRunner: ProcessRunner = createManagedCourseProcessRunner(baseProcessRunner);
   const isRegisteredAssignmentSetupCourse = (request: AssignmentSetupTermsRequest): boolean =>
     (managedCourseOperation.getStore()?.courseFolderId === request.courseFolderId &&
       managedCourseOperation.getStore()?.courseFolderPath === request.courseFolderPath) ||

@@ -341,6 +341,7 @@ export const validateTransaction = (root: string, organization: string): void =>
 };
 
 export { registerCourseRuntimeRoot } from "../../src/core/course-runtime-paths.js";
+export { readAssignmentApplyState } from "../../src/assignment-detail/assignment-apply-state.js";
 export {
   legacyCourseWriteIncompatible,
   legacyCourseContentIncompatible

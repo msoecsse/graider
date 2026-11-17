@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { managedOperationalFixture, fixtureGit as git } from "./managedOperationalFixtures.js";
 import { removeGitFixture, GIT_INTEGRATION_TIMEOUT_MS } from "./gitIntegrationFixtures.js";
@@ -10,8 +11,20 @@ import { createCourseMutationIpc } from "./courseMutationIpc.js";
 import {
   IPC_CHANNELS,
   type AssignmentDetailRequest,
-  type AssignmentGroupConfigRequest
+  type AssignmentGroupConfigRequest,
+  type AssignmentRepositoryDownloadRequest
 } from "./ipc.js";
+import { createManagedCourseProcessRunner } from "./managedCourseProcessRunner.js";
+import { runAssignmentRepositoryDownload } from "./assignmentRepositoryDownloadRunner.js";
+import { createGradingWorkspaceService } from "./gradingWorkspaceService.js";
+import { createFacultyScopeService } from "./facultyScopeService.js";
+import { getLocalSettingsPath, saveCurrentFacultyMsoeUsername } from "./localSettings.js";
+import { stringify } from "yaml";
+import { createGradingStudentSourceService } from "./gradingStudentSourceService.js";
+import {
+  getLocalRepositoryLocatorPath,
+  recordSuccessfulDownloadLocators
+} from "./localRepositoryLocator.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import { getAssignmentGroupConfig } from "./assignmentGroupConfigService.js";
 import { execFile } from "node:child_process";
@@ -22,6 +35,7 @@ import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
 vi.mock("./githubRemoteRepositories.js", () => ({
   createRemoteRepositoryReader: vi.fn()
 }));
+const DOWNLOAD_GRADING_TIMEOUT_MS = 60_000;
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeGitFixture));
@@ -48,14 +62,67 @@ const commit = async (root: string) => {
   ]);
   return git(root, ["rev-parse", "HEAD"]);
 };
-const fixture = async () => {
+const fixture = async (managed = false) => {
   const f = await managedOperationalFixture();
   roots.push(f.root);
   vi.mocked(createRemoteRepositoryReader).mockReturnValue(f.reader);
   addAssignment(f.writer, "lab01");
+  const studentCount = 47;
+  const students = Array.from({ length: studentCount }, (_, index) => ({
+    studentId: `s${index}`,
+    githubUsername: `student${index}`,
+    repositoryName: `27s1-fixture101-lab01-student${index}`
+  }));
+  const rosters = path.join(f.writer, "terms", "27s1", "rosters");
+  fs.mkdirSync(rosters, { recursive: true });
+  fs.appendFileSync(
+    path.join(f.writer, "terms", "27s1", "term.yml"),
+    "    roster: rosters/section-001.csv\n"
+  );
+  fs.writeFileSync(
+    path.join(rosters, "section-001.csv"),
+    "student_id,github_username,section,status\n" +
+      students.map((s) => `${s.studentId},${s.githubUsername},001,active\n`).join("")
+  );
+  const manifestContent = stringify({
+    schema_version: 2,
+    repository_mode: "individual",
+    targets: students.map((s) => ({
+      target_id: s.studentId,
+      mode: "individual",
+      repository_name: s.repositoryName,
+      clone_url: `https://github.com/fixture/${s.repositoryName}.git`,
+      section_ids: ["001"],
+      student_ids: [s.studentId],
+      github_usernames: [s.githubUsername],
+      diagnostics: []
+    })),
+    student_mappings: students.map((s) => ({
+      student_id: s.studentId,
+      github_username: s.githubUsername,
+      target_id: s.studentId,
+      repository_name: s.repositoryName
+    })),
+    diagnostics: []
+  });
   const base = await commit(f.writer);
   await git(f.writer, ["push", "origin", "main"]);
   for (const root of [f.cache, f.legacy]) await git(root, ["pull", "--ff-only"]);
+  if (managed) Object.assign(f.course, { localFolderIds: [] });
+  const selection = managed ? f.guard.remoteSelectors()[0]! : { id: "registered", path: f.legacy };
+  const runtimeRoot = managed ? path.join(path.dirname(f.cache), "runtime") : f.legacy;
+  const manifestPath = path.join(
+    runtimeRoot,
+    "terms",
+    "27s1",
+    "manifests",
+    "lab01",
+    "manifest.yml"
+  );
+  const writeManifest = (content = manifestContent) => {
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    fs.writeFileSync(manifestPath, content);
+  };
   type InvokeHandler = Parameters<Parameters<typeof createCourseMutationIpc>[0]["handle"]>[1];
   const handlers = new Map<string, (request: unknown) => unknown>();
   const sender = Object.assign(new EventEmitter(), {
@@ -84,31 +151,103 @@ const fixture = async () => {
     IPC_CHANNELS.getAssignmentGroupConfig,
     (_event, request: AssignmentGroupConfigRequest) => getAssignmentGroupConfig(request)
   );
-  // Exercise the real IPC adapter, runner, and CLI process with no GitHub credentials.
+  // Only student clone transport is mocked; the download backend, manifest parsing,
+  // IPC authorization and the source/runtime environment wrapper are production code.
+  const studentRepository = path.join(f.root, "student-fixture");
+  fs.mkdirSync(studentRepository);
+  await git(studentRepository, ["init", "--initial-branch=main"]);
+  fs.writeFileSync(path.join(studentRepository, "submission.txt"), "Existing student submission\n");
+  await commit(studentRepository);
+  const cloneScript = path.join(f.root, "download-fixture.mjs");
+  fs.writeFileSync(
+    cloneScript,
+    `
+    import fs from "node:fs";
+    import { exec as git } from ${JSON.stringify(pathToFileURL(require.resolve("dugite")).href)};
+    import { downloadAssignmentRepositories } from ${JSON.stringify(pathToFileURL(path.resolve("../src/repository-download/repository-download.ts")).href)};
+    const input = JSON.parse(process.argv[2]);
+    const result = await downloadAssignmentRepositories({ ...input, token: process.env.GRAIDER_GITHUB_TOKEN,
+      dependencies: { git: { verifyAvailable: async () => {}, clone: async ({ destination }) => {
+        const cloned = await git(["clone", "--no-hardlinks", ${JSON.stringify(studentRepository)}, destination], ${JSON.stringify(f.root)});
+        if (cloned.exitCode !== 0) throw new Error("Local fixture clone failed");
+        return { root: destination };
+      } } }
+    });
+    process.stdout.write(JSON.stringify(result));
+  `
+  );
+  const launches: Array<{ cwd?: string; source?: string; runtime?: string; command: string }> = [];
+  const runner = createManagedCourseProcessRunner(async (input) => {
+    const download = input.args[1] === "download-repositories";
+    expect(input.cwd).toBe(download && !managed ? f.legacy : f.cache);
+    if (!download) expect(input.env).not.toHaveProperty("GRAIDER_GITHUB_TOKEN");
+    launches.push({
+      cwd: input.cwd,
+      source: input.env?.GRAIDER_MANAGED_COURSE_SOURCE,
+      runtime: input.env?.GRAIDER_MANAGED_COURSE_RUNTIME,
+      command: input.args[1]
+    });
+    const result = await promisify(execFile)(
+      process.execPath,
+      [
+        "--import",
+        pathToFileURL(require.resolve("tsx")).href,
+        ...(download
+          ? [
+              cloneScript,
+              JSON.stringify({
+                cwd: input.cwd,
+                assignmentFile: input.args[2],
+                destination: input.args[4]
+              })
+            ]
+          : [path.resolve("../src/cli/index.ts"), ...input.args])
+      ],
+      { cwd: input.cwd, env: input.env }
+    );
+    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr, error: null };
+  });
   ipc.handle(IPC_CHANNELS.getAssignmentDetail, (_event, request: AssignmentDetailRequest) =>
-    getAssignmentDetail(request, {
-      env: {},
-      runner: async (input) => {
-        expect(input.cwd).toBe(f.cache);
-        expect(input.env).not.toHaveProperty("GRAIDER_GITHUB_TOKEN");
-        const result = await promisify(execFile)(
-          process.execPath,
-          [
-            "--import",
-            pathToFileURL(require.resolve("tsx")).href,
-            path.resolve("../src/cli/index.ts"),
-            ...input.args
-          ],
-          { cwd: input.cwd, env: input.env }
-        );
-        return { exitCode: 0, stdout: result.stdout, stderr: result.stderr, error: null };
-      }
-    })
+    getAssignmentDetail(request, { env: {}, runner })
+  );
+  ipc.handle(
+    IPC_CHANNELS.downloadAssignmentRepositories,
+    async (_event, request: AssignmentRepositoryDownloadRequest) => {
+      const result = await runAssignmentRepositoryDownload(request, { runner, env: {} });
+      recordSuccessfulDownloadLocators(
+        getLocalRepositoryLocatorPath(f.root),
+        {
+          courseFolderId: request.courseFolderId,
+          termCode: "27s1",
+          assignmentSlug: "lab01"
+        },
+        result.targets ?? []
+      );
+      return result;
+    }
+  );
+  saveCurrentFacultyMsoeUsername(getLocalSettingsPath(f.root), "jones");
+  const resolveFacultyScope = createFacultyScopeService(
+    require("../dist-electron/facultyScopeBackend.cjs")
+  );
+  const workspace = createGradingWorkspaceService({
+    backend: require("../dist-electron/gradingWorkspaceBackend.cjs"),
+    resolveFacultyScope
+  });
+  const source = createGradingStudentSourceService({
+    resolveFacultyScope,
+    loadBackend: () => require("../dist-electron/gradingStudentSourceBackend.cjs")
+  });
+  ipc.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request) =>
+    source({ ...request, userDataPath: f.root })
+  );
+  ipc.handle(IPC_CHANNELS.prepareGradingWorkspace, (_event, request) =>
+    workspace({ ...request, userDataPath: f.root })
   );
   const open = async (slug = "lab01", revision = base) => {
     const request = {
-      courseFolderId: "registered",
-      courseFolderPath: f.legacy,
+      courseFolderId: selection.id,
+      courseFolderPath: selection.path,
       assignmentFile: assignmentFile(slug)
     };
     const detail = await invoke(IPC_CHANNELS.getAssignmentDetail, request);
@@ -122,21 +261,183 @@ const fixture = async () => {
       status: "ready",
       courseReadRevision: revision
     });
-    expect(sender.send).toHaveBeenCalledWith("graider-ui:course-mutation:notice", {
-      status: "cached_course_read",
-      commit: revision
-    });
+    if (!managed)
+      expect(sender.send).toHaveBeenCalledWith("graider-ui:course-mutation:notice", {
+        status: "cached_course_read",
+        commit: revision
+      });
     return detail;
   };
   const call = (channel: string, fields: Record<string, unknown> = {}) =>
     invoke(channel, {
-      courseFolderId: "registered",
-      courseFolderPath: f.legacy,
+      courseFolderId: selection.id,
+      courseFolderPath: selection.path,
       assignmentFile: assignmentFile("lab01"),
       ...fields
     });
-  return { ...f, base, open, sender, call, ipc };
+  return {
+    ...f,
+    base,
+    open,
+    sender,
+    call,
+    ipc,
+    manifestPath,
+    writeManifest,
+    students,
+    studentCount,
+    launches
+  };
 };
+
+it.each([false, true])(
+  "keeps grading available after a successful download of 47 submissions (managed=%s)",
+  async (managed) => {
+    const f = await fixture(managed);
+    f.writeManifest();
+    const destination = path.join(f.root, "submissions");
+    expect(
+      await f.call(IPC_CHANNELS.downloadAssignmentRepositories, { destination })
+    ).toMatchObject({
+      status: "success",
+      totalTargets: f.studentCount,
+      clonedCount: f.studentCount,
+      failedCount: 0
+    });
+    const snapshot = () =>
+      Object.fromEntries(
+        fs
+          .readdirSync(destination, { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => {
+            const file = path.join(entry.parentPath, entry.name);
+            return [
+              path.relative(destination, file),
+              createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+            ];
+          })
+      );
+    const before = snapshot();
+    const manifestBefore = fs.readFileSync(f.manifestPath, "utf8");
+    const gradingNotes = path.join(
+      path.dirname(path.dirname(path.dirname(path.dirname(f.manifestPath)))),
+      ".graider",
+      "grading",
+      "local-notes.txt"
+    );
+    fs.mkdirSync(path.dirname(gradingNotes), { recursive: true });
+    fs.writeFileSync(gradingNotes, "Existing faculty grading notes");
+    const sourceBefore = await git(f.legacy, ["status", "--porcelain"]);
+    expect(
+      fs.existsSync(path.join(f.cache, "terms", "27s1", "manifests", "lab01", "manifest.yml"))
+    ).toBe(false);
+    const downloadLaunch = f.launches.at(-1);
+    expect(downloadLaunch).toMatchObject({
+      cwd: managed ? f.cache : f.legacy,
+      source: managed ? f.cache : undefined,
+      runtime: managed ? path.join(path.dirname(f.cache), "runtime") : undefined
+    });
+    vi.mocked(createRemoteRepositoryReader).mockImplementation(() => {
+      throw new Error("Offline");
+    });
+    const sync = vi.spyOn(f.deps.session, "withSynchronizedCourse");
+    const authenticate = f.authenticate.mock.calls.length;
+    for (const student of f.students.slice(0, 2)) {
+      expect(await f.open()).toMatchObject({
+        detail: {
+          applyState: { status: "applied" },
+          roster: { activeStudentCount: f.studentCount }
+        }
+      });
+      expect(
+        await f.call(IPC_CHANNELS.prepareGradingWorkspace, {
+          termCode: "27s1",
+          assignmentSlug: "lab01",
+          studentId: student.studentId
+        })
+      ).toMatchObject({
+        status: "success",
+        students: expect.arrayContaining([
+          expect.objectContaining({ studentId: student.studentId })
+        ])
+      });
+    }
+    for (const student of f.students.slice(0, 2)) {
+      expect(
+        await f.call(IPC_CHANNELS.loadGradingStudentSource, {
+          termCode: "27s1",
+          assignmentSlug: "lab01",
+          studentId: student.studentId
+        })
+      ).toMatchObject({ status: "success", studentId: student.studentId });
+    }
+    expect(sync).not.toHaveBeenCalled();
+    expect(f.authenticate).toHaveBeenCalledTimes(authenticate);
+    expect(f.launches.filter((l) => l.command === "detail").every((l) => l.cwd === f.cache)).toBe(
+      true
+    );
+    expect(fs.readFileSync(f.manifestPath, "utf8")).toBe(manifestBefore);
+    expect(snapshot()).toEqual(before);
+    expect(fs.readFileSync(gradingNotes, "utf8")).toBe("Existing faculty grading notes");
+    expect(await git(f.legacy, ["status", "--porcelain"])).toBe(sourceBefore);
+  },
+  DOWNLOAD_GRADING_TIMEOUT_MS
+);
+
+it.each([false, true])(
+  "does not enable grading or download for missing or invalid runtime manifests (managed=%s)",
+  async (managed) => {
+    const f = await fixture(managed);
+    const destination = path.join(f.root, "submissions");
+    expect(await f.open()).toMatchObject({ detail: { applyState: { status: "not_applied" } } });
+    expect(
+      await f.call(IPC_CHANNELS.downloadAssignmentRepositories, { destination })
+    ).toMatchObject({ status: "failure", clonedCount: 0 });
+    f.writeManifest("invalid: manifest\n");
+    expect(await f.open()).toMatchObject({ detail: { applyState: { status: "unknown" } } });
+    expect(
+      await f.call(IPC_CHANNELS.downloadAssignmentRepositories, { destination })
+    ).toMatchObject({ status: "failure", clonedCount: 0 });
+    expect(fs.existsSync(destination)).toBe(false);
+    expect(fs.readFileSync(f.manifestPath, "utf8")).toBe("invalid: manifest\n");
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it.each(["unpublished", "dirty", "hidden-metadata", "source-ahead", "hardlink"] as const)(
+  "does not trust a registered runtime manifest with %s source evidence",
+  async (kind) => {
+    const f = await fixture();
+    f.writeManifest();
+    if (kind === "hardlink") fs.linkSync(f.manifestPath, path.join(f.root, "manifest-link.yml"));
+    else if (kind === "source-ahead") {
+      await f.advance();
+      await git(f.legacy, ["pull", "--ff-only"]);
+    } else {
+      const file = path.join(f.legacy, "course.yml");
+      if (kind === "hidden-metadata")
+        await git(f.legacy, ["update-index", "--assume-unchanged", "course.yml"]);
+      fs.appendFileSync(file, "\n# local faculty metadata\n");
+      if (kind === "unpublished")
+        await git(f.legacy, [
+          "-c",
+          "user.name=Fixture",
+          "-c",
+          "user.email=fixture@example.test",
+          "commit",
+          "-am",
+          "Unpublished"
+        ]);
+    }
+    if (kind === "hardlink") await expect(f.open()).rejects.toThrow();
+    else expect(await f.open()).toMatchObject({ detail: { applyState: { status: "unknown" } } });
+    if (kind !== "hardlink")
+      await expect(
+        f.call(IPC_CHANNELS.prepareGradingWorkspace, { termCode: "27s1", assignmentSlug: "lab01" })
+      ).rejects.toThrow();
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
 
 it(
   "opens every cached assignment with cache A/source B/GitHub B, then refreshes and opens the published addition without restart",
@@ -220,6 +521,7 @@ it.each(["origin", "unauthorized", "cache-origin"] as const)(
   "blocks %s through assignment IPC",
   async (invalid) => {
     const f = await fixture();
+    f.writeManifest();
     if (invalid === "unauthorized") Object.assign(f.course, { authorization: "not_authorized" });
     else
       await git(invalid === "origin" ? f.legacy : f.cache, [

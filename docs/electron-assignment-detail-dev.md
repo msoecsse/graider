@@ -101,6 +101,70 @@ Regression coverage: `registeredAssignmentRead.integration.test.ts` drives the
 production IPC adapter, detail runner/CLI process, and Groups service with bundled
 Git clones and a local bare remote. No live course repository is used.
 
+### Assignment lifecycle runtime evidence
+
+Assignment metadata and assignment runtime state have independent sources. In
+particular, `getAssignmentDetail` remains in `CACHED_LEGACY_METADATA_READ_CHANNELS`;
+removing it would regress cache-first assignment browsing. The former existence-only
+`getApplyState()` checked the cache/runtime path while repository download checked
+the registered legacy path. An untracked legacy manifest could therefore authorize
+a successful download but disappear from the detail view, hiding **Continue grading**
+and leaving **Applied** current instead of complete (regression #64).
+
+The exact manifest locations for term `27s1`, assignment `hw11`, are:
+
+| Operation context                      | Metadata root                | Manifest path                                                     |
+| -------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| Registered legacy download and grading | Registered source            | `<registered-source>/terms/27s1/manifests/hw11/manifest.yml`      |
+| Cached legacy Assignment Detail CLI    | Account-scoped managed cache | `<managed-course>/runtime/terms/27s1/manifests/hw11/manifest.yml` |
+| Cached legacy lifecycle correction     | Verified registered source   | `<registered-source>/terms/27s1/manifests/hw11/manifest.yml`      |
+| Managed download, detail, and grading  | `<managed-course>/source`    | `<managed-course>/runtime/terms/27s1/manifests/hw11/manifest.yml` |
+
+The guard supplies a main-only, read-only lifecycle callback for cached legacy
+Assignment Detail. Before and after reading existing manifest bytes, it performs
+the same local source validation as grading: authorized registration/origin,
+default branch/upstream, exact cached revision, no pending course changes, and
+matching faculty metadata. Unverifiable runtime evidence yields `unknown` while
+safe cached metadata remains readable. Identity or authorization failures still
+block the request. The callback cannot authorize mutations and is never accepted
+from the renderer or serialized as an authorization ticket. No manifest is copied
+from the registered source into the managed cache/runtime.
+
+Both CLI and legacy runtime inspection now parse the manifest with the existing
+v1/v2 validator. Missing files produce `not_applied`; invalid or unsafe evidence
+produces `unknown`. Only valid manifest evidence produces `applied`. Linked or
+special files are rejected. Source/runtime mapping uses native canonical source
+identity so aliases such as macOS `/var` and `/private/var` (or Windows canonical
+directory names) cannot split in-process and CLI runtime lookup. Runtime paths and
+authorization checks remain main-owned.
+
+The IPC regression tests exercise the production process-context wrapper shared
+with `main.ts`, CLI detail, actual download implementation, locator recording,
+workspace preparation, and student source loading. Only student clone transport
+is redirected to local bundled-Git fixtures. They cover 47 successful downloads,
+offline reopening and student switching, source/cache revision mismatch, hidden
+faculty metadata edits, invalid/missing manifests, denied origins/authorization,
+and preservation of all downloaded submissions, manifests, and local grading notes.
+
+### Rebuilding the navigation fix
+
+Rebuild the backend CLI and Electron application from the updated checkout:
+
+```bash
+npm run build
+npm --prefix ui run build:cli
+npm --prefix ui run build
+```
+
+For a replacement macOS arm64 application, use `npm --prefix ui run package:mac`;
+for Windows x64, use `npm --prefix ui run package:win`. These packaging commands
+also rebuild the bundled CLI and UI. Quit the old application and launch the newly
+built application. Development Electron uses the external `graider` CLI on PATH,
+so ensure it resolves to this rebuilt checkout before `npm --prefix ui run dev:electron`.
+Reopen the assignment; no Apply, download, cache reset, course edit, or grading-data
+migration is needed. Use the [packaging guide](electron-packaging.md) for artifacts
+and release signing requirements.
+
 ## Student Repository Access Page
 
 Successful Apply generates or updates a static student-facing page at:

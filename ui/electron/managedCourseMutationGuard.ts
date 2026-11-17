@@ -756,9 +756,9 @@ export class ManagedCourseMutationGuard {
         !localGrading &&
         request !== undefined &&
         CACHED_LEGACY_METADATA_READ_CHANNELS.includes(request.channel);
-      const validateLegacy = async () => {
+      const validateLegacy = async (runtimeEvidence = false) => {
         if (!legacy) return;
-        if (cachedLegacyMetadata) {
+        if (cachedLegacyMetadata && !runtimeEvidence) {
           // The registered path is an identity selector only for these reads. Never
           // read its working files or infer publication from the older cache SHA.
           if (validateManagedStorage(path.dirname(folder.path), folder.path).length)
@@ -810,6 +810,41 @@ export class ManagedCourseMutationGuard {
         assertCurrent();
       };
       await validateLegacy();
+      const readAssignmentApplyState = async () => {
+        const assignment = request?.fields.assignmentFile;
+        const match =
+          typeof assignment === "string" && !assignment.includes("..")
+            ? assignment
+                .replaceAll("\\", "/")
+                .match(
+                  /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u
+                )
+            : null;
+        if (!match) return "unknown" as const;
+        try {
+          // Cached metadata identity checks alone cannot authorize untracked runtime files.
+          // Require the same revision and faculty metadata as local grading, without GitHub.
+          await validateLegacy(true);
+          const state = loadMetadata().readAssignmentApplyState(
+            folder.path,
+            path.join(folder.path, "terms", match[1], "manifests", match[2], "manifest.yml")
+          );
+          await validateLegacy(true);
+          return state;
+        } catch (error) {
+          assertCurrent();
+          if (
+            error instanceof CourseMutationBlocked &&
+            [
+              "operational_source_stale",
+              "operational_source_updateable",
+              "operational_source_unsafe"
+            ].includes(error.result.reason)
+          )
+            return "unknown" as const;
+          throw error;
+        }
+      };
       const revalidateLocal = async () => {
         assertCurrent();
         // Independent cache/source inspections retain all checks while overlapping
@@ -857,6 +892,9 @@ export class ManagedCourseMutationGuard {
             : { mode: "local_read" as const }),
         managed: !legacy || cachedLegacyMetadata,
         ...(cachedLegacyMetadata ? { cachedLegacyMetadata: true as const } : {}),
+        ...(cachedLegacyMetadata && request?.channel === IPC_CHANNELS.getAssignmentDetail
+          ? { readAssignmentApplyState }
+          : {}),
         cachedCommit: local.commit,
         operationalCommit: local.commit,
         sessionGeneration: generation,

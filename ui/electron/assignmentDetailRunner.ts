@@ -167,7 +167,8 @@ export const getAssignmentDetail = async (
   request: AssignmentDetailRequest,
   options: AssignmentDetailRunnerOptions
 ): Promise<AssignmentDetailResult> => {
-  if (managedCourseOperation.getStore()?.mode === "local_read") {
+  const operation = managedCourseOperation.getStore();
+  if (operation?.mode === "local_read") {
     const {
       GRAIDER_GITHUB_TOKEN: _token,
       GITHUB_TOKEN: _fallback,
@@ -186,6 +187,9 @@ export const getAssignmentDetail = async (
         ? null
         : {
             ...result.detail,
+            ...(operation.readAssignmentApplyState
+              ? { applyState: { status: await operation.readAssignmentApplyState() } }
+              : {}),
             diagnostics: result.detail.diagnostics.map((diagnostic) =>
               isRecord(diagnostic) &&
               (diagnostic.code === "github_token_required" ||

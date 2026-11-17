@@ -54,6 +54,15 @@ that local folder changes are excluded. Already-published commits, unpublished
 commits, uncommitted configuration, and untracked manifests in that folder do not
 block these views or become authoritative cached data. Use **Refresh courses** to
 load newly published assignments; no restart or manual cache cleanup is needed.
+
+Assignment lifecycle state also checks the existing local assignment manifest.
+For registered legacy courses this requires the source revision and faculty
+metadata to match the verified cache. A valid manifest restores **Continue grading**
+and marks **Applied** complete, including after downloading student repositories;
+you do not need to Apply again. This check does not contact GitHub or move,
+recreate, or overwrite submissions or grading data. Missing, invalid, or
+unverifiable manifest evidence does not mark Apply complete. Resolve source
+validation problems before grading; do not reapply just to repair navigation.
 Local grading and publication retain their source checks. A stale editor must reload
 before saving against a newer GitHub revision.
 
