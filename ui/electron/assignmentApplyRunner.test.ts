@@ -216,25 +216,51 @@ describe("assignmentApplyRunner", () => {
     );
   });
 
-  it("returns apply JSON from a nonzero partial-success exit", async () => {
-    const apply = createApplyJson("partial_success");
-    const runner = createRunner([
-      createProcessResult({
-        stdout: JSON.stringify(apply),
-        exitCode: PARTIAL_SUCCESS_EXIT_CODE
-      })
-    ]);
+  it.each([PARTIAL_SUCCESS_EXIT_CODE, 3, 4])(
+    "preserves partial Apply diagnostics with nonzero exit %s as transport success",
+    async (exitCode) => {
+      const diagnostic = {
+        code: "workflow_deployment_forbidden",
+        severity: "error",
+        message: "The credential needs authorization to modify workflow files.",
+        context: {
+          operationType: "ensure_managed_grading_workflow",
+          workflowPath: ".github/workflows/grade.yml",
+          repositoryName: "course/lab-ada",
+          remediation:
+            "Authorize workflow-file writes and rerun Apply. Repository creation is retained."
+        }
+      };
+      const apply = {
+        ...createApplyJson("partial_success"),
+        exitCode,
+        diagnostics: [diagnostic],
+        errors: [diagnostic],
+        summary: {
+          created: 1,
+          repositories: [
+            { repository: "course/lab-ada", status: "failed", diagnostics: [diagnostic] }
+          ]
+        }
+      };
+      const runner = createRunner([
+        createProcessResult({
+          stdout: JSON.stringify(apply),
+          exitCode
+        })
+      ]);
 
-    const result = await runAssignmentApplyCommand({
-      request: APPLY_REQUEST,
-      token: "secret-token",
-      runner
-    });
+      const result = await runAssignmentApplyCommand({
+        request: APPLY_REQUEST,
+        token: "secret-token",
+        runner
+      });
 
-    expect(result.status).toBe("success");
-    expect(result.apply).toEqual(apply);
-    expect(result.error).toBeNull();
-  });
+      expect(result.status).toBe("success");
+      expect(result.apply).toEqual(apply);
+      expect(result.error).toBeNull();
+    }
+  );
 
   it("returns failure apply JSON for command failures with usable output", async () => {
     const apply = createApplyJson("failure");

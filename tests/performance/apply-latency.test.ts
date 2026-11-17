@@ -317,7 +317,7 @@ describe(
           status: string;
           diagnostics: { context?: Record<string, unknown> }[];
         }[];
-        expect(outcomes[0]?.status).toBe("created");
+        expect(outcomes[0]?.status).toBe(scenario === "transient" ? "created" : "failed");
         const checkpoint = loadManifest(createManifestPath(cwd, "27s1", "lab04").absolutePath);
         expect(checkpoint.manifest?.repositories).toHaveLength(STUDENTS);
         expect(transport.calls.filter((call) => call === actions)).toHaveLength(

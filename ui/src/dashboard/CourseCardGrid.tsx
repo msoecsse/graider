@@ -74,7 +74,7 @@ const getRepositoryLabel = (assignment: RecentAssignmentSummary): string => {
   }
 
   if (assignment.applyState === "partially_applied") {
-    return "Repositories partially created";
+    return "Repository setup incomplete";
   }
 
   return "Repository status unavailable";

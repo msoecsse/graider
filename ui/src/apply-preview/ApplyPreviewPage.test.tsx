@@ -1042,6 +1042,84 @@ describe("ApplyPreviewPage", () => {
     expect(within(globalPanel!).queryByText(failedIssue.message)).toBeNull();
   });
 
+  it.each([
+    ["success", 0, "Apply completed successfully. The plan below reflects what happened."],
+    [
+      "partial_success",
+      3,
+      "Apply partially completed and requires attention. Review the repository diagnostics, then rerun Apply to finish setup."
+    ],
+    ["failure", 4, "Apply failed. Review the diagnostics before retrying."]
+  ] as const)(
+    "distinguishes %s from transport completion after managed workflow rejection",
+    async (status, exitCode, message) => {
+      const workflowIssue = {
+        code: "workflow_deployment_forbidden",
+        severity: "error",
+        message: "The credential needs authorization to modify workflow files.",
+        context: {
+          operationType: "ensure_managed_grading_workflow",
+          repositoryName: "graider-sandbox/csc1120-lab02-ada",
+          student_id: "s001",
+          workflowPath: ".github/workflows/grade.yml",
+          remediation:
+            "Authorize workflow-file writes, then rerun Apply. Repository creation is retained."
+        }
+      };
+      const diagnostics = status === "success" ? [] : [workflowIssue];
+      mockGraiderUI({
+        getAssignmentApplyPreview: vi
+          .fn()
+          .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+        applyAssignment: vi.fn().mockResolvedValue(
+          createApplyResult(
+            createApplyJson({
+              status,
+              exitCode,
+              diagnostics,
+              errors: diagnostics,
+              summary: {
+                created: 1,
+                repositories: [
+                  {
+                    studentId: "s001",
+                    githubUsername: "ada",
+                    section: "001",
+                    repository: "graider-sandbox/csc1120-lab02-ada",
+                    status: status === "success" ? "created" : "failed",
+                    reason: status === "success" ? "repository_created" : "repository_apply_failed",
+                    diagnostics
+                  }
+                ]
+              }
+            }),
+            { status: status === "failure" ? "failure" : "success" }
+          )
+        )
+      });
+      renderApplyPreviewPage();
+      fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+      fireEvent.click(
+        screen.getByLabelText("I understand this will apply changes to student repositories")
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      const row = within(screen.getByRole("table", { name: "Repository rows" }))
+        .getAllByRole("row")
+        .find((entry) => entry.textContent?.includes("ada"));
+      expect(row).toBeDefined();
+      expect(
+        within(row!).getByText(status === "success" ? "Created" : "Failed")
+      ).toBeInTheDocument();
+      if (status !== "success") {
+        expect(within(row!).queryByText("Created")).toBeNull();
+        expect(within(row!).getByText("Workflow: .github/workflows/grade.yml")).toBeInTheDocument();
+        expect(within(row!).getByText(workflowIssue.message)).toBeInTheDocument();
+        expect(within(row!).getByText(workflowIssue.context.remediation)).toBeInTheDocument();
+      }
+    }
+  );
+
   it("renders partial success and failure diagnostics safely", async () => {
     mockGraiderUI({
       getAssignmentApplyPreview: vi

@@ -407,6 +407,9 @@ const RowDiagnostics = ({
           {diagnostic.context.operationType === undefined ? null : (
             <span>Operation: {formatApplyOperationLabel(diagnostic.context.operationType)}</span>
           )}
+          {diagnostic.context.workflowPath === undefined ? null : (
+            <code>Workflow: {diagnostic.context.workflowPath}</code>
+          )}
           {diagnostic.context.endpoint === undefined ? null : (
             <code>
               {diagnostic.context.requestMethod ?? "GET"} {diagnostic.context.endpoint}
@@ -1014,7 +1017,11 @@ export const ApplyPreviewPage = ({
         <p className="preview-only-notice">
           {normalizedApplyResult === null
             ? "Preview only — no repositories or files will be changed."
-            : "Apply has finished. The plan below reflects what happened."}
+            : normalizedApplyResult.status === "success"
+              ? "Apply completed successfully. The plan below reflects what happened."
+              : normalizedApplyResult.status === "partial_success"
+                ? "Apply partially completed and requires attention. Review the repository diagnostics, then rerun Apply to finish setup."
+                : "Apply failed. Review the diagnostics before retrying."}
         </p>
         <p className="assignment-detail__path">
           Assignment file: {preview?.files.assignmentFile ?? selection.assignmentFile}

@@ -125,6 +125,7 @@ const revealExistingSection = (headingId: string, detailsId?: string): void => {
 interface AssignmentLifecycleStripInput {
   readonly activeStudentCount: number;
   readonly isApplied: boolean;
+  readonly isPartiallyApplied: boolean;
   readonly gradingDoneCount: number;
   readonly publishedCount: number;
   readonly unknownStatusCount: number;
@@ -143,7 +144,11 @@ const buildAssignmentLifecycleSteps = (
   const gradingDone = input.isApplied && (total === 0 || input.gradingDoneCount >= total);
   const publishedDone = gradingDone && (total === 0 || input.publishedCount >= total);
 
-  const appliedState: LifecycleStepState = input.isApplied ? "complete" : "current";
+  const appliedState: LifecycleStepState = input.isPartiallyApplied
+    ? "blocked"
+    : input.isApplied
+      ? "complete"
+      : "current";
   const gradingState: LifecycleStepState = !input.isApplied
     ? "upcoming"
     : gradingDone
@@ -160,7 +165,9 @@ const buildAssignmentLifecycleSteps = (
     {
       id: "applied",
       label: "Applied",
-      detail: `${total} repositor${total === 1 ? "y" : "ies"}`,
+      detail: input.isPartiallyApplied
+        ? "Setup requires attention"
+        : `${total} repositor${total === 1 ? "y" : "ies"}`,
       state: appliedState
     },
     {
@@ -1204,30 +1211,34 @@ export const AssignmentDetailPage = ({
             variant: "blocked",
             onClick: () => revealExistingSection("assignment-readiness-title")
           }
-        : detail.applyState.status === "applied" || detail.applyState.status === "partially_applied"
+        : detail.applyState.status === "partially_applied"
           ? {
-              label: "Continue grading",
-              onClick: () => {
-                onPreviewGrade(selection, detail, loadResult);
-              }
+              label: "Finish Apply",
+              onClick: () => onPreviewApply(selection, detail, loadResult)
             }
-          : {
-              label: `Apply to ${detail.roster?.activeStudentCount ?? 0} student${
-                (detail.roster?.activeStudentCount ?? 0) === 1 ? "" : "s"
-              }`,
-              onClick: () => {
-                onPreviewApply(selection, detail, loadResult);
+          : detail.applyState.status === "applied"
+            ? {
+                label: "Continue grading",
+                onClick: () => {
+                  onPreviewGrade(selection, detail, loadResult);
+                }
               }
-            };
+            : {
+                label: `Apply to ${detail.roster?.activeStudentCount ?? 0} student${
+                  (detail.roster?.activeStudentCount ?? 0) === 1 ? "" : "s"
+                }`,
+                onClick: () => {
+                  onPreviewApply(selection, detail, loadResult);
+                }
+              };
 
   const assignmentLifecycleSteps: readonly LifecycleStep[] =
     detail === null
       ? []
       : buildAssignmentLifecycleSteps({
           activeStudentCount: detail.roster?.activeStudentCount ?? 0,
-          isApplied:
-            detail.applyState.status === "applied" ||
-            detail.applyState.status === "partially_applied",
+          isApplied: detail.applyState.status === "applied",
+          isPartiallyApplied: detail.applyState.status === "partially_applied",
           gradingDoneCount:
             gradingLifecycleResult?.status === "success"
               ? gradingLifecycleResult.gradingDoneCount

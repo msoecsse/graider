@@ -57,8 +57,8 @@ load newly published assignments; no restart or manual cache cleanup is needed.
 
 Assignment lifecycle state also checks the existing local assignment manifest.
 For registered legacy courses this requires the source revision and faculty
-metadata to match the verified cache. A valid manifest restores **Continue grading**
-and marks **Applied** complete, including after downloading student repositories;
+metadata to match the verified cache. A valid manifest without Apply errors restores
+**Continue grading** and marks **Applied** complete, including after downloading student repositories;
 you do not need to Apply again. This check does not contact GitHub or move,
 recreate, or overwrite submissions or grading data. Missing, invalid, or
 unverifiable manifest evidence does not mark Apply complete. Resolve source
@@ -319,8 +319,13 @@ conservative: it does not overwrite unmanaged or unsupported workflow content.
 Use the explicit workflow-replacement actions when replacement is intended.
 
 After Apply, the repository table shows the recorded outcomes and refreshes its
-read-only preview automatically. **Created with issues** means creation succeeded
-but permissions, Actions, or grading setup need attention. Each issue identifies
+read-only preview automatically. **Apply partially completed and requires
+attention** means required setup remains incomplete. An affected repository row
+shows **Failed**, even if repository creation succeeded; its identity and completed
+setup remain saved for safe reapplication. Reopening Assignment Detail shows
+**Finish Apply** and an incomplete **Applied** step until recovery succeeds;
+the Dashboard identifies incomplete repository setup. **Created with issues** can indicate
+warnings such as a pending invitation. Each issue identifies
 the operation, endpoint when available, and recovery guidance. A failed refresh
 does not replace those outcomes. A row without a confirmed outcome shows
 **Unknown**, never the old **Would create** status as its final result.
@@ -329,7 +334,10 @@ GitHub can briefly return 404 for a newly created repository's Actions settings
 or a newly installed workflow. Graider waits within a bounded window; persistent
 404s and authorization failures remain visible. Check repository administration
 access, GitHub sign-in permissions and organization Actions policy as directed,
-then rerun Apply to finish the tracked setup. Existing repositories are retained.
+then rerun Apply to finish the tracked setup. A workflow-file permission failure
+requires a credential authorized to modify workflow files as well as repository
+contents; follow the [token permission guidance](github-token-permissions.md).
+Existing repositories and valid managed workflows are retained.
 An invitation warning means the student must accept the repository invitation.
 Confirm required permissions and grading checks before sharing repository links.
 

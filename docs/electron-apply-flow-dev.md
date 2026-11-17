@@ -413,10 +413,11 @@ Blocked
 ```
 
 Individual rows also carry a stable machine `reason` and target-scoped
-`diagnostics`. A durable `created` or `updated` status is not replaced by
-`failed` when a later target operation fails. The UI derives **Created with
-issues** or **Updated with issues** when those successful outcomes have error
-diagnostics, and renders the operation diagnostic beside the row. Older result
+`diagnostics`. A later required-operation error takes precedence over `created`
+or `updated`: the row reports `failed`, while the aggregate creation count and
+durable manifest identity preserve successful creation for safe recovery.
+Warnings can still produce **Created with issues** or **Updated with issues**.
+The operation diagnostic, workflow path and remediation appear beside the row. Older result
 payloads without the optional fields remain parseable and receive a safe
 status-derived reason.
 
@@ -429,6 +430,14 @@ The Apply Result Summary renders usable backend JSON for:
 - `success`
 - `partial_success`
 - `failure`
+
+The Electron runner treats valid `partial_success` JSON as transport success,
+including a nonzero authorization or GitHub exit code. Consumers must read
+`apply.status` for the application outcome. The UI explicitly announces complete,
+partial (requiring attention), or failed Apply; transport success never means
+all required assignment setup completed. Persisted Apply-operation errors yield
+`partially_applied` when reopening Assignment Detail or Dashboard. Assignment
+Detail offers **Finish Apply** and leaves its Applied lifecycle step incomplete.
 
 When present, the UI shows command status, exit code, applied timestamp,
 assignment file, manifest file, generated files, repository counts, and

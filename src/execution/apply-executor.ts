@@ -371,10 +371,14 @@ const createWorkflowDeploymentForbiddenDiagnostic = (operation: PlanOperation): 
   attachOperationContext(
     createConfigDiagnostic(
       DiagnosticCode.WorkflowDeploymentForbidden,
-      `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. Check the token's workflow-file write permission.`
+      `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. The credential needs authorization to modify workflow files.`
     ),
     operation,
-    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
+    {
+      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+      remediation:
+        "Authorize the credential for repository Contents and workflow-file writes, including any required organization approval, then rerun Apply. Repository creation is retained."
+    }
   );
 
 const operationTargetKey = (operation: PlanOperation): string =>
@@ -573,6 +577,70 @@ const recordError = (state: ApplyState, diagnostic: Diagnostic): ApplyState => (
     errors: state.summary.errors + 1
   }
 });
+
+/** Replace diagnostics only for the operation just attempted; retain unrelated evidence. */
+const checkpointOperationDiagnostics = (
+  input: ApplyExecutionContext,
+  state: ApplyState,
+  operation: PlanOperation,
+  warningsBefore: number,
+  errorsBefore: number
+): ApplyState => {
+  const matchesOperation = (diagnostic: Diagnostic): boolean =>
+    diagnostic.context?.repositoryName === operation.repository_name &&
+    (diagnostic.context?.operationType === operation.type ||
+      (isRepositoryCreationOperation(operation) &&
+        diagnostic.context?.operationType === "verify_repository_baseline"));
+  const warnings = state.warnings.slice(warningsBefore);
+  const errors = state.errors.slice(errorsBefore);
+  // A failed checkpoint must block later writes rather than trigger another checkpoint.
+  if (errors.some((diagnostic) => diagnostic.code === DiagnosticCode.ManifestWriteFailed))
+    return state;
+  const record = findManifestRecord(input, state.manifest, operation);
+  if (
+    warnings.length === EMPTY_COUNT &&
+    errors.length === EMPTY_COUNT &&
+    ![
+      ...state.manifest.warnings,
+      ...state.manifest.errors,
+      ...(record?.warnings ?? []),
+      ...(record?.errors ?? [])
+    ].some(matchesOperation)
+  )
+    return state;
+
+  const manifest = {
+    ...state.manifest,
+    warnings: [
+      ...state.manifest.warnings.filter((diagnostic) => !matchesOperation(diagnostic)),
+      ...warnings
+    ],
+    errors: [
+      ...state.manifest.errors.filter((diagnostic) => !matchesOperation(diagnostic)),
+      ...errors
+    ]
+  };
+  return persistManifest(
+    {
+      ...state,
+      manifest:
+        record === undefined
+          ? manifest
+          : upsertRepositoryRecord(manifest, {
+              ...record,
+              warnings: [
+                ...record.warnings.filter((diagnostic) => !matchesOperation(diagnostic)),
+                ...warnings
+              ],
+              errors: [
+                ...record.errors.filter((diagnostic) => !matchesOperation(diagnostic)),
+                ...errors
+              ]
+            })
+    },
+    input.manifestPath
+  );
+};
 
 const incrementSummary = (state: ApplyState, key: keyof ApplySummary): ApplyState => ({
   ...state,
@@ -1072,7 +1140,9 @@ const executeVerifyWorkflow = async (
       normalizeGitHubError(error, operation, {
         workflowPath,
         endpoint: WORKFLOW_ENDPOINT,
-        requestMethod: "GET"
+        requestMethod: "GET",
+        remediation:
+          "Check the workflow file and Actions access, then rerun Apply to verify. Repository creation is retained."
       })
     );
   }
@@ -1145,7 +1215,9 @@ const executeVerifyDispatch = async (
       normalizeGitHubError(error, operation, {
         workflowPath,
         endpoint: WORKFLOW_ENDPOINT,
-        requestMethod: "GET"
+        requestMethod: "GET",
+        remediation:
+          "Check the workflow_dispatch trigger and Actions access, then rerun Apply to verify. Repository creation is retained."
       })
     );
   }
@@ -1217,7 +1289,9 @@ const executeEnsureManagedWorkflow = async (
       error instanceof WorkflowDeploymentPermissionError
         ? createWorkflowDeploymentForbiddenDiagnostic(operation)
         : normalizeGitHubError(error, operation, {
-            workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH
+            workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+            remediation:
+              "Review the GitHub error and repository access, then rerun Apply to install or verify the managed workflow. Repository creation is retained."
           })
     );
   }
@@ -1361,6 +1435,7 @@ export const executeApplyPlan = async (
     const warningsBefore = state.warnings.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;
+    const skippedBefore = state.summary.skipped;
     state = await measureApplyPhase(operationPhase(operation), () =>
       executeOperation(
         input,
@@ -1394,6 +1469,10 @@ export const executeApplyPlan = async (
           )
       ]
     };
+
+    if (operation.status === "planned" && state.summary.skipped === skippedBefore) {
+      state = checkpointOperationDiagnostics(input, state, operation, warningsBefore, errorsBefore);
+    }
 
     if (
       operation.target_id !== undefined &&
@@ -1440,14 +1519,13 @@ export const executeApplyPlan = async (
       .map((target) => {
         const outcome = repositoryOutcomes.get(target.targetId);
         const diagnostics = [...target.diagnostics, ...(outcome?.diagnostics ?? [])];
-        const status: ApplyRepositoryOutcomeStatus =
-          outcome?.created === true
+        const status: ApplyRepositoryOutcomeStatus = hasErrorDiagnostic(diagnostics)
+          ? "failed"
+          : outcome?.created === true
             ? "created"
             : outcome?.updated === true
               ? "updated"
-              : hasErrorDiagnostic(diagnostics)
-                ? "failed"
-                : "skipped";
+              : "skipped";
 
         return {
           studentId: target.primaryStudentId ?? target.targetId,

@@ -526,15 +526,30 @@ Useful fields include:
 
 `generatedFiles` includes the manifest path when a manifest was written.
 
-Individual `summary.repositories` rows report durable creation/update separately
-from setup diagnostics. A `created` row with `repository_created_with_issues`
-means the repository exists but required setup failed; inspect its diagnostics
-before sharing it. Diagnostics carry `operationType` for creation, collaborator
+Individual `summary.repositories` rows report `failed` with
+`repository_apply_failed` whenever a required operation fails, even after
+successful creation or updates. `summary.created` still counts successful
+creation, and the manifest retains repository identity and completed setup for
+safe reapplication. A partial Apply returns `partial_success` and a nonzero
+exit code (authorization and GitHub error exit codes retain precedence).
+Warnings alone may produce `created` with `repository_created_with_issues`.
+Diagnostics carry `operationType` for creation, collaborator
 or faculty-team access, Actions configuration, workflow installation, and
 workflow/dispatch verification. Endpoint-bearing errors include a fixed
 `endpoint` template and `requestMethod`, never a raw request URL or headers.
 `remediation` provides recovery guidance. A baseline read failure after creation
 uses `verify_repository_baseline`, preserving the creation checkpoint.
+
+Apply checkpoints operation diagnostics in the existing manifest-level and
+repository-level `warnings`/`errors` fields. A new attempt replaces diagnostics
+only for the attempted operation and repository; successful recovery clears
+those diagnostics without clearing unrelated evidence. A failed workflow write
+skips workflow verification, so absent verification fields mean unverified,
+not successful. Existing observation fields remain historical observations.
+The legacy individual Apply executor does not append `operation_history`;
+its empty array is not evidence of success. Assignment Detail and Dashboard use
+`partially_applied` when persisted Apply-operation errors remain. No manifest
+schema change is needed.
 
 Fresh individual repository Actions reads and recently installed workflow
 indexing reads allow four attempts with 1, 2 and 4 second waits (seven seconds

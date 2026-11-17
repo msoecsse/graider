@@ -608,6 +608,28 @@ const createDeferred = <T,>(): {
 };
 
 describe("DashboardPage", () => {
+  it("shows incomplete repository setup for a persisted partial Apply", async () => {
+    const card = {
+      ...COURSE_TERM_CARD,
+      recentAssignments: [
+        {
+          ...COURSE_TERM_CARD.recentAssignments[0],
+          applyState: "partially_applied"
+        }
+      ]
+    };
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult({}, [card])]))
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText("Repository setup incomplete")).toBeInTheDocument();
+    expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Ready")).toBeNull();
+  });
+
   it("opens the comment library through the clicked course-term card", async () => {
     const secondTermCard = {
       ...COURSE_TERM_CARD,

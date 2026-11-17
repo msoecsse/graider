@@ -14,6 +14,7 @@ import {
 import type { GitHubClient } from "../../src/github/github-client.js";
 import type { GitHubTemplateRepository } from "../../src/github/github-models.js";
 import { createManifestPath } from "../../src/manifest/manifest-paths.js";
+import { loadManifest } from "../../src/manifest/manifest-loader.js";
 import { writeManifest } from "../../src/manifest/manifest-renderer.js";
 import {
   createEmptyManifest,
@@ -611,6 +612,36 @@ describe("graider assignment detail command", () => {
 
     expect(result.applyState).toEqual({ status: "applied" });
   });
+
+  it.each([
+    ["error", "ensure_managed_grading_workflow", "partially_applied"],
+    ["error", "verify_grading_workflow", "partially_applied"],
+    ["error", "verify_workflow_dispatch", "partially_applied"],
+    ["warning", "ensure_managed_grading_workflow", "applied"],
+    ["error", "report", "applied"]
+  ] as const)(
+    "reads persisted %s for %s as %s without changing the manifest",
+    async (severity, operationType, status) => {
+      const cwd = copyFixtureToTemp(REPORT_FIXTURE_ROOT);
+      const manifestPath = createManifestPath(cwd, "27s1", "lab04").absolutePath;
+      const loaded = loadManifest(manifestPath);
+      if (loaded.status !== "loaded") throw new Error("Expected valid fixture manifest.");
+      writeManifest(manifestPath, {
+        ...loaded.manifest,
+        errors: [
+          {
+            code: "test_operation_diagnostic",
+            severity,
+            message: "Operation needs attention.",
+            context: { operationType }
+          }
+        ]
+      });
+      const before = fs.readFileSync(manifestPath, "utf8");
+      expect((await runDetail(cwd)).applyState).toEqual({ status });
+      expect(fs.readFileSync(manifestPath, "utf8")).toBe(before);
+    }
+  );
 
   it("does not mistake an invalid manifest for a completed Apply", async () => {
     const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);

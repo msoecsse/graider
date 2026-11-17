@@ -59,8 +59,11 @@ personal access tokens and GitHub App tokens, grant `Contents: write` and
 tokens, use `repo` together with the `workflow` scope.
 
 If that authority is missing, Apply reports
-`workflow_deployment_forbidden` for the affected repository. Other GitHub
-failures retain their normal diagnostics.
+`workflow_deployment_forbidden` for the affected repository, marks its Apply
+outcome failed, and retains the repository for recovery. Authorize the credential
+to modify workflow files, including any required organization approval, then
+rerun Apply. Other GitHub failures retain their normal diagnostics; a rejected
+write alone does not establish which credential source or permission caused it.
 
 ### `grade`
 

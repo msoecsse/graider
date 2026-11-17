@@ -174,8 +174,8 @@ describe("apply recovery", () => {
     }
     expect(firstOutcome).toMatchObject({
       repository: JONES_REPOSITORY,
-      status: "created",
-      reason: "repository_created_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     const diagnostics: unknown = Reflect.get(firstOutcome, "diagnostics");
     expect(JSON.stringify(diagnostics)).toContain('"operationType":"add_student_collaborator"');

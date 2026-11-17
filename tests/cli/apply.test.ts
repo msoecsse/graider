@@ -1,7 +1,12 @@
 import fs from "node:fs";
+import { buildDashboard } from "../../src/dashboard/dashboard-builder.js";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  runAssignmentDetailCommand,
+  runAssignmentApplyCommand
+} from "../../src/cli/commands/assignment.command.js";
 import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
 import { FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS } from "../../src/execution/apply-executor.js";
 import { formatCommandResultAsJson } from "../../src/cli/output.js";
@@ -601,6 +606,203 @@ describe("graider apply command", () => {
     expect(client.workflowReads.filter((read) => read.repo === JONES_REPOSITORY)).toEqual([]);
   });
 
+  it.each([
+    ["legacy", runApplyCommand, false],
+    ["assignment", runAssignmentApplyCommand, false],
+    ["legacy with existing repository", runApplyCommand, true],
+    ["assignment with existing repository", runAssignmentApplyCommand, true]
+  ] as const)(
+    "%s retains failed workflow setup and recovers without recreating repositories",
+    async (_label, apply, existing) => {
+      const cwd = copyFixtureToTemp("active-assignment");
+      configureAssignmentPresetGrading(cwd);
+      const client = createReadyClient(existing ? [createRepository(JONES_REPOSITORY)] : []);
+      if (existing) writeTrackedManifest(cwd, JONES_REPOSITORY);
+      const fakeToken = "ghp_workflow_regression_fake_token";
+      vi.spyOn(client, "writeRepositoryFile").mockRejectedValueOnce(
+        new GitHubClientError("permission_denied", `Rejected credential ${fakeToken}`, {
+          statusCode: 403
+        })
+      );
+      const request = {
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        options: jsonYesOptions,
+        githubClient: client,
+        clock: fixedClock,
+        retryOptions: { sleep: async () => {} }
+      };
+
+      const first = await apply(request);
+      expect(first.status).toBe("partial_success");
+      expect(first.exitCode).toBe(ExitCode.AuthenticationOrAuthorizationFailure);
+      expect(first.summary.created).toBe(existing ? 1 : 2);
+      expect(getRepositoryOutcomes(first)).toContainEqual(
+        expect.objectContaining({
+          repository: JONES_REPOSITORY,
+          status: "failed",
+          reason: "repository_apply_failed"
+        })
+      );
+      const diagnostic = first.errors.find(
+        (error) => error.code === "workflow_deployment_forbidden"
+      );
+      expect(diagnostic).toMatchObject({
+        context: {
+          operationType: "ensure_managed_grading_workflow",
+          repositoryName: JONES_REPOSITORY,
+          workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH
+        }
+      });
+      expect(diagnostic?.context?.remediation).toMatch(/authoriz.*workflow/iu);
+      expect(formatCommandResultAsJson(first)).not.toMatch(/authorization:|Bearer |ghp_/u);
+      const manifest = loadWrittenManifest(cwd).manifest;
+      expect(manifest?.schemaVersion).toBe(1);
+      const record = manifest?.repositories.find(
+        (entry) => entry.repository.name === JONES_REPOSITORY
+      );
+      expect(record).toMatchObject({
+        repository: { name: JONES_REPOSITORY },
+        permissions: { student: { permission: "admin" }, facultyTeam: { permission: "admin" } },
+        actions: { enabled: true },
+        lifecycle: { status: "created" },
+        errors: [diagnostic]
+      });
+      expect(record?.actions.gradingWorkflowFound).toBeUndefined();
+      expect(manifest?.errors).toContainEqual(diagnostic);
+      expect(
+        fs.readFileSync(createManifestPath(cwd, "27s1", "lab04").absolutePath, "utf8")
+      ).not.toContain(fakeToken);
+      expect(client.workflowReads.filter((read) => read.repo === JONES_REPOSITORY)).toEqual([]);
+      await expect(
+        client.getRepositoryFileContent(
+          ORGANIZATION,
+          JONES_REPOSITORY,
+          GRAIDER_MANAGED_WORKFLOW_PATH,
+          TEMPLATE_BRANCH
+        )
+      ).resolves.toBeNull();
+      expect(client.mutations.addedCollaborators).toHaveLength(2);
+      expect(client.mutations.teamPermissions).toHaveLength(2);
+      expect(client.mutations.enabledActions).toHaveLength(2);
+      expect((await runAssignmentDetailCommand({ ...request, env: {} })).applyState?.status).toBe(
+        "partially_applied"
+      );
+      const dashboard = await buildDashboard({ cwd, githubClient: client });
+      expect(
+        dashboard.cards[0]?.assignments.find((assignment) => assignment.slug === "lab04")
+          ?.applyState
+      ).toBe("partially_applied");
+      expect(
+        dashboard.cards[0]?.assignments.find((assignment) => assignment.slug === "lab04")
+          ?.needsAttention
+      ).toBe(true);
+      expect(dashboard.cards[0]?.needsAttention).toBe(true);
+      const createdCount = client.mutations.createdRepositories.length;
+      const writesBeforeRecovery = [...client.mutations.fileWrites];
+      if (manifest === undefined) throw new Error("Expected saved manifest.");
+      const unrelatedWarning = {
+        code: "historical_report_warning",
+        severity: "warning" as const,
+        message: "Prior report observation.",
+        context: { operationType: "report", repositoryName: JONES_REPOSITORY }
+      };
+      writeManifest(createManifestPath(cwd, "27s1", "lab04").absolutePath, {
+        ...manifest,
+        warnings: [...manifest.warnings, unrelatedWarning],
+        repositories: manifest.repositories.map((entry) =>
+          entry.repository.name === JONES_REPOSITORY
+            ? { ...entry, warnings: [...entry.warnings, unrelatedWarning] }
+            : entry
+        )
+      });
+      client.failNext("writeRepositoryFile", "permission_denied", { statusCode: 403 });
+      expect((await apply(request)).status).toBe("partial_success");
+      expect(loadWrittenManifest(cwd).manifest?.errors).toEqual([diagnostic]);
+      expect(client.mutations.createdRepositories).toHaveLength(createdCount);
+
+      const second = await apply(request);
+      expect(second.status).toBe("success");
+      expect(second.exitCode).toBe(ExitCode.Success);
+      expect(second.summary.created).toBe(0);
+      expect(client.mutations.createdRepositories).toHaveLength(createdCount);
+      expect(client.mutations.fileWrites).toEqual([
+        ...writesBeforeRecovery,
+        expect.objectContaining({ repo: JONES_REPOSITORY, path: GRAIDER_MANAGED_WORKFLOW_PATH })
+      ]);
+      const recovered = loadWrittenManifest(cwd).manifest;
+      expect(recovered?.errors).toEqual([]);
+      expect(recovered?.warnings).toEqual([unrelatedWarning]);
+      expect(
+        recovered?.repositories.find((entry) => entry.repository.name === JONES_REPOSITORY)
+          ?.warnings
+      ).toEqual([unrelatedWarning]);
+      expect(recovered?.operationHistory).toEqual([]);
+      expect((await runAssignmentDetailCommand({ ...request, env: {} })).applyState?.status).toBe(
+        "applied"
+      );
+      expect(
+        (await buildDashboard({ cwd, githubClient: client })).cards[0]?.assignments.find(
+          (assignment) => assignment.slug === "lab04"
+        )?.applyState
+      ).toBe("applied");
+      expect(
+        recovered?.repositories.find((entry) => entry.repository.name === JONES_REPOSITORY)
+      ).toMatchObject({
+        errors: [],
+        actions: { enabled: true, gradingWorkflowFound: true, workflowDispatchSupported: true }
+      });
+      expect((await apply(request)).status).toBe("success");
+      expect(client.mutations.createdRepositories).toHaveLength(createdCount);
+      expect(client.mutations.fileWrites).toHaveLength(writesBeforeRecovery.length + 1);
+    }
+  );
+
+  it("reports an unverified managed workflow as failed and verifies it on reapply without rewriting it", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureAssignmentPresetGrading(cwd);
+    const client = createReadyClient();
+    const verification = vi.spyOn(client, "getWorkflow").mockResolvedValue(null);
+    const request = {
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonYesOptions,
+      githubClient: client,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    };
+    const first = await runAssignmentApplyCommand(request);
+    expect(first.status).toBe("partial_success");
+    expect(first.exitCode).not.toBe(ExitCode.Success);
+    expect(getRepositoryOutcomes(first)).toEqual([
+      expect.objectContaining({ repository: JONES_REPOSITORY, status: "failed" }),
+      expect.objectContaining({ repository: PATEL_REPOSITORY, status: "failed" })
+    ]);
+    const saved = loadWrittenManifest(cwd).manifest;
+    expect(saved?.errors).toEqual(first.errors);
+    expect(saved?.repositories[0]).toMatchObject({
+      actions: { enabled: true, gradingWorkflowFound: false, workflowDispatchSupported: false }
+    });
+    expect(saved?.repositories[0]?.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "grading_workflow_missing" }),
+        expect.objectContaining({ code: "workflow_dispatch_unsupported" })
+      ])
+    );
+    const createdCount = client.mutations.createdRepositories.length;
+    const workflowWrites = [...client.mutations.fileWrites];
+    verification.mockRestore();
+    const second = await runAssignmentApplyCommand(request);
+    expect(second.status).toBe("success");
+    expect(client.mutations.createdRepositories).toHaveLength(createdCount);
+    expect(client.mutations.fileWrites).toEqual(workflowWrites);
+    expect(loadWrittenManifest(cwd).manifest?.errors).toEqual([]);
+    expect(loadWrittenManifest(cwd).manifest?.repositories[0]).toMatchObject({
+      actions: { gradingWorkflowFound: true, workflowDispatchSupported: true },
+      errors: []
+    });
+  });
+
   it("reports workflow-file permission denial without relabeling other GitHub failures", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     removeAssignmentTemplate(cwd);
@@ -625,8 +827,8 @@ describe("graider apply command", () => {
       (outcome) => outcome.repository === JONES_REPOSITORY
     );
     expect(jonesOutcome).toMatchObject({
-      status: "created",
-      reason: "repository_created_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     expect(
       hasOutcomeDiagnostic(jonesOutcome, "workflow_deployment_forbidden", {
@@ -1044,8 +1246,8 @@ describe("graider apply command", () => {
     expect(result.summary.repositories).toEqual([
       expect.objectContaining({
         repository: JONES_REPOSITORY,
-        status: "created",
-        reason: "repository_created_with_issues"
+        status: "failed",
+        reason: "repository_apply_failed"
       })
     ]);
     expect(githubClient.mutations.createdRepositories).toHaveLength(1);
@@ -1109,7 +1311,7 @@ describe("graider apply command", () => {
     }
   );
 
-  it("keeps Created and attaches collaborator context when post-create access setup fails", async () => {
+  it("reports Failed and retains creation when post-create access setup fails", async () => {
     const githubClient = createReadyClient();
     githubClient.failTimes("addCollaborator", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS, {
       statusCode: 500
@@ -1122,8 +1324,8 @@ describe("graider apply command", () => {
     const collaboratorOutcome = getRepositoryOutcomes(result)[0];
     expect(collaboratorOutcome).toMatchObject({
       repository: JONES_REPOSITORY,
-      status: "created",
-      reason: "repository_created_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     expect(
       hasOutcomeDiagnostic(collaboratorOutcome, "github_api_error", {
@@ -1211,7 +1413,9 @@ describe("graider apply command", () => {
         teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
       });
       const { cwd, result } = await runApply("grading-disabled", githubClient);
-      expect(getRepositoryOutcomes(result)[0]?.status).toBe("created");
+      expect(getRepositoryOutcomes(result)[0]?.status).toBe(
+        grant === "invitation" ? "created" : "failed"
+      );
       const record = loadWrittenManifest(cwd).manifest?.repositories[0];
       if (grant === "invitation") {
         expect(record?.permissions.student).toMatchObject({
@@ -1259,7 +1463,7 @@ describe("graider apply command", () => {
     ]);
   });
 
-  it("retains Created with an Actions 404 issue after propagation retries exhaust", async () => {
+  it("reports Failed with retained creation after Actions 404 retries exhaust", async () => {
     const githubClient = new ActionsPropagationGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones"].map((username) => ({ username })),
@@ -1275,8 +1479,8 @@ describe("graider apply command", () => {
     expect(githubClient.actionsStateReads).toBe(FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS);
     const actionsOutcome = getRepositoryOutcomes(result)[0];
     expect(actionsOutcome).toMatchObject({
-      status: "created",
-      reason: "repository_created_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     expect(
       hasOutcomeDiagnostic(actionsOutcome, "github_api_error", {
@@ -1304,7 +1508,7 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.createdRepositories).toHaveLength(createdCount);
   });
 
-  it("reports Updated with issues when an existing repository changes before a later failure", async () => {
+  it("reports Failed when an existing repository changes before a later failure", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
     writeTrackedManifest(cwd, JONES_REPOSITORY);
     const githubClient = createReadyClient([createRepository(JONES_REPOSITORY)]);
@@ -1324,8 +1528,8 @@ describe("graider apply command", () => {
     expect(result.status).toBe("partial_success");
     const updateOutcome = getRepositoryOutcomes(result)[0];
     expect(updateOutcome).toMatchObject({
-      status: "updated",
-      reason: "repository_updated_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     expect(
       hasOutcomeDiagnostic(updateOutcome, "github_api_error", {
@@ -1411,8 +1615,8 @@ describe("graider apply command", () => {
       (outcome) => outcome.repository === JONES_REPOSITORY
     );
     expect(workflowOutcome).toMatchObject({
-      status: "created",
-      reason: "repository_created_with_issues"
+      status: "failed",
+      reason: "repository_apply_failed"
     });
     expect(
       hasOutcomeDiagnostic(workflowOutcome, "github_api_error", {

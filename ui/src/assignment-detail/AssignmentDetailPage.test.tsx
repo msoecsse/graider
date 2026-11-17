@@ -706,6 +706,28 @@ describe("AssignmentDetailPage", () => {
     });
   });
 
+  it("keeps partial Apply incomplete and offers recovery after reopening the assignment", async () => {
+    const onPreviewApply = vi.fn();
+    mockGraiderUI({
+      getAssignmentDetail: vi
+        .fn()
+        .mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({ applyState: { status: "partially_applied" } })
+          )
+        )
+    });
+    renderAssignmentDetailPage({ onPreviewApply });
+    fireEvent.click(await screen.findByRole("button", { name: "Finish Apply" }));
+    expect(screen.getByText("Applied").closest("li")).toHaveClass("lifecycle-strip__step--blocked");
+    expect(screen.getByText("Applied").closest("li")).not.toHaveClass(
+      "lifecycle-strip__step--complete"
+    );
+    expect(screen.getByText("Setup requires attention")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue grading" })).toBeNull();
+    expect(onPreviewApply).toHaveBeenCalledTimes(1);
+  });
+
   it("treats partially applied assignments as eligible for template-sync preparation", async () => {
     const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
       available: true,

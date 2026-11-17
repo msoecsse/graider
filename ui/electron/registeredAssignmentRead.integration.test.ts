@@ -19,7 +19,7 @@ import { runAssignmentRepositoryDownload } from "./assignmentRepositoryDownloadR
 import { createGradingWorkspaceService } from "./gradingWorkspaceService.js";
 import { createFacultyScopeService } from "./facultyScopeService.js";
 import { getLocalSettingsPath, saveCurrentFacultyMsoeUsername } from "./localSettings.js";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { createGradingStudentSourceService } from "./gradingStudentSourceService.js";
 import {
   getLocalRepositoryLocatorPath,
@@ -378,6 +378,39 @@ it.each([false, true])(
     expect(await git(f.legacy, ["status", "--porcelain"])).toBe(sourceBefore);
   },
   DOWNLOAD_GRADING_TIMEOUT_MS
+);
+
+it.each([false, true])(
+  "retains partial Apply state through the guarded cached view and clears it after recovery (managed=%s)",
+  async (managed) => {
+    const f = await fixture(managed);
+    f.writeManifest();
+    const saved = parse(fs.readFileSync(f.manifestPath, "utf8")) as Record<string, unknown>;
+    f.writeManifest(
+      stringify({
+        ...saved,
+        diagnostics: [
+          {
+            code: "workflow_deployment_forbidden",
+            severity: "error",
+            message: "Workflow setup requires authorization.",
+            context: {
+              operationType: "ensure_managed_grading_workflow",
+              workflowPath: ".github/workflows/grade.yml"
+            }
+          }
+        ]
+      })
+    );
+    const before = fs.readFileSync(f.manifestPath, "utf8");
+    expect(await f.open()).toMatchObject({
+      detail: { applyState: { status: "partially_applied" } }
+    });
+    expect(fs.readFileSync(f.manifestPath, "utf8")).toBe(before);
+    f.writeManifest();
+    expect(await f.open()).toMatchObject({ detail: { applyState: { status: "applied" } } });
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
 );
 
 it.each([false, true])(

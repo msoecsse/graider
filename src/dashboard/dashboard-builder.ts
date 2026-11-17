@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { readAssignmentApplyState } from "../assignment-detail/assignment-apply-state.js";
 import path from "node:path";
 import {
   resolveEffectiveAssignmentGrading,
@@ -93,7 +94,6 @@ const STATUS_COMPLETED = "completed";
 const STATUS_INACTIVE = "inactive";
 const STATUS_UNKNOWN = "unknown";
 const LEGACY_GRADING_MODE = "custom-workflow";
-const APPLY_STATE_APPLIED: DashboardApplyState = "applied";
 const APPLY_STATE_NOT_APPLIED: DashboardApplyState = "not_applied";
 const APPLY_STATE_UNKNOWN: DashboardApplyState = "unknown";
 const GITHUB_STATUS_AVAILABLE: DashboardGithubStatus = "available";
@@ -522,7 +522,9 @@ const getAssignmentApplyState = (
 ): DashboardApplyState => {
   const manifestPath = createManifestPath(repoRoot, termSlug, assignmentSlug);
 
-  return isFile(manifestPath.absolutePath) ? APPLY_STATE_APPLIED : APPLY_STATE_NOT_APPLIED;
+  return isFile(manifestPath.absolutePath)
+    ? readAssignmentApplyState(repoRoot, manifestPath.absolutePath)
+    : APPLY_STATE_NOT_APPLIED;
 };
 
 const createAssignmentSummary = (
@@ -535,6 +537,11 @@ const createAssignmentSummary = (
   diagnostics: Diagnostic[]
 ): DashboardAssignmentSummary => {
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
+  const applyState = getAssignmentApplyState(
+    repoRoot,
+    assignmentFile.split("/")[1] ?? "",
+    expectedSlug
+  );
 
   return {
     slug: assignmentConfig.assignment.slug,
@@ -542,8 +549,9 @@ const createAssignmentSummary = (
     status: assignmentStatus,
     gradingEnabled: grading.enabled,
     assignmentFile,
-    applyState: getAssignmentApplyState(repoRoot, assignmentFile.split("/")[1] ?? "", expectedSlug),
-    needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT,
+    applyState,
+    needsAttention:
+      applyState === "partially_applied" || getAttentionCount(diagnostics) > EMPTY_COUNT,
     diagnostics,
     ...(grading.enabled
       ? { gradingMode: grading.mode ?? LEGACY_GRADING_MODE }
@@ -590,7 +598,8 @@ const withAssignmentGithubResult = (
 ): DashboardAssignmentSummary => ({
   ...assignment,
   diagnostics: [...diagnostics],
-  needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT,
+  needsAttention:
+    assignment.applyState === "partially_applied" || getAttentionCount(diagnostics) > EMPTY_COUNT,
   github
 });
 
@@ -1105,7 +1114,8 @@ const buildCard = async (
     termSlug: term.termSlug,
     termTitle: getTermTitle(term),
     status: getCardStatus(assignments),
-    needsAttention: attentionCount > EMPTY_COUNT,
+    needsAttention:
+      attentionCount > EMPTY_COUNT || assignments.some((assignment) => assignment.needsAttention),
     attentionCount,
     roster: rosterResult.roster,
     assignmentCount: assignments.length,
