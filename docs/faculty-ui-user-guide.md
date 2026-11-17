@@ -323,8 +323,9 @@ read-only preview automatically. **Apply partially completed and requires
 attention** means required setup remains incomplete. An affected repository row
 shows **Failed**, even if repository creation succeeded; its identity and completed
 setup remain saved for safe reapplication. Reopening Assignment Detail shows
-**Finish Apply** and an incomplete **Applied** step until recovery succeeds;
-the Dashboard identifies incomplete repository setup. **Created with issues** can indicate
+**Finish Apply** and an incomplete **Applied** step until recovery succeeds.
+Use **More assignment actions → Continue grading** to grade existing repositories
+during recovery. The Dashboard identifies incomplete repository setup. **Created with issues** can indicate
 warnings such as a pending invitation. Each issue identifies
 the operation, endpoint when available, and recovery guidance. A failed refresh
 does not replace those outcomes. A row without a confirmed outcome shows

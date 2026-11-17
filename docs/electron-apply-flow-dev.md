@@ -438,6 +438,8 @@ partial (requiring attention), or failed Apply; transport success never means
 all required assignment setup completed. Persisted Apply-operation errors yield
 `partially_applied` when reopening Assignment Detail or Dashboard. Assignment
 Detail offers **Finish Apply** and leaves its Applied lifecycle step incomplete.
+Its existing grading entry remains available under **More assignment actions**
+for partial assignments; recovery does not remove local grading access.
 
 When present, the UI shows command status, exit code, applied timestamp,
 assignment file, manifest file, generated files, repository counts, and

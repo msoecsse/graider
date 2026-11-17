@@ -226,7 +226,7 @@ describe("AssignmentDetailPage header actions", () => {
     assertNoDuplicateAccessibleNames();
   });
 
-  it('treats "partially_applied" the same as applied: "Continue grading"', async () => {
+  it('offers "Finish Apply" for partially applied assignments without marking Applied complete', async () => {
     mockGraiderUI({
       getAssignmentDetail: vi
         .fn()
@@ -238,7 +238,12 @@ describe("AssignmentDetailPage header actions", () => {
     });
     renderAssignmentDetailPage();
 
-    expect(await screen.findByRole("button", { name: "Continue grading" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Finish Apply" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue grading" })).toBeNull();
+    expect(screen.getByText("Applied").closest("li")).toHaveClass("lifecycle-strip__step--blocked");
+    expect(screen.getByText("Applied").closest("li")).not.toHaveClass(
+      "lifecycle-strip__step--complete"
+    );
   });
 
   it.each(["applied", "partially_applied"])(
@@ -269,7 +274,12 @@ describe("AssignmentDetailPage header actions", () => {
         )
       });
       renderAssignmentDetailPage({ onPreviewGrade });
-      fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
+      if (status === "partially_applied") {
+        expect(await screen.findByRole("button", { name: "Finish Apply" })).toBeInTheDocument();
+        await clickOverflowItem("Continue grading");
+      } else {
+        fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
+      }
       expect(onPreviewGrade).toHaveBeenCalledOnce();
       expect(screen.queryByText(/gh auth login/u)).not.toBeInTheDocument();
       expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();

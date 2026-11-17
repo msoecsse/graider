@@ -1314,6 +1314,16 @@ export const AssignmentDetailPage = ({
             id: "grading-setup",
             heading: "Grading setup",
             items: [
+              ...(detail.applyState.status === "partially_applied"
+                ? [
+                    {
+                      id: "continue-grading",
+                      label: "Continue grading",
+                      caption: "Open grading for existing repositories.",
+                      onSelect: () => onPreviewGrade(selection, detail, loadResult)
+                    }
+                  ]
+                : []),
               {
                 id: "regenerate-workflow",
                 label: "Regenerate grading workflow",
