@@ -111,14 +111,16 @@ the registered legacy path. An untracked legacy manifest could therefore authori
 a successful download but disappear from the detail view, hiding **Continue grading**
 and leaving **Applied** current instead of complete (regression #64).
 
-The exact manifest locations for term `27s1`, assignment `hw11`, are:
+Here `<managed-course>` means
+`<userData>/managed-courses/<account-id>/<repository-id>`. For example, the exact
+manifest locations for term `27s1`, assignment slug `hw11`, are:
 
 | Operation context                      | Metadata root                | Manifest path                                                     |
 | -------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | Registered legacy download and grading | Registered source            | `<registered-source>/terms/27s1/manifests/hw11/manifest.yml`      |
 | Cached legacy Assignment Detail CLI    | Account-scoped managed cache | `<managed-course>/runtime/terms/27s1/manifests/hw11/manifest.yml` |
 | Cached legacy lifecycle correction     | Verified registered source   | `<registered-source>/terms/27s1/manifests/hw11/manifest.yml`      |
-| Managed download, detail, and grading  | `<managed-course>/source`    | `<managed-course>/runtime/terms/27s1/manifests/hw11/manifest.yml` |
+| Managed download, detail, and grading  | `<managed-course>/repo`      | `<managed-course>/runtime/terms/27s1/manifests/hw11/manifest.yml` |
 
 The guard supplies a main-only, read-only lifecycle callback for cached legacy
 Assignment Detail. Before and after reading existing manifest bytes, it performs
