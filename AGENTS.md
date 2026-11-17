@@ -19,6 +19,16 @@ For bug fixes, also read:
 Then read only the additional canonical documents named by the current GitHub
 issue. Do not scan broad documentation trees unless the issue requires it.
 
+## Fast iteration and CI handoff
+
+Follow the fast-iteration policy in `agent-workflow-contract.md` (section 6A)
+plus the shared development contract. Prefer focused, change-scoped local
+checks over repeated full suites. Commit and push after required local checks
+pass; let CI handle comprehensive validation without idle polling. A pending
+or red required CI gate is **not** issue completion. Report measured time for
+investigation, implementation, local checks, and external waiting separately;
+never guess missing timings.
+
 ## Model and context policy
 
 Issues use these execution labels:

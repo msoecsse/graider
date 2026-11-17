@@ -165,6 +165,38 @@ Do not run live/destructive GitHub tests, packaging, release workflows, real
 organization mutations, branch deletion, or force operations unless the issue
 explicitly requires them.
 
+## 6A. Fast iteration, CI handoff, and measured time
+
+Keep turnaround short without weakening required validation:
+
+- Restrict investigation to the issue, required contracts, affected files, and
+  their dependencies. Avoid repeated broad searches and unrelated cleanup.
+- During implementation, run focused new/changed tests and affected regression
+  tests. Before committing, make one final relevant local validation pass with
+  the required typechecks, test hygiene, lint/format checks, integration tests,
+  builds, and task-specific checks. Do not routinely duplicate complete root/UI
+  suites locally or repeat already-passing unrelated checks.
+- Honor all issue-required validation, including mandatory migration, security,
+  authorization, Git-safety, and native-platform requirements. Do not weaken,
+  skip, suppress, or bypass any test, CI gate, or dependency audit.
+- Once required **local pre-push** checks pass, commit and push promptly.
+  GitHub Actions owns comprehensive regression and platform verification.
+  Do not idle or repeatedly poll while CI runs unless the issue explicitly
+  requires synchronous CI verification.
+- Treat **pushed / CI pending** as a handoff, not acceptance or issue closure.
+  Report the SHA, CI link if available, pending checks, and next action. Do not
+  claim the task fully validated or close the issue until all required
+  exact-SHA CI checks pass. For a new CI regression, investigate the failing
+  scope with targeted checks; track unrelated baseline failures separately.
+- Record actual wall-clock timestamps at task start and at transitions between
+  investigation, implementation, local validation, and external waiting.
+  Report measured durations for these phases and total elapsed time, separating
+  time spent waiting for GitHub Actions from agent work. If a duration was not
+  measured, say so; never invent timings or equate CI runner time with agent
+  coding time. Avoid introducing scripts or dependencies just for timing.
+- Keep the final report concise: scope and result, checks run and their status,
+  commit SHA, CI status/link, timing, and pending follow-up.
+
 ## 7. Phase boundaries
 
 Each implementation phase ends with a dedicated phase-audit issue.
