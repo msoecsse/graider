@@ -185,38 +185,33 @@ describe("production artifact provenance", () => {
       );
   });
 
-  it("keeps the signing development pause, requires both migration targets and preserves release gates", () => {
+  it("keeps credential-free signing, both migration targets and required release gates", () => {
     const workflow = parse(fs.readFileSync("../.github/workflows/ci.yml", "utf8"));
     expect(workflow.on.push.branches).toEqual(
       expect.arrayContaining(["master", "release/**", "remote-course-v2"])
     );
-    for (const name of ["grading-cache-safety"]) {
+    for (const name of ["grading", "signing", "migration"]) {
       const job = workflow.jobs[name];
-      expect(job.needs).toBeUndefined();
-      const expression = job.strategy.matrix.include.slice(3, -2);
-      for (const [event_name, ref, targets] of [
-        ["push", "refs/heads/remote-course-v2", ["macOS arm64"]],
-        ["push", "refs/heads/master", ["macOS arm64", "Windows x64"]],
-        ["push", "refs/heads/release/1.0", ["macOS arm64", "Windows x64"]],
-        ["pull_request", "refs/pull/1/merge", ["macOS arm64", "Windows x64"]]
-      ] as const) {
-        const rows = runInNewContext(expression, {
-          fromJSON: JSON.parse,
-          github: { event_name, ref }
-        });
-        expect(rows.map((row: { target: string }) => row.target)).toEqual(targets);
-      }
+      expect(job.needs).toBe("select");
+      expect(job.if).toBe(`\u0024{{ needs.select.outputs.${name} == 'true' }}`);
+      expect(job.strategy.matrix.include).toEqual([
+        { runner: "macos-15", architecture: "arm64", target: "macOS arm64" },
+        { runner: "windows-latest", architecture: "x64", target: "Windows x64" }
+      ]);
+      expect(workflow.jobs.required.needs).toContain(name);
     }
-    const migration = workflow.jobs["migration-regression"];
-    expect(migration.needs).toBeUndefined();
-    expect(migration.strategy.matrix.include).toEqual([
-      { runner: "macos-15", architecture: "arm64", target: "macOS arm64" },
-      { runner: "windows-latest", architecture: "x64", target: "Windows x64" }
-    ]);
+    expect(workflow.jobs.required.if).toBe("${{ always() }}");
     expect(
-      migration.steps.some((step: { run?: string }) => step.run === "npm run test:migration")
+      workflow.jobs.signing.steps.some((step: { run?: string }) =>
+        step.run?.includes("electron/macProductionArtifacts.test.ts")
+      )
     ).toBe(true);
-    expect(workflow.jobs["normal-checks"].needs).toBeUndefined();
+    expect(
+      workflow.jobs.migration.steps.some(
+        (step: { run?: string }) => step.run === "npm run test:migration"
+      )
+    ).toBe(true);
+    expect(workflow.jobs.fast.needs).toBe("select");
     const signing = parse(
       fs.readFileSync("../.github/workflows/macos-production-signing.yml", "utf8")
     );

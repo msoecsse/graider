@@ -1,0 +1,30 @@
+name: CI dependency setup
+description: Native Node 24, dual lockfile cache and dependency installation
+inputs:
+  architecture:
+    description: Native Node architecture
+    default: x64
+runs:
+  using: composite
+  steps:
+    - name: Start job timer
+      shell: bash
+      run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_ENV, "CI_STARTED=" + Date.now() + "\n")'
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        architecture: ${{ inputs.architecture }}
+        cache: npm
+        cache-dependency-path: |-
+          package-lock.json
+          ui/package-lock.json
+    - name: Verify native platform and architecture
+      shell: bash
+      env:
+        EXPECTED_ARCH: ${{ inputs.architecture }}
+        EXPECTED_PLATFORM: ${{ runner.os == 'Windows' && 'win32' || runner.os == 'macOS' && 'darwin' || 'linux' }}
+      run: node -e 'if (process.arch !== process.env.EXPECTED_ARCH || process.platform !== process.env.EXPECTED_PLATFORM) process.exit(1)'
+    - shell: bash
+      run: npm ci
+    - shell: bash
+      run: npm ci --prefix ui

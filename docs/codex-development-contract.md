@@ -216,3 +216,96 @@ in addition to scope-required root/UI validation. Both native CI jobs (macOS arm
 and Windows x64) must pass before merging or releasing affected changes. This
 suite remains required after Phase 9. See
 [coverage and failure diagnosis](migration-regression.md).
+
+## Change-aware GitHub Actions CI
+
+`.github/workflows/ci.yml` owns automated CI. Every triggered run performs fast
+feedback: test hygiene, root/UI typechecks, lint, both format checks, both builds,
+CI selection/gate tests, and focused changed-file tests. Vitest `related` follows
+static transitive imports for renderer source changes; changed test files run
+directly. A nonempty focused request finding no tests fails rather than silently
+accepting missing coverage. The fast lane does not install Java or run GUI fixtures.
+
+Development push selection compares the current SHA with the last **successful
+push CI** on the same branch, not merely `github.event.before`. This retains all
+unvalidated changes when earlier runs are cancelled. Both SHAs must exist and the
+baseline must be an ancestor. A failed lookup, missing baseline, invalid/empty diff,
+unsupported record or unknown path selects full regression. Git's NUL-delimited
+`--no-renames --name-status` retains both rename endpoints, spaces and deletions;
+code deletions select full regression. There are no workflow-level path filters.
+
+| Change                                                                                                                        | Additional coverage                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Root/docs Markdown only                                                                                                       | Fast feedback                                                                                 |
+| Explicit renderer feature leaf or root test                                                                                   | Focused tests; native domain jobs as below                                                    |
+| Renderer imports crossing features                                                                                            | Transitive importer domains, including their native jobs                                      |
+| Apply, assignment, planning or execution tests/UI                                                                             | Apply and IPC/security/recovery on both native targets                                        |
+| Grading, reports, comments, dashboard or Review Import tests/UI                                                               | Grading, Apply, IPC/security/recovery and credential-free signing tests on both targets       |
+| Migration, schemas, course/faculty management, authorization, Git, tokens, IPC or reconciliation                              | Complete native migration target plus Apply, grading, IPC/security/recovery and signing tests |
+| Workflow-generation/GUI tests                                                                                                 | Real JavaFX fixtures, plus applicable native jobs                                             |
+| Backend source, shared renderer, fixtures/helpers, dependencies, configuration, CI tooling/workflows, unknown or deleted code | Full regression                                                                               |
+
+The initial allowlist is deliberately small. Backend production changes still
+select full regression because generated Electron bridges, CLI composition and
+shared services cross package/domain boundaries. Do not add a narrow backend rule
+without testing those consumers. Renderer import traversal includes static/dynamic
+literal TypeScript imports/re-exports and CSS imports; shared importers select full
+regression. The App/AppRoutes/main composition roots are tested through Vitest's
+related graph without treating composition alone as a native domain change.
+
+Full regression runs for **every PR**, pushes to `master` or `release/**`, and
+`workflow_dispatch` with `full_regression: true` (the default). It retains complete
+root/UI suites (UI split into three independent shards), dependency audit, real
+JavaFX fixtures, and native macOS arm64/Windows x64 Apply, grading, security,
+credential-free signing and `npm run test:migration`. Native jobs verify OS and
+architecture. Typechecks run once in fast feedback; platform-independent compiler
+checks need not be repeated in every native job. Migration generates its bridges
+inside the permanent target. Identical Apply CLI tests formerly repeated inside
+grading are covered by the native Apply jobs whenever grading is selected. No
+production signing credentials or release environment are used by routine CI.
+
+Only obsolete **pushes** on `remote-course-v2` and `ui-redesign` share cancellable
+concurrency groups. Manual acceptance, PR, master and release runs have unique run
+IDs; separate packaging/signing workflows are unchanged.
+
+### Required checks and branch limitations
+
+Require the stable **`CI required`** status in branch protection/rulesets. It runs
+with `always()` and explicitly requires selector/fast success and success from
+every selected job/matrix. Failed, cancelled, missing and unexpectedly skipped
+jobs fail the gate. Only explicitly unselected jobs may be skipped. Requiring an
+optional job alone is insufficient because GitHub treats skipped jobs as success.
+There are deterministic gate tests covering these cases.
+
+On 2026-11-17, the protection API reported `remote-course-v2` **not protected** and
+the repository rulesets API returned `[]`. This implementation does not change
+repository administration. Until an administrator requires `CI required` (and
+removes obsolete required job names), the workflow cannot prevent direct pushes
+or merges that disregard CI. Workflow edits themselves still need trusted review.
+
+The repository default branch is **`master`**. GitHub schedules execute the default
+branch workflow/commit; this branch adds no schedule and makes no claim of
+scheduled validation of `remote-course-v2`. Use explicit dispatch with
+`--ref remote-course-v2` for branch acceptance. Dispatch availability depends on
+GitHub registering the workflow from the default branch; report API rejection
+rather than changing `master` or pretending a push is manual acceptance. See
+[GitHub event rules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows).
+
+### CI performance evidence
+
+Selection reasons appear in the selector's Actions summary and its JSON artifact.
+Each test job summarizes elapsed setup/check time even on failure; `CI required`
+also reports job durations from the Actions API. Timings include setup and may be
+affected by runner queues/cache state. Compare workflow wall time separately from
+the fast job's time and native acceptance time.
+
+Baseline: [run 44006485645](https://github.com/msoecsse/graider/actions/runs/44006485645)
+at `5069146cf8a62fd17588fa6f6f6bfc791abaf19a`: overall **12m14s**; Normal checks
+**12m11s**, macOS grading **11m46s**, Windows migration **10m23s**, macOS migration
+**5m05s**. Logs show sequential root/UI tests took 1m41s/6m06s, root installation
+about one minute per job, repeated native typechecks 20–40s, and signing/IPC work
+serially extended the grading job. The new layout splits those independent tests,
+caches both lockfiles, and removes duplicate native compiler/bridge work. Ordinary
+narrow feedback targets **under five minutes**; required native regression may take
+longer. Record measured post-change run links and timings after exact-SHA validation;
+do not substitute estimates for measured results.

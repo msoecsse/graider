@@ -16,7 +16,7 @@ interface PackageJson {
 }
 
 interface ValidationWorkflow {
-  jobs: Record<string, { steps: { run?: string }[] }>;
+  jobs: Record<string, { steps: { run?: string; uses?: string }[] }>;
 }
 
 const readPackageJson = (filename = PACKAGE_JSON_PATH): PackageJson =>
@@ -71,8 +71,17 @@ describe("CI and dependency hardening", () => {
       const workflow = parse(
         fs.readFileSync(path.resolve(".github/workflows", filename), "utf8")
       ) as ValidationWorkflow;
-      for (const job of Object.values(workflow.jobs)) {
-        const commands = job.steps.map((step) => step.run ?? "");
+      const jobs = filename === "ci.yml" ? [workflow.jobs.fast] : Object.values(workflow.jobs);
+      for (const job of jobs) {
+        expect(job).toBeDefined();
+        const setup = parse(
+          fs.readFileSync(path.resolve(".github/actions/ci-setup/action.yml"), "utf8")
+        ) as { runs: { steps: { run?: string }[] } };
+        const commands = (job?.steps ?? []).flatMap((step) =>
+          step.uses === "./.github/actions/ci-setup"
+            ? setup.runs.steps.map((entry) => entry.run ?? "")
+            : [step.run ?? ""]
+        );
         const installation = commands.indexOf("npm ci --prefix ui");
         const preparation = commands.indexOf("npm run build:electron-backends");
         expect(installation).toBeGreaterThanOrEqual(0);
@@ -102,7 +111,7 @@ describe("CI and dependency hardening", () => {
       "npm run typecheck",
       "npm run lint",
       "npm run format:check",
-      "npm test",
+      "npx vitest run",
       "npm run build",
       "npm run audit"
     ]) {
@@ -110,6 +119,16 @@ describe("CI and dependency hardening", () => {
     }
 
     expect(workflow).not.toMatch(LIVE_TEST_COMMAND_PATTERN);
+    const parsed = parse(workflow) as ValidationWorkflow;
+    expect(
+      parsed.jobs.root?.steps.some((step) => step.run === "npx vitest run --maxWorkers=2")
+    ).toBe(true);
+    expect(
+      parsed.jobs.ui?.steps.some(
+        (step) => step.run === "npx vitest run --shard=${{ matrix.shard }}/3"
+      )
+    ).toBe(true);
+    expect(parsed.jobs.fast?.steps.some((step) => step.run === "npm run test:hygiene")).toBe(true);
   });
 
   it("live GitHub tests are explicitly gated and skip when sandbox variables are missing", () => {

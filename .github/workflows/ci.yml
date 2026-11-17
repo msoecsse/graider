@@ -5,79 +5,163 @@ on:
       - master
       - ui-redesign
       - remote-course-v2
-      - "release/**"
-  pull_request:
-
+      - release/**
+  pull_request: null
+  workflow_dispatch:
+    inputs:
+      full_regression:
+        description: Run every regression on both native targets
+        type: boolean
+        default: true
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.event_name == 'push' && (github.ref == 'refs/heads/remote-course-v2' || github.ref == 'refs/heads/ui-redesign')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/remote-course-v2' || github.ref == 'refs/heads/ui-redesign') }}
+defaults:
+  run:
+    shell: bash
 jobs:
-  normal-checks:
-    name: Normal checks
+  select:
+    name: Select conservative regression coverage
     runs-on: ubuntu-latest
-
+    outputs:
+      root: ${{ steps.selection.outputs.root }}
+      ui: ${{ steps.selection.outputs.ui }}
+      gui: ${{ steps.selection.outputs.gui }}
+      apply: ${{ steps.selection.outputs.apply }}
+      grading: ${{ steps.selection.outputs.grading }}
+      safety: ${{ steps.selection.outputs.safety }}
+      signing: ${{ steps.selection.outputs.signing }}
+      migration: ${{ steps.selection.outputs.migration }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install UI dependencies
-        run: npm ci --prefix ui
-
-      - name: Reject skipped and focused tests
-        run: npm run test:hygiene
-
-      - name: Generate Electron backend bridges
-        run: npm run build:electron-backends
-
-      - name: Typecheck
-        run: npm run typecheck:prepared
-
-      - name: UI typecheck
-        run: npm --prefix ui run typecheck:prepared
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: UI check formatting
-        run: npm --prefix ui run format:check
-
-      - name: Set up Java for real GUI fixtures
-        uses: actions/setup-java@v6
+      - name: Install selector tooling without native install hooks
+        run: npm ci --ignore-scripts
+      - name: Find last successful development baseline
+        id: baseline
+        uses: actions/github-script@v7
+        with:
+          script: |-
+            try {
+              const {data} = await github.rest.actions.listWorkflowRuns({owner: context.repo.owner, repo: context.repo.repo, workflow_id: 'ci.yml', branch: context.ref.replace('refs/heads/', ''), event: 'push', status: 'success', per_page: 100});
+              const baseline = data.workflow_runs.find(run => run.id !== context.runId);
+              core.setOutput('sha', baseline?.head_sha || '');
+            } catch {
+              core.warning('Baseline lookup failed; full regression will run.');
+              core.setOutput('sha', '');
+            }
+      - id: selection
+        run: node --import tsx scripts/ci/select.ts
+        env:
+          CI_BASE_SHA: ${{ steps.baseline.outputs.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-selection
+          path: ci-selection.json
+          retention-days: 7
+  fast:
+    name: Fast development feedback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-selection
+          path: ${{ runner.temp }}/ci-selection
+      - run: npm run test:hygiene
+      - run: npm run build:electron-backends
+      - run: npm run typecheck:prepared
+      - run: npm --prefix ui run typecheck:prepared
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm --prefix ui run format:check
+      - name: Selection and gate regressions
+        run: npx vitest run tests/unit/ci-selection.test.ts tests/unit/ci-runner.test.ts --maxWorkers=2
+      - name: Focused changed-file and transitive importer tests
+        run: node --import tsx scripts/ci/focused.ts
+        env:
+          CI_SELECTION_PATH: ${{ runner.temp }}/ci-selection/ci-selection.json
+      - run: npm run build
+      - run: npm --prefix ui run build
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+  root:
+    name: Root regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: x64
+      - run: npm run build:electron-backends
+      - run: npx vitest run --maxWorkers=2
+      - run: npm run audit
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.root == 'true' }}
+  ui:
+    name: UI regression (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 1
+          - 2
+          - 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: x64
+      - run: npm run build:electron-backends
+      - working-directory: ui
+        run: npx vitest run --shard=${{ matrix.shard }}/3
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.ui == 'true' }}
+  gui:
+    name: Real JavaFX fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: x64
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25"
-
-      - name: Install real GUI fixture runtime
-        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
-
-      - name: Verify real JavaFX GUI smoke fixtures
-        run: node --import tsx scripts/verify-java-gui-smoke.ts
-
-      - name: Test
-        run: npm test
-
-      - name: UI test
-        run: npm --prefix ui test
-
-      - name: Build
-        run: npm run build
-
-      - name: UI build
-        run: npm --prefix ui run build
-
-      - name: Audit dependencies
-        run: npm run audit
-
-  apply-regression:
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
+      - run: node --import tsx scripts/verify-java-gui-smoke.ts
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.gui == 'true' }}
+  apply:
     name: Apply workflow (${{ matrix.target }})
     strategy:
       fail-fast: false
@@ -90,144 +174,127 @@ jobs:
             architecture: x64
             target: Windows x64
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
     steps:
       - name: Preserve repository line endings
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/ci-setup
         with:
-          node-version: 24
-          architecture: ${{ matrix.architecture }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            ui/package-lock.json
-      - name: Verify native architecture
-        run: node -e "if (process.arch !== '${{ matrix.architecture }}') process.exit(1)"
-      - run: npm ci
-      - run: npm ci --prefix ui
+          architecture: ${{ matrix.architecture || 'x64' }}
       - run: npm run build:electron-backends
-      - run: npm run typecheck:prepared
-      - run: npm --prefix ui run typecheck:prepared
       - name: Apply latency, ordering, diagnostics, OAuth and recovery regressions
-        run: >-
-          npx vitest run --maxWorkers=2
-          tests/performance
-          tests/unit/planning
-          tests/unit/github
-          tests/unit/github-readiness-validation.test.ts
-          tests/unit/workflows/managed-workflow-deployment.test.ts
-          tests/unit/groups/group-target-executor.test.ts
-          tests/cli/apply.test.ts
-          tests/cli/assignment-apply.test.ts
-          tests/cli/gui-assignment-apply.test.ts
-          tests/cli/legacy-mutation-boundary.test.ts
-          tests/unit/execution/authoritative-legacy-course.test.ts
-          tests/recovery/apply-recovery.test.ts
-          tests/architecture/github-host-boundary.test.ts
+        run: npx vitest run --maxWorkers=2 tests/performance tests/unit/planning tests/unit/github tests/unit/github-readiness-validation.test.ts tests/unit/workflows/managed-workflow-deployment.test.ts tests/unit/groups/group-target-executor.test.ts tests/cli/apply.test.ts tests/cli/assignment-apply.test.ts tests/cli/gui-assignment-apply.test.ts tests/cli/legacy-mutation-boundary.test.ts tests/unit/execution/authoritative-legacy-course.test.ts tests/recovery/apply-recovery.test.ts tests/architecture/github-host-boundary.test.ts
       - name: Immediate Apply outcome and reconciliation regressions
         working-directory: ui
         run: npx vitest run --maxWorkers=2 src/apply-preview
-
-  grading-cache-safety:
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.apply == 'true' }}
+  grading:
     name: Grading local boundary (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
-        # Temporary #54 pause for branch pushes only; every PR keeps both platforms.
-        include: ${{ fromJSON(github.event_name == 'push' && github.ref == 'refs/heads/remote-course-v2' && '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"}]' || '[{"runner":"macos-15","architecture":"arm64","target":"macOS arm64"},{"runner":"windows-latest","architecture":"x64","target":"Windows x64"}]') }}
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
     steps:
       - name: Preserve repository line endings
         run: git config --global core.autocrlf false
-
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
         with:
-          node-version: 24
-          cache: npm
-          architecture: ${{ matrix.architecture }}
-          cache-dependency-path: |
-            package-lock.json
-            ui/package-lock.json
-
-      - name: Verify native target architecture
-        run: node -e "if (process.arch !== '${{ matrix.architecture }}') process.exit(1)"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install UI dependencies
-        run: npm ci --prefix ui
-
-      - name: Generate Electron backend bridges
-        run: npm run build:electron-backends
-
-      - name: Typecheck root
-        run: npm run typecheck:prepared
-
-      - name: Typecheck UI
-        run: npm --prefix ui run typecheck:prepared
-
-      - name: Test production signing verification without credentials
-        working-directory: ui
-        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macProductionArtifacts.test.ts electron/macBuilderLifecycle.integration.test.ts electron/macDmgSigning.test.ts electron/macAppSigning.test.ts
-
+          architecture: ${{ matrix.architecture || 'x64' }}
+      - run: npm run build:electron-backends
       - name: Test local grading, cache leases, account invalidation and publication safeguards
         working-directory: ui
         env:
           GRAIDER_GRADING_PERFORMANCE: "1"
           GRAIDER_GRADING_BENCHMARK: "1"
-        run: >-
-          npx vitest run --maxWorkers=2
-          electron/gradingStudentRepositoryUpdate.integration.test.ts
-          electron/gradingStudentRepositoryUpdateService.test.ts
-          src/grading-workspace/GradingWorkspacePublication.test.tsx
-          electron/gradingLocalPerformance.integration.test.ts
-          electron/gradingPerformance.test.ts
-          electron/migrationReconciliationService.test.ts
-          electron/courseStartup.integration.test.ts
-          electron/remoteCourseDiscovery.test.ts
-          src/dashboard/DashboardDataContext.test.tsx
-          src/grading-workspace/GradingWorkspaceRoute.test.tsx
-          electron/githubClientProvider.test.ts
-          electron/gradingStudentEvidenceService.test.ts
-          electron/managedCourseLeases.test.ts
-          electron/managedLocalRead.integration.test.ts
-          electron/managedRuntimeWriteSafety.test.ts
-          electron/managedOperationBridge.integration.test.ts
-          electron/gradingStudentReportPublicationService.test.ts
-          src/grading-workspace/GradingWorkspaceEvidencePanel.test.tsx
-          src/grading-workspace/GradingWorkspaceKeyboardShortcuts.test.tsx
-
+        run: npx vitest run --maxWorkers=2 electron/gradingStudentRepositoryUpdate.integration.test.ts electron/gradingStudentRepositoryUpdateService.test.ts src/grading-workspace/GradingWorkspacePublication.test.tsx electron/gradingLocalPerformance.integration.test.ts electron/gradingPerformance.test.ts electron/migrationReconciliationService.test.ts electron/courseStartup.integration.test.ts electron/remoteCourseDiscovery.test.ts src/dashboard/DashboardDataContext.test.tsx src/grading-workspace/GradingWorkspaceRoute.test.tsx electron/githubClientProvider.test.ts electron/gradingStudentEvidenceService.test.ts electron/managedCourseLeases.test.ts electron/managedLocalRead.integration.test.ts electron/managedRuntimeWriteSafety.test.ts electron/managedOperationBridge.integration.test.ts electron/gradingStudentReportPublicationService.test.ts src/grading-workspace/GradingWorkspaceEvidencePanel.test.tsx src/grading-workspace/GradingWorkspaceKeyboardShortcuts.test.tsx
       - name: Test actual student Git updates and grading preservation
         run: npx vitest run --maxWorkers=2 tests/unit/grading/grading-student-repository-update.test.ts tests/unit/git/git-command-workspace.test.ts
-
-      - name: Test Apply OAuth authority and standalone CLI refusal
-        run: npx vitest run --maxWorkers=2 tests/cli/gui-assignment-apply.test.ts tests/cli/legacy-mutation-boundary.test.ts tests/unit/execution/authoritative-legacy-course.test.ts
-
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.grading == 'true' }}
+  safety:
+    name: IPC, security and recovery (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: ${{ matrix.architecture || 'x64' }}
+      - run: npm run build:electron-backends
       - name: Test Apply IPC and immediate assignment publication
         working-directory: ui
         run: npx vitest run --maxWorkers=2 electron/assignmentApplyRunner.test.ts electron/tokenResolver.test.ts electron/managedCourseMutationGuard.test.ts electron/managedOperational.integration.test.ts
-
       - name: Test Review Import local Git evidence and faculty recovery workflow
         run: npx vitest run --maxWorkers=2 tests/unit/review-import
-
       - name: Test Review Import main-process validation and preview
         working-directory: ui
         run: npx vitest run --maxWorkers=2 electron/reviewImportService.test.ts electron/reviewImportSynchronization.integration.test.ts src/review-import/ReviewImportWorkflow.test.tsx
-
       - name: Test serial issue orchestrator process and recovery safeguards
         run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts
-
-  migration-regression:
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.safety == 'true' }}
+  signing:
+    name: Signing verification without credentials (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: ${{ matrix.architecture || 'x64' }}
+      - name: Test production signing verification without credentials
+        working-directory: ui
+        run: npx vitest run electron/macProductionSigning.test.ts electron/macProductionBuilder.test.ts electron/macProductionArtifacts.test.ts electron/macBuilderLifecycle.integration.test.ts electron/macDmgSigning.test.ts electron/macAppSigning.test.ts
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.signing == 'true' }}
+  migration:
     name: Migration regression (${{ matrix.target }})
     strategy:
       fail-fast: false
@@ -240,26 +307,50 @@ jobs:
             architecture: x64
             target: Windows x64
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
     steps:
       - name: Preserve repository line endings
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/ci-setup
+        with:
+          architecture: ${{ matrix.architecture || 'x64' }}
+      - name: Complete permanent migration regression suite
+        run: npm run test:migration
+      - name: Job duration summary
+        if: ${{ always() }}
+        shell: bash
+        run: "node -e 'const fs=require(\"node:fs\"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, \"\\nJob steps elapsed: \" + Math.round((Date.now()-Number(process.env.CI_STARTED))/1000) + \"s\\n\")'"
+    needs: select
+    if: ${{ needs.select.outputs.migration == 'true' }}
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs:
+      - select
+      - fast
+      - root
+      - ui
+      - gui
+      - apply
+      - grading
+      - safety
+      - signing
+      - migration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          architecture: ${{ matrix.architecture }}
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            ui/package-lock.json
-      - name: Verify native target
-        run: node -e "if (process.arch !== '${{ matrix.architecture }}' || process.platform !== '${{ matrix.runner == 'windows-latest' && 'win32' || 'darwin' }}') process.exit(1)"
-      - run: npm ci
-      - run: npm ci --prefix ui
-      - run: npm run build:electron-backends
-      - run: npm run typecheck:prepared
-      - run: npm --prefix ui run typecheck:prepared
-      - name: Complete permanent migration regression suite
-        run: npm run test:migration
+      - run: npm ci --ignore-scripts
+      - name: Reject failed, cancelled or unexpectedly skipped coverage
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: node --import tsx scripts/ci/gate.ts
+      - name: Workflow job durations
+        if: ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |-
+            const {data} = await github.rest.actions.listJobsForWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: context.runId, per_page: 100});
+            await core.summary.addHeading('Job durations').addTable([['Job', 'Result', 'Seconds'], ...data.jobs.map(j => [j.name, j.conclusion || j.status, j.started_at && j.completed_at ? String(Math.round((Date.parse(j.completed_at)-Date.parse(j.started_at))/1000)) : 'pending'])]).write();

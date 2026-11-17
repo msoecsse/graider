@@ -7,10 +7,13 @@ migration suites with two workers. No GitHub credentials, live resources or real
 student records are needed. Keep this target after Phase 9.
 
 Run it for changes to schemas, migration, course management, Git transactions,
-authorization or reconciliation, alongside required full root/UI checks. The CI
+authorization or reconciliation, alongside required full root/UI checks. The change-aware CI
 `Migration regression` jobs run the complete target on native macOS arm64 and
-Windows x64 and verify architecture. Failure on either platform blocks merging
-or releasing affected changes. Linux normal checks do not substitute for them.
+Windows x64 and verify architecture. The selector retains both jobs for affected changes and full PR/release/manual acceptance;
+see the [CI policy and required gate](codex-development-contract.md#change-aware-github-actions-ci).
+Failure on either platform fails `CI required` and blocks acceptance of affected changes.
+Branch-protection enforcement limitations are recorded in that policy. Linux checks do
+not substitute for either native target.
 
 ## Audit coverage
 
