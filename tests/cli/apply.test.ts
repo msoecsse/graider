@@ -9,6 +9,7 @@ import { normalizeCommonCommandOptions } from "../../src/core/command-context.js
 import { ExitCode } from "../../src/core/exit-codes.js";
 import { buildAssignmentGradePreview } from "../../src/grade-preview/grade-preview-builder.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import { OctokitGitHubClient } from "../../src/github/octokit-github-client.js";
 import { GitHubClientError } from "../../src/github/github-errors.js";
 import { DEFAULT_GITHUB_RETRY_ATTEMPTS } from "../../src/github/github-retry.js";
 import type {
@@ -1151,6 +1152,55 @@ describe("graider apply command", () => {
     expect(rerun.status).toBe("success");
     expect(githubClient.mutations.createdRepositories).toHaveLength(createdCount);
   });
+
+  it.each(["admin", "pull"] as const)(
+    "verifies actual faculty %s grants and performs no repeat permission writes",
+    async (initialPermission) => {
+      let permission = initialPermission;
+      const requests: string[] = [];
+      const grantWrites: string[] = [];
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const request = new Request(input, init);
+        requests.push(`${request.method} ${new URL(request.url).pathname}`);
+        if (request.method === "PUT") {
+          grantWrites.push(request.url);
+          permission = "admin";
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify([{ slug: "faculty", permission }]), {
+            headers: { "content-type": "application/json" }
+          })
+        );
+      });
+      try {
+        const adapter = new OctokitGitHubClient({ token: "synthetic-test-token" });
+        const githubClient = createReadyClient();
+        githubClient.getTeamPermission = adapter.getTeamPermission.bind(adapter);
+        githubClient.addTeamPermission = adapter.addTeamPermission.bind(adapter);
+        const { cwd, result } = await runApply("grading-disabled", githubClient);
+        expect(result.status).toBe("success");
+        expect(
+          loadWrittenManifest(cwd).manifest?.repositories[0]?.permissions.facultyTeam
+        ).toMatchObject({ teamSlug: "faculty", permission: "admin" });
+        const rerun = await runApplyCommand({
+          cwd,
+          assignmentFile: ASSIGNMENT_FILE,
+          options: yesOptions,
+          githubClient,
+          clock: fixedClock
+        });
+        expect(rerun.status).toBe("success");
+        expect(grantWrites).toHaveLength(initialPermission === "admin" ? 0 : 1);
+        expect(githubClient.mutations.createdRepositories).toHaveLength(1);
+        expect(requests.filter((request) => request.startsWith("GET "))).toContain(
+          `GET /repos/${ORGANIZATION}/${JONES_REPOSITORY}/teams`
+        );
+      } finally {
+        fetchMock.mockRestore();
+      }
+    }
+  );
 
   it.each(["student", "faculty", "invitation"] as const)(
     "does not claim complete access after an unverified %s grant",

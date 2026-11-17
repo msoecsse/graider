@@ -283,6 +283,17 @@ Dispatch support requires active metadata and an actual YAML
 enablement are read back; pending invitations are preserved and warned about.
 Permission readbacks use the existing three-attempt bounded retry policy.
 
+Faculty permission reads use the fully paginated
+`GET /repos/{owner}/{repo}/teams` listing and require one exact team-slug match.
+The access-check endpoint can return HTTP 204 without a permission level; that
+response cannot verify admin access. A missing team yields no grant; duplicate
+matches, malformed identities, unknown grant levels, and failed reads cannot
+verify access. Authorization failures remain errors rather than missing grants.
+An already sufficient grant stays a no-op on Apply, including recovery reruns.
+Each read costs one request per repository-team page; the one-page case retains
+the benchmark request counts below. A missing grant now returns an empty list,
+removing one expected 404 per student from first-Apply measurements.
+
 Repository creation stays durable before later reads, including the template
 baseline. Later setup failures preserve `created` with scoped diagnostics and
 recovery guidance. UI normalization also attaches top-level repository diagnostics

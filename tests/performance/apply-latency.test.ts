@@ -53,13 +53,13 @@ const READINESS_REQUESTS = 36;
 const PERMISSIONS_REQUESTS = 180;
 const CREATION_REQUESTS = 60;
 const DEPLOYMENT_REQUESTS = 90;
-const FIRST_EXPECTED_MISSING_GRADING = 150;
-const FIRST_EXPECTED_MISSING_UNINDEXED = 270;
+const FIRST_EXPECTED_MISSING_GRADING = 120;
+const FIRST_EXPECTED_MISSING_UNINDEXED = 240;
 const UNINDEXED_FIRST_REQUESTS = 546;
 const UNINDEXED_FIRST_MS = 260_200;
 const UNINDEXED_RESUME_REQUESTS = 246;
 const UNINDEXED_RESUME_MS = 20_200;
-const FIRST_EXPECTED_MISSING_DISABLED = 90;
+const FIRST_EXPECTED_MISSING_DISABLED = 60;
 
 // Measured at b40becc before this change; includes initial validation in readiness.
 const AUTHORITY_BEFORE = {
@@ -148,7 +148,7 @@ class ApplyTransport {
       return reply({ slug: "faculty", name: "Faculty" });
     if (url.pathname.includes("/teams/faculty/repos/")) {
       if (!read) this.permissions.add(url.pathname);
-      return reply({ permission: "admin" }, this.permissions.has(url.pathname) ? OK : MISSING);
+      return reply(undefined, this.permissions.has(url.pathname) ? EMPTY : MISSING);
     }
     if (route === "generate") {
       const body: unknown = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
@@ -163,6 +163,12 @@ class ApplyTransport {
     if (route === "branches") return reply([{ name: "main" }]);
     if (route === "commits") return reply([{ sha: "baseline-sha" }]);
     if (route === "contents") return reply([{ name: "README.md" }]);
+    if (route === "teams")
+      return reply(
+        this.permissions.has(`/orgs/example-org/teams/faculty/repos/example-org/${repo}`)
+          ? [{ slug: "faculty", permission: "admin" }]
+          : []
+      );
     if (route.startsWith("collaborators/")) {
       const key = `${repo}/collaborator`;
       if (!read) this.permissions.add(key);

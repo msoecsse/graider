@@ -18,7 +18,9 @@ enum OctokitTestNumber {
   ArtifactId = 606,
   RedirectStatus = 302,
   EmptyBufferLength = 0,
+  OkStatus = 200,
   CreatedStatus = 201,
+  NoContentStatus = 204,
   NotFoundStatus = 404,
   ConflictStatus = 409,
   UnprocessableEntityStatus = 422,
@@ -495,6 +497,161 @@ describe("OctokitGitHubClient", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each(["admin", "maintain", "push", "triage", "pull"] as const)(
+    "reads the exact team's %s repository grant rather than the access-check response",
+    async (permission) => {
+      const octokit = createMockOctokit();
+      const accessCheck = vi.fn(() =>
+        resolvedResponse(undefined, OctokitTestNumber.NoContentStatus)
+      );
+      octokit.rest.teams.checkPermissionsForRepoInOrg = accessCheck;
+      octokit.paginate = vi.fn(() =>
+        Promise.resolve([
+          { slug: "other-team", name: TEAM_SLUG, permission: "admin" },
+          { slug: `${TEAM_SLUG}-assistants`, permission: "admin" },
+          { slug: TEAM_SLUG, permission }
+        ])
+      );
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.getTeamPermission(OWNER, REPO, TEAM_SLUG)).resolves.toEqual({
+        pendingInvite: false,
+        permission
+      });
+      expect(octokit.paginate).toHaveBeenCalledWith("GET /repos/{owner}/{repo}/teams", {
+        owner: OWNER,
+        repo: REPO,
+        per_page: 100
+      });
+      expect(accessCheck).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns none only when a complete team list has no exact slug match", async () => {
+    const octokit = createMockOctokit();
+    octokit.paginate = () =>
+      Promise.resolve([
+        { slug: "other-team", name: TEAM_SLUG, permission: "admin" },
+        { slug: `${TEAM_SLUG}-assistants`, permission: "admin" }
+      ]);
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getTeamPermission(OWNER, REPO, TEAM_SLUG)).resolves.toEqual({
+      pendingInvite: false,
+      permission: "none"
+    });
+    octokit.paginate = () => Promise.resolve([]);
+    await expect(client.getTeamPermission(OWNER, REPO, TEAM_SLUG)).resolves.toEqual({
+      pendingInvite: false,
+      permission: "none"
+    });
+  });
+
+  it.each([
+    [
+      { slug: TEAM_SLUG, permission: "admin" },
+      { slug: TEAM_SLUG, permission: "pull" }
+    ],
+    [
+      { slug: TEAM_SLUG, permission: "admin" },
+      { slug: TEAM_SLUG, permission: "admin" }
+    ],
+    [{ slug: TEAM_SLUG }],
+    [{ slug: TEAM_SLUG, permission: "custom-role" }],
+    [{ slug: TEAM_SLUG, permission: "none" }],
+    [{ permission: "admin" }],
+    [null]
+  ])("rejects unverifiable repository-team grants: %j", async (...teams) => {
+    const octokit = createMockOctokit();
+    octokit.paginate = () => Promise.resolve(teams);
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getTeamPermission(OWNER, REPO, TEAM_SLUG)).rejects.toMatchObject({
+      kind: "api_error",
+      endpoint: "/repos/{owner}/{repo}/teams",
+      requestMethod: "GET"
+    });
+  });
+
+  it.each([
+    [OctokitTestNumber.UnauthorizedStatus, "auth_failed"],
+    [OctokitTestNumber.ForbiddenStatus, "permission_denied"],
+    [OctokitTestNumber.NotFoundStatus, "api_error"]
+  ])("does not turn HTTP %s into a missing team or admin grant", async (status, kind) => {
+    const octokit = createMockOctokit();
+    octokit.paginate = () => rejectedResponse(createRequestError({ status }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.getTeamPermission(OWNER, REPO, TEAM_SLUG)).rejects.toMatchObject({ kind });
+  });
+
+  it("requires authentication before listing repository teams", async () => {
+    const octokit = createMockOctokit();
+    octokit.paginate = vi.fn();
+    await expect(
+      new OctokitGitHubClient({ octokit }).getTeamPermission(OWNER, REPO, TEAM_SLUG)
+    ).rejects.toMatchObject({ kind: "auth_missing" });
+    expect(octokit.paginate).not.toHaveBeenCalled();
+  });
+
+  it("follows pagination before accepting an exact team grant", async () => {
+    const urls: string[] = [];
+    const nextUrl = `https://api.github.com/repos/${OWNER}/${REPO}/teams?per_page=100&page=2`;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = new Request(input, init).url;
+      urls.push(url);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            url === nextUrl
+              ? [{ slug: TEAM_SLUG, permission: "admin" }]
+              : [{ slug: "other-team", permission: "pull" }]
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+              ...(url === nextUrl ? {} : { link: `<${nextUrl}>; rel="next"` })
+            }
+          }
+        )
+      );
+    });
+    await expect(
+      new OctokitGitHubClient({ token: TOKEN }).getTeamPermission(OWNER, REPO, TEAM_SLUG)
+    ).resolves.toEqual({ pendingInvite: false, permission: "admin" });
+    expect(urls).toEqual([
+      `https://api.github.com/repos/${OWNER}/${REPO}/teams?per_page=100`,
+      nextUrl
+    ]);
+  });
+
+  it.each(["duplicate", "forbidden"] as const)(
+    "rejects a first-page admin match when a later page is %s",
+    async (scenario) => {
+      const nextUrl = `https://api.github.com/repos/${OWNER}/${REPO}/teams?page=2`;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const isNextPage = new Request(input, init).url === nextUrl;
+        const forbidden = isNextPage && scenario === "forbidden";
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              forbidden ? { message: "Forbidden" } : [{ slug: TEAM_SLUG, permission: "admin" }]
+            ),
+            {
+              status: forbidden ? OctokitTestNumber.ForbiddenStatus : OctokitTestNumber.OkStatus,
+              headers: {
+                "content-type": "application/json",
+                ...(isNextPage ? {} : { link: `<${nextUrl}>; rel="next"` })
+              }
+            }
+          )
+        );
+      });
+      await expect(
+        new OctokitGitHubClient({ token: TOKEN }).getTeamPermission(OWNER, REPO, TEAM_SLUG)
+      ).rejects.toMatchObject({
+        kind: scenario === "forbidden" ? "permission_denied" : "api_error"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("configures the production Octokit client with the current GitHub REST API version", async () => {
     let observedApiVersion: string | null = null;

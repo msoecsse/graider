@@ -58,6 +58,8 @@ const HTTP_STATUS_SERVER_ERROR_MIN = 500;
 const DEFAULT_BRANCH_FALLBACK = "main";
 const ROOT_CONTENT_PATH = "";
 const FIRST_PAGE_LIMIT = 1;
+const REPOSITORY_TEAMS_PAGE_SIZE = 100;
+const SINGLE_TEAM_MATCH_COUNT = 1;
 const UNKNOWN_COMMIT_SHA = "unknown";
 const UNKNOWN_ID = 0;
 const EMPTY_LENGTH = 0;
@@ -916,24 +918,25 @@ export class OctokitGitHubClient implements GitHubClient {
     repo: string,
     teamSlug: string
   ): Promise<GitHubPermissionState> {
-    const data = await this.runNullable(() =>
-      this.octokit.rest.teams.checkPermissionsForRepoInOrg({
-        org: owner,
+    return this.atEndpoint("GET", "/repos/{owner}/{repo}/teams", async () => {
+      // The team access-check endpoint can return 204 without a permission level.
+      // Only a complete repository-team listing proves the exact team's grant.
+      const teams = await this.runPaginated("GET /repos/{owner}/{repo}/teams", {
         owner,
         repo,
-        team_slug: teamSlug
-      })
-    );
-
-    if (data === null) {
-      return noPermission();
-    }
-
-    const record = asRecord(data);
-    return {
-      pendingInvite: false,
-      permission: toPermission(asString(record.permission))
-    };
+        per_page: REPOSITORY_TEAMS_PAGE_SIZE
+      });
+      const unverifiable = (): GitHubClientError =>
+        new GitHubClientError("api_error", "GitHub did not return a verifiable team permission.");
+      if (!Array.isArray(teams) || teams.some((team) => !asString(asRecord(team).slug)))
+        throw unverifiable();
+      const matches = teams.map(asRecord).filter((team) => team.slug === teamSlug);
+      if (matches.length === EMPTY_LENGTH) return noPermission();
+      if (matches.length !== SINGLE_TEAM_MATCH_COUNT) throw unverifiable();
+      const permission = toPermission(asString(matches.at(0)?.permission));
+      if (permission === "none") throw unverifiable();
+      return { pendingInvite: false, permission };
+    });
   }
 
   async addTeamPermission(input: AddTeamPermissionInput): Promise<void> {
