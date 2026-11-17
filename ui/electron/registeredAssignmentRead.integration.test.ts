@@ -1,6 +1,7 @@
 // @vitest-environment node
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { managedOperationalFixture, fixtureGit as git } from "./managedOperationalFixtures.js";
@@ -92,7 +93,12 @@ const fixture = async () => {
         expect(input.env).not.toHaveProperty("GRAIDER_GITHUB_TOKEN");
         const result = await promisify(execFile)(
           process.execPath,
-          ["--import", require.resolve("tsx"), path.resolve("../src/cli/index.ts"), ...input.args],
+          [
+            "--import",
+            pathToFileURL(require.resolve("tsx")).href,
+            path.resolve("../src/cli/index.ts"),
+            ...input.args
+          ],
           { cwd: input.cwd, env: input.env }
         );
         return { exitCode: 0, stdout: result.stdout, stderr: result.stderr, error: null };
