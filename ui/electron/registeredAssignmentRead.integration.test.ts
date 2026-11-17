@@ -283,6 +283,7 @@ const fixture = async (managed = false) => {
     call,
     ipc,
     manifestPath,
+    runtimeRoot,
     writeManifest,
     students,
     studentCount,
@@ -319,12 +320,7 @@ it.each([false, true])(
       );
     const before = snapshot();
     const manifestBefore = fs.readFileSync(f.manifestPath, "utf8");
-    const gradingNotes = path.join(
-      path.dirname(path.dirname(path.dirname(path.dirname(f.manifestPath)))),
-      ".graider",
-      "grading",
-      "local-notes.txt"
-    );
+    const gradingNotes = path.join(f.runtimeRoot, ".graider", "grading", "local-notes.txt");
     fs.mkdirSync(path.dirname(gradingNotes), { recursive: true });
     fs.writeFileSync(gradingNotes, "Existing faculty grading notes");
     const sourceBefore = await git(f.legacy, ["status", "--porcelain"]);
