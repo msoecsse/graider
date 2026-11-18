@@ -233,6 +233,83 @@ introduced by this assessment. Failed exploratory fixtures remain evidence, not
 passing checks. The original interrupted checkpoints/locks are never opened for
 execution or reused.
 
+### Native-edit follow-up (2026-11-18)
+
+**The development fixture's native write failure is resolved; execution remains
+disabled and #41 remains open/blocked.** This is Linux arm64 guest evidence only.
+The native macOS/Windows adapters, credential-free model relay, supervisor
+promotion/integrity and crash recovery acceptance above remain outstanding.
+The unrelated dependency audit blocker [#65](https://github.com/msoecsse/graider/issues/65)
+is separate from this diagnosis.
+
+**Observed failure:** a fresh credential-free HVF boot reproduced
+`Failed to write file /work/native-codex.txt`. Ordinary writes by `nobody` to its
+owned mode-0700 `/work` succeeded. Guest syscall tracing then showed Codex's native
+filesystem helper launching `codex-linux-sandbox` and bundled Bubblewrap. Both
+Bubblewrap's capability probe and the actual helper failed at
+`pivot_root("/tmp", "oldroot") = -1 EINVAL`, before a target-file write. This was
+an inner-sandbox setup failure, not evidence of an unwritable workspace or a
+successful native-edit boundary. A broad initial trace did not complete the
+fixture and is retained as failed diagnostic evidence.
+
+**Cause and bounded correction:** the guest was still running on Linux's initial
+rootfs. The [Linux `pivot_root` contract](https://man7.org/linux/man-pages/man2/pivot_root.2.html)
+explicitly rejects that rootfs and recommends switching root during boot. Changing
+only the bootstrap to copy the disposable guest files into a new RAM-only tmpfs
+root and `exec switch_root /newroot /guest-init` allowed the same native creation
+to succeed. A confirmation trace recorded successful `pivot_root` and seccomp filter
+installation in the filesystem helper. No host files or mounts were added. This controlled comparison and
+the failing syscall establish the boot-layout cause; no Codex binary patch or
+sandbox bypass was needed. The committed
+[guest PID-1 bootstrap](../tests/fixtures/orchestrator-native-edit/bootstrap.sh)
+is development fixture input, never a host command or production adapter.
+
+**Independent enforcement observations:** the final fixture ran twice from fresh
+RAM-backed boots, without a tracer. It used the same pinned Alpine/Codex inputs,
+explicit HVF, no NIC, shares, disks, guest agent or credential forwarding, and
+`nobody` with `never` + `workspace-write` + `network_access = false`. It additionally
+set `exclude_slash_tmp = true` and `exclude_tmpdir_env_var = true` to restrict
+native writes to `/work` (retaining Codex's protected workspace subpaths).
+A guest-only loopback endpoint supplied scripted Responses; no inference or
+model/GitHub credentials were used.
+
+- Native create, update and delete succeeded; guest assertions checked final
+  bytes and deletion, independently of the model response.
+- Each of 14 hostile patch attempts ran independently and was rejected: update
+  and add at four fake host protected/Git/credential/sibling paths, a protected
+  guest file, file/directory symlinks out of `/work`, workspace `.git/config`,
+  `/tmp` and parent traversal. Absent host-path reads returned `ENOENT`; direct
+  outside writes were policy-rejected; symlink writes reached the helper and
+  failed. Host canary hashes and protected guest/Git bytes stayed unchanged.
+- An actual Codex `exec_command` descendant wrote `/work/native-command.txt`,
+  failed protected-file and `/tmp` writes, and could not reach the guest fixture
+  server from its network namespace. It reported `Seccomp: 2`, `NoNewPrivs: 1`
+  and exit zero after those assertions. Ordinary hostile validation descendants,
+  host path/link/proc escapes and external network denial also passed.
+- Both QEMU processes were terminated/reaped; the next boot began without the
+  preceding workspace edit. This verifies these disposable probes, not production
+  crash recovery or a future model relay.
+
+The [scripted native cases](../tests/fixtures/orchestrator-native-edit/native-cases.ts)
+catch each rejection separately. Deterministic offline regressions verify that a
+failure cannot suppress later attempts and reject missing/duplicate/unexpected
+outcomes, successful hostile writes and the original failed benign write. The
+[concise observed outcomes](../tests/fixtures/orchestrator-native-edit/observed.json)
+retain both manual boots and input digests. These CI tests check fixture coverage
+and evidence interpretation; they do **not** run HVF or certify OS isolation.
+
+New local evidence: `/private/tmp/graider-41-native-edit-2jax2fgj`, including
+`reproduce.py`, `trace-mount.py`/`trace-mount-guest-1.log`, `switch-root.py`,
+`reviewed-proof.py`, `reviewed-guest-{1,2}.log`, `reviewed-result.json`,
+`reviewed-trace.py`/`reviewed-trace-guest-1.log`, checksum
+metadata and validation logs. `reviewed-proof.py` consumes the reviewed bootstrap
+and native case bytes captured in `reviewed-fixture.json`; its only endpoint is
+inside the no-NIC guest. Raw requests are local diagnostic artifacts, not public
+attachments. The previous November 17 evidence manifest was rechecked: all 523
+entries are unchanged. Historical failed-run checkpoints/locks were not reused
+or modified. No executor, unattended mode, #26/#15 execution or Phase 10 work is
+introduced by this follow-up.
+
 ### Smallest implementation sequence under the accepted decision
 
 Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,

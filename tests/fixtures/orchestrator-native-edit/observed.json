@@ -1,0 +1,196 @@
+{
+  "scope": "Manual Linux arm64 guest fixture evidence; not native macOS/Windows or executor acceptance",
+  "runtimeSha256": {
+    "rootfs.tar.gz": "4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de",
+    "vmlinuz-virt": "cd05fed9e617b5df93dc62ece9b78c422fd94e9b432a2f7c092714b139d5eef4",
+    "codex-linux.tgz": "e24d7b6f0af5695a36c04692c3a79672bdadebcac7c44005259cb3cad36ac40e"
+  },
+  "boots": [
+    {
+      "attempt": 1,
+      "ready": true,
+      "processGone": true,
+      "exit": 0,
+      "elapsedSeconds": 7.665252959355712,
+      "markers": [
+        "BOOTED-ISOLATED-GUEST",
+        "PASS native-edit-and-fresh-workspace",
+        "PASS protected-host-read-write-denial",
+        "PASS link-and-proc-path-escape-denial",
+        "PASS network-denial-no-nic",
+        "PASS validation-and-descendant",
+        "PASS codex-native-apply-patch",
+        "READY-FOR-CANCELLATION"
+      ],
+      "hostFixturesUnchanged": true,
+      "observations": [
+        {
+          "id": "valid-add",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-update",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete-setup",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete",
+          "outcome": "completed"
+        },
+        {
+          "id": "host-read-update-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/guest-protected.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/.git/config",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/tmp/native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/../native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape-dir/guest-protected.txt",
+          "outcome": "rejected"
+        }
+      ],
+      "innerCommandOutput": "Seccomp:\t2\nNoNewPrivs:\t1\nPASS inner-command-sandbox\n"
+    },
+    {
+      "attempt": 2,
+      "ready": true,
+      "processGone": true,
+      "exit": 0,
+      "elapsedSeconds": 7.585508583579212,
+      "markers": [
+        "BOOTED-ISOLATED-GUEST",
+        "PASS native-edit-and-fresh-workspace",
+        "PASS protected-host-read-write-denial",
+        "PASS link-and-proc-path-escape-denial",
+        "PASS network-denial-no-nic",
+        "PASS validation-and-descendant",
+        "PASS codex-native-apply-patch",
+        "READY-FOR-CANCELLATION"
+      ],
+      "hostFixturesUnchanged": true,
+      "observations": [
+        {
+          "id": "valid-add",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-update",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete-setup",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete",
+          "outcome": "completed"
+        },
+        {
+          "id": "host-read-update-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/guest-protected.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/.git/config",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/tmp/native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/../native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape-dir/guest-protected.txt",
+          "outcome": "rejected"
+        }
+      ],
+      "innerCommandOutput": "Seccomp:\t2\nNoNewPrivs:\t1\nPASS inner-command-sandbox\n"
+    }
+  ]
+}
