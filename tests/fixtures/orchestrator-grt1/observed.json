@@ -1,0 +1,484 @@
+{
+  "scope": "Standalone credential-free synthetic GRT1 tests only. No complete Graider capture/import, native validation acceptance or production execution.",
+  "startingHead": "a26d8183905d92b8904d58854d204005ea136b15",
+  "finalImageSha256": "c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96",
+  "finalHelperSha256": "abdd1df0226cfce9cb741d65beee41176a94b3dd4017010c87f677606b5a481f",
+  "finalWatchdogSha256": "ab8eb106c7a507db22ae7e52554788eb0b1f4f09acba5a2ac1433be8b0529600",
+  "loadedSourceHashes": {
+    "protocol.ts": "032fc8b855146888a761128f18b930e18d303524ca4edb5227b95ce7f396050e",
+    "manifest.ts": "75d660a89b12fc64e68dd85e75558ef9a32231a55c1edffcec52d6cf3741526b",
+    "channel.ts": "1c40c2a19356b65417de45a40c4f06bb0f0863bb7940196974b07557a58fddb5",
+    "transfer.ts": "a728ba78c7dffbced17195500b6774718e13930db6bac9578395bd1ce316377e",
+    "hvf.ts": "bfd686ccc83e7a162aea73aa59aba9c4bdabb14479c5b120a34dc8bde185f3b8",
+    "inputs.ts": "01284ecf0ab1edf0998ec654144de255542f17d17440e0b101a63dba72fab80f",
+    "watchdog.mjs": "ab8eb106c7a507db22ae7e52554788eb0b1f4f09acba5a2ac1433be8b0529600",
+    "test-image-pins.json": "b2e0a32f335d5a3282c3be4b160cdcf4bf7f86a58a5219722f91c5ae8d77405b",
+    "guest.py": "abdd1df0226cfce9cb741d65beee41176a94b3dd4017010c87f677606b5a481f",
+    "guest-init.sh": "99f56ab5b5c41d2d5ac1e15d8a9f44cdc13d8e21ffb9ca21398037b3becaa8df"
+  },
+  "reproducibility": {
+    "builderPython": "3.11.3",
+    "zlibRuntime": "1.2.12",
+    "imageBytes": 16218748,
+    "entries": 1295,
+    "explicitExpectedDigestVerifiedTwice": true,
+    "outputs": [
+      "/private/tmp/graider-72-grt1-depth-image-a",
+      "/private/tmp/graider-72-grt1-depth-image-b"
+    ],
+    "inputs": "/private/tmp/graider-72-grt1-inputs"
+  },
+  "finalMaximum": {
+    "scope": "Synthetic GRT1 only; no full-Graider/native acceptance or production integration",
+    "scenario": "maximum",
+    "files": 2048,
+    "directories": 1024,
+    "sourceBytes": 16777216,
+    "manifestBytes": 268583,
+    "inventoryBytes": 234504,
+    "sourceReads": 1024,
+    "receipt": {
+      "profile": "GRT1-test-2c2",
+      "session": "11c49188acd3031985504f6ee165d0b2",
+      "manifestSha256": "474cbdca60dff21d05a3bc6f2c4ff5eaa664b4919d600004ab82860c8c755478",
+      "dataSha256": "22aa3d9f808b91ba3595a41ed0acc9cae4cce89237cf9f58c67881fcb2ddd883",
+      "wireBytes": 45990689,
+      "sentBytes": 22865355,
+      "receivedBytes": 23125253,
+      "diagnosticBytes": 81,
+      "operations": 1055,
+      "guestUsage": [20692, 17281024, 3073, 1503052, 1369748],
+      "transcriptSha256": "8d1ea4e66dd5eb09db9fbe40137045743edb9adbf90edf47d1fa45503eb9c249",
+      "maxExchangeMs": 3528.131917000006,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      },
+      "elapsedMs": 279659.42845799995
+    },
+    "rejected": false,
+    "elapsedMs": 279737.712459,
+    "cleanup": {
+      "reaped": true,
+      "payloadRemoved": true
+    },
+    "watchdog": {
+      "status": "reaped",
+      "pid": 40839,
+      "code": 0,
+      "stopReason": "caller-stop",
+      "stderrBytes": 81,
+      "sentBytes": 22865355,
+      "receivedBytes": 23125253,
+      "at": "2026-11-18T20:49:49.652Z"
+    },
+    "imageSha256": "c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96",
+    "helperSha256": "abdd1df0226cfce9cb741d65beee41176a94b3dd4017010c87f677606b5a481f",
+    "probeSha256": "acac0b3f17cb8cd9093965f3839cde50ae55b21be12cb23e33ac441126f259b6",
+    "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-6g5RpH/graider-grt1-A1jQhd"
+  },
+  "finalDeepPath": {
+    "scope": "Synthetic GRT1 only; no full-Graider/native acceptance or production integration",
+    "scenario": "deep",
+    "files": 5,
+    "directories": 83,
+    "sourceBytes": 557073,
+    "manifestBytes": 952,
+    "inventoryBytes": 12266,
+    "sourceReads": 36,
+    "receipt": {
+      "profile": "GRT1-test-2c2",
+      "session": "ded3d7bb6cc4ba818501aa000ca4f9af",
+      "manifestSha256": "154717797a313ca29c24574ee7db89a82051f5e3cbef55fa0ad7a192f334f603",
+      "dataSha256": "11fa1247f927354e41c81c2790b45fc1d41f66d99d770793efbaf749954f13e8",
+      "wireBytes": 1530670,
+      "sentBytes": 749617,
+      "receivedBytes": 780972,
+      "diagnosticBytes": 81,
+      "operations": 45,
+      "guestUsage": [17644, 561152, 89, 1503052, 1374388],
+      "transcriptSha256": "88c03281ad2f6d64116bd2274734bc8c8c548eedd75b1cc0a78a6e8eeebd73b1",
+      "maxExchangeMs": 1536.4253749999998,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      },
+      "elapsedMs": 20943.870084000002
+    },
+    "rejected": false,
+    "elapsedMs": 20954.806083,
+    "cleanup": {
+      "reaped": true,
+      "payloadRemoved": true
+    },
+    "watchdog": {
+      "status": "reaped",
+      "pid": 40309,
+      "code": 0,
+      "stopReason": "caller-stop",
+      "stderrBytes": 81,
+      "sentBytes": 749617,
+      "receivedBytes": 780972,
+      "at": "2026-11-18T20:44:50.588Z"
+    },
+    "imageSha256": "c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96",
+    "helperSha256": "abdd1df0226cfce9cb741d65beee41176a94b3dd4017010c87f677606b5a481f",
+    "probeSha256": "acac0b3f17cb8cd9093965f3839cde50ae55b21be12cb23e33ac441126f259b6",
+    "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-tcCZkz/graider-grt1-DWsEIa"
+  },
+  "finalImageRecovery": [
+    {
+      "scenario": "death",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 5830.8334159999995,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 40527,
+        "code": 0,
+        "stopReason": "caller-disconnected",
+        "stderrBytes": 81,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:44:56.985Z"
+      },
+      "payloadRetainedForReconciliation": true,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-tZKH8k/graider-grt1-7GsM6u",
+      "scriptSha256": "eb47940f0c5477acf5930e3ba92a868671908ff547bba53ee567f92bf8652c70"
+    },
+    {
+      "scenario": "crash",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 6031.8324170000005,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 40612,
+        "code": null,
+        "stopReason": "qemu-exit",
+        "stderrBytes": 0,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:45:03.258Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-fNxToF/graider-grt1-t2cZtU",
+      "scriptSha256": "eb47940f0c5477acf5930e3ba92a868671908ff547bba53ee567f92bf8652c70"
+    },
+    {
+      "scenario": "forced",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 4031.025375,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 40690,
+        "code": null,
+        "stopReason": "caller-stop",
+        "stderrBytes": 0,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:45:07.663Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-gZBePb/graider-grt1-5PKUX7",
+      "scriptSha256": "eb47940f0c5477acf5930e3ba92a868671908ff547bba53ee567f92bf8652c70"
+    },
+    {
+      "scenario": "cancel",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 2004.069292,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 40766,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 81,
+        "sentBytes": 44531,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:45:09.817Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-LuBQkL/graider-grt1-zNQL4n",
+      "scriptSha256": "eb47940f0c5477acf5930e3ba92a868671908ff547bba53ee567f92bf8652c70"
+    },
+    {
+      "scenario": "death",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 2228.275209,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 98072,
+        "code": 0,
+        "stopReason": "caller-disconnected",
+        "stderrBytes": 81,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:50:34.167Z"
+      },
+      "payloadRetainedForReconciliation": true,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-KVnTfx/graider-grt1-TJTKeu",
+      "scriptSha256": "143cf9b633451e642d7d816bff60c068a5e71c51f097f042015bd2d375e6ce8c"
+    }
+  ],
+  "earlierImageObservations": [
+    {
+      "scenario": "small",
+      "sourceBytes": 557073,
+      "files": 5,
+      "directories": 3,
+      "elapsedMs": 7782.688333,
+      "operations": 45,
+      "wireBytes": 1499321,
+      "imageSha256": "16afc5c4eb0b1dc5be313fc6541eb0ccfeb862515089ca1749d252110690c768",
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-rLpUG3/graider-grt1-y5yzRj",
+      "rejected": false,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      }
+    },
+    {
+      "scenario": "large",
+      "sourceBytes": 12679270,
+      "files": 1536,
+      "directories": 512,
+      "elapsedMs": 149101.625041,
+      "operations": 797,
+      "wireBytes": 34691344,
+      "imageSha256": "16afc5c4eb0b1dc5be313fc6541eb0ccfeb862515089ca1749d252110690c768",
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-bCNc1s/graider-grt1-pSpIxj",
+      "rejected": false,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      }
+    },
+    {
+      "scenario": "maximum",
+      "sourceBytes": 16777216,
+      "files": 2048,
+      "directories": 1024,
+      "elapsedMs": 198926.898958,
+      "operations": 1053,
+      "wireBytes": 45973553,
+      "imageSha256": "16afc5c4eb0b1dc5be313fc6541eb0ccfeb862515089ca1749d252110690c768",
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-SYZChS/graider-grt1-broxCF",
+      "rejected": false,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      }
+    },
+    {
+      "scenario": "maximum",
+      "sourceBytes": 16777216,
+      "files": 2048,
+      "directories": 1024,
+      "elapsedMs": 260347.846334,
+      "operations": 1053,
+      "wireBytes": 45973553,
+      "imageSha256": "16afc5c4eb0b1dc5be313fc6541eb0ccfeb862515089ca1749d252110690c768",
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-FQm0O0/graider-grt1-QueOxB",
+      "rejected": false,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      }
+    },
+    {
+      "scenario": "cancel",
+      "sourceBytes": 557073,
+      "files": 5,
+      "directories": 3,
+      "elapsedMs": 3075.29,
+      "operations": null,
+      "wireBytes": null,
+      "imageSha256": "16afc5c4eb0b1dc5be313fc6541eb0ccfeb862515089ca1749d252110690c768",
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-9NqnDF/graider-grt1-EEwl8d",
+      "rejected": true,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      }
+    }
+  ],
+  "retainedFailures": [
+    {
+      "directory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-Gy6k1c",
+      "description": "Initial managed invocation rejected input/startup verification; no HVF attestation.",
+      "evidence.json": {
+        "profile": "GRT1-test-2c2",
+        "status": "reaped-payload-removed",
+        "failure": "inputs/startup-failed",
+        "at": "2026-11-18T20:20:05.061Z"
+      },
+      "transcript.json": {
+        "profile": "GRT1-test-2c2",
+        "session": "38d31bd9b9a14d5b7fd49500ff3dfe54",
+        "manifestSha256": "3a7f0edaa1eefbe353aca706fc23262fd7a4425a935b967b507e3b7bfd7a82bb",
+        "dataSha256": "11fa1247f927354e41c81c2790b45fc1d41f66d99d770793efbaf749954f13e8",
+        "status": "failed",
+        "failure": "GRT1 inputs/startup-unverified; terminal failure, no resume.",
+        "sentBytes": 0,
+        "receivedBytes": 0,
+        "diagnosticBytes": 0,
+        "operations": 0,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        },
+        "at": "2026-11-18T20:20:05.061Z"
+      }
+    },
+    {
+      "directory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-mreYUW",
+      "description": "Initial mixed synthetic run rejected QEMU termination diagnostics; corrected to count them during bounded teardown only.",
+      "evidence.json": {
+        "profile": "GRT1-test-2c2",
+        "status": "reaped-payload-removed",
+        "inputDigest": "c7778532bde1ce26406c09abcd12b3498b4a9cac6842be64a2182746e24ecf23",
+        "processId": 77624,
+        "at": "2026-11-18T20:20:42.480Z"
+      },
+      "watchdog.json": {
+        "status": "reaped",
+        "pid": 77624,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 81,
+        "sentBytes": 749401,
+        "receivedBytes": 749839,
+        "at": "2026-11-18T20:20:42.462Z"
+      },
+      "transcript.json": {
+        "profile": "GRT1-test-2c2",
+        "session": "0355f4369e3a5de3d8e3a8c6c708ba75",
+        "manifestSha256": "3a7f0edaa1eefbe353aca706fc23262fd7a4425a935b967b507e3b7bfd7a82bb",
+        "dataSha256": "11fa1247f927354e41c81c2790b45fc1d41f66d99d770793efbaf749954f13e8",
+        "status": "finished",
+        "sentBytes": 749401,
+        "receivedBytes": 749839,
+        "diagnosticBytes": 81,
+        "operations": 45,
+        "transcriptSha256": "70a173e9a98ff0ace1375edf4f16bf556c8a399a1d1b1d645aad444797c13f32",
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        },
+        "at": "2026-11-18T20:20:42.481Z"
+      }
+    },
+    {
+      "directory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-5syBlV",
+      "description": "Recovery fixture read processId before evidence publication instead of the watchdog PID; run failed safely and was reaped.",
+      "evidence.json": {
+        "profile": "GRT1-test-2c2",
+        "status": "reaped-payload-removed",
+        "inputDigest": "6597160ac17e0426712e89502fcd5b6602f771f5c7f810eef9e3c5fb676a01fa",
+        "processId": 80161,
+        "at": "2026-11-18T20:28:07.155Z"
+      },
+      "watchdog.json": {
+        "status": "reaped",
+        "pid": 80161,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 81,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-18T20:28:07.147Z"
+      },
+      "transcript.json": {
+        "profile": "GRT1-test-2c2",
+        "session": "6a51ec6c721943bd436e7a5397040168",
+        "manifestSha256": "aa9c3ee94bdea583dcee49df1b5b34afb6635fe1472b25abde497cc57c02bd30",
+        "dataSha256": "07854d2fef297a06ba81685e660c332de36d5d18d546927d30daad6d7fda1541",
+        "status": "failed",
+        "failure": "GRT1 startup/cancellation/source failure; raw diagnostics withheld.",
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "diagnosticBytes": 81,
+        "operations": 3,
+        "maxExchangeMs": 1293.0718330000002,
+        "transcriptSha256": "b47cb7463af20e7dc18641a193946b71ec2290915121eb5dfaadc8fcb7ebb7ca",
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        },
+        "at": "2026-11-18T20:28:07.156Z"
+      }
+    },
+    {
+      "directory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-xfZJwD",
+      "description": "Initial pinned helper failed an admitted 80-level path. Directory iterator nesting exceeded the fixed descriptor ceiling; deterministic regression failed before the fix. Limits were not raised.",
+      "evidence.json": {
+        "profile": "GRT1-test-2c2",
+        "status": "reaped-payload-removed",
+        "inputDigest": "6597160ac17e0426712e89502fcd5b6602f771f5c7f810eef9e3c5fb676a01fa",
+        "processId": 39428,
+        "at": "2026-11-18T20:42:13.024Z"
+      },
+      "watchdog.json": {
+        "status": "reaped",
+        "pid": 39428,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 0,
+        "sentBytes": 746644,
+        "receivedBytes": 2551,
+        "at": "2026-11-18T20:42:13.013Z"
+      },
+      "transcript.json": {
+        "profile": "GRT1-test-2c2",
+        "session": "c8411b092f47a7bb357c9ca57522f09f",
+        "manifestSha256": "154717797a313ca29c24574ee7db89a82051f5e3cbef55fa0ad7a192f334f603",
+        "dataSha256": "11fa1247f927354e41c81c2790b45fc1d41f66d99d770793efbaf749954f13e8",
+        "status": "failed",
+        "failure": "GRT1 frame-encoding; terminal failure, no resume.",
+        "sentBytes": 746644,
+        "receivedBytes": 2551,
+        "diagnosticBytes": 0,
+        "operations": 22,
+        "maxExchangeMs": 1134.6907919999999,
+        "transcriptSha256": "b6bbdcf038ad14280caf2f5295b052f925f85c72ea4ac7b052719e21907bb520",
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        },
+        "at": "2026-11-18T20:42:13.024Z"
+      }
+    }
+  ],
+  "interpretation": [
+    "Final maximum includes an 80-component directory path; inventories and every returned byte are independently compared and hashed.",
+    "Guest usage order: helper peak RSS KiB, workspace used bytes, workspace used inodes, guest MemTotal KiB, guest MemAvailable KiB. RAM availability is a point observation, not a peak memory certification.",
+    "Final native probes overlapped root validation; elapsed times are measured host-wall observations, not guaranteed upper bounds.",
+    "Recovery observations record the exact fixture hash used. The final typed death rerun follows the optional IPC disconnect typing correction; the pinned helper/watchdog were unchanged.",
+    "Earlier image results are retained historical observations, not evidence for a different helper digest.",
+    "600-second lease and full-tree resource estimates remain provisional until separately reviewed complete-tree measurement.",
+    "No historical interrupted checkpoint, lock or evidence was reused/removed. Caller-death payloads remain for reconciliation.",
+    "An initial full root run passed 3503 tests; the deep-path regression increased coverage to 3504. A subsequent full run had the existing #71 CI-selector timeout; its unchanged focused file passed 8/8. No unrelated test or timeout was changed."
+  ]
+}

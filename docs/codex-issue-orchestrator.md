@@ -830,6 +830,194 @@ setup and exclusive tool/approval waits were not separately instrumented; they
 are not estimated. No CI waiting occurred in this interval. Commit/push/CI
 inspection and issue handoff follow these measured intervals.
 
+### Slice 2C2: standalone GRT1 test transport (2026-11-18)
+
+The reviewed architecture is now implemented under
+[`scripts/orchestrator/grt1/`](../scripts/orchestrator/grt1/transfer.ts), **only for
+credential-free standalone tests**. The provisional profile is not production
+acceptance. Slice 2A/2B code, limits and pins remain unchanged. There is no baseline
+capture/import integration, Agent, runner, relay, promotion, GitHub authority or
+execution entry point. #72 remains open; #41 remains open/blocked. Do not import a
+complete Graider baseline until the next review. No #26, #15 or Phase 10 execution.
+
+The [supervisor](../scripts/orchestrator/grt1/transfer.ts) consumes supervisor-owned
+canonical v1 metadata and a bounded captured-byte reader. It never opens a path
+returned by a guest. It admits all paths, modes, file/directory counts, individual
+and aggregate sizes and metadata sizes before transfer, separately from guest
+checks. It creates a random 128-bit session, seals the manifest/data identities,
+and implements the six controls and globally monotonic sequence from Slice 2C1.
+Each direction has one outstanding exchange. No retries, replay, resume or lease
+extension exist. A protocol, source, timeout, cancellation or lifecycle failure is
+terminal and stops credit; failure also interrupts a pending source read.
+
+Wire details resolving the design's control grammar:
+
+```text
+GRT1 READY GRT1-test-2c2
+GRT1 session sequence START manifest-size manifest-sha256 data-size data-sha256
+GRT1 session sequence ACK phase next-offset accepted-sha256
+GRT1 session sequence GET I|R offset length previous-offset previous-sha256
+GRT1 session sequence SEAL_MANIFEST
+GRT1 session sequence SEAL_DATA
+GRT1 session sequence BEGIN_READBACK previous-offset previous-sha256
+GRT1 session sequence END_READBACK previous-offset previous-sha256
+GRT1 session sequence FINISH previous-offset previous-sha256
+```
+
+Every line has exactly one LF and canonical ASCII fields. Data frames retain
+the proposed `M/D/R/I` grammar. ACKs additionally repeat the phase. The first GET
+of each egress stream carries zero/empty SHA-256; each following GET acknowledges
+the preceding verified response. The transition control acknowledges the final
+response. START ACK seals the exact empty inventory `[]`. Controls/ACKs are at
+most 256 bytes; data frames are at most 44,000 bytes with at most 32,768 decoded
+bytes. The host bounds the pending reply and partial buffer before decoding, and
+rejects unsolicited bytes, duplicate lines, CR, noncanonical integers/base64,
+unknown versions, field/count/offset/phase/sequence/length/digest mismatches and
+premature EOF. Nonfinal chunks have the exact full size; empty streams have no
+data frame. File boundaries come only from the manifest, including empty files.
+
+The [fixed helper](../scripts/orchestrator/grt1/guest.py) is Python standard-library
+source installed outside `/work` in a separate pinned Alpine/Python image. It has
+no command endpoint and never executes imported files. It parses bounded canonical
+metadata, creates directories, streams into one exclusive/no-follow regular file
+at a time, hashes each file and aggregate, and applies exactly `0644`/`0755`.
+Descriptor-relative parent walks reject links. Its explicit states are start,
+manifest, data, inventory-before, readback, inventory-after, finished and failed.
+Unsafe names, aliases, protected components, unknown metadata, special files,
+multiply linked files and inventory/mode/size/identity drift fail closed.
+Inventory closes each directory iterator before descending, so admitted deep
+paths do not exhaust the unchanged 32-descriptor ceiling. An 80-level regression
+first failed deterministically and in the initial HVF image; the corrected helper
+was explicitly repinned and rebuilt twice before renewed native probes.
+
+The host compares both streamed inventories byte for byte to its own canonical
+projection, and independently compares **every readback byte** to its captured
+reader while hashing every file and the aggregate. The helper additionally checks
+the filesystem again at FINISH: at most 9,216 entry visits across its three final
+inventory walks, plus the empty startup walk. No imported program runs between
+these checks. Only a receipt after verified reaping/removal is returned.
+
+The [standalone HVF launcher](../scripts/orchestrator/grt1/hvf.ts) has no general
+VM/command interface. It independently checks the reviewed host OS, HVF support,
+Node/QEMU and transitive library pins, helper/build sources and complete image
+digest. QEMU uses only HVF, 1,536 MiB RAM, anonymous serial pipes, no NIC, monitor,
+host mounts/shares, disks, sockets or credentials. The guest has a 64-MiB
+`nosuid,nodev,noexec` workspace with 4,096 inodes; Python runs as nobody with
+isolated imports, no site initialization/bytecode, a 64-MiB address-space ceiling,
+600 CPU seconds and 32 open descriptors. The image contains no issue agent.
+
+The provisional profile independently caps 512 KiB/file, 16 MiB source, 2,048
+files, 1,024 directories, 240 ASCII bytes/path, 1 MiB manifest/each inventory,
+1,126 exchanges and 64 MiB combined wire. Startup/exchanges/source reads have
+30-second ceilings. A separately pinned
+[watchdog](../scripts/orchestrator/grt1/watchdog.mjs) enforces a nonrenewable
+600-second VM lease, counts both directions and runtime diagnostics before
+parsing, and kills the entire process group on caller/pipe loss or exhaustion.
+It escalates after 250 ms and attests only after child/stream closure and group
+absence. Host cleanup has a five-second ceiling; uncertain reaping retains the
+payload. Caller death preserves this run's payload for reconciliation even when
+the independent watchdog subsequently attests reaping. Historical evidence and
+locks are never opened, reused or cleared.
+
+Host and watchdog independently account for all traffic, including malformed
+bytes and diagnostics. Protocol noise and diagnostics during exchanges fail.
+After an independently verified FINISH, QEMU termination diagnostics are counted
+during bounded teardown; serial noise remains a failure. Receipts/failure evidence
+retain counts, direction-separated transcript hashes, identities and timestamps,
+without raw bytes, commands, environment or exception text. FINISH appends exactly
+five bounded telemetry integers: helper peak RSS KiB, workspace used bytes/inodes,
+guest MemTotal/MemAvailable KiB. These are fixed-helper observations, never
+acceptance authority or proof of worst-case guest memory.
+
+#### Pinned construction, tests and measured scope
+
+[Test-image pins](../scripts/orchestrator/grt1/test-image-pins.json) explicitly
+record each Alpine package URL/SHA-256/source-package commit, the downloaded index
+digest, helper/init/bootstrap/builder source hashes, image and watchdog digests.
+The original reviewed rootfs/kernel remain inputs. The
+[offline builder](../tests/fixtures/orchestrator-grt1/build-image.py) never extracts
+or executes guest files on the host, installs no repository hooks and downloads
+nothing. Sorted CPIO records have fixed ownership/timestamps and canonical gzip
+metadata. Two independent output directories reproduced image
+`c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96`
+(16,218,748 bytes, 1,295 entries). A candidate-only build uses a deliberately
+different filename; it cannot be launched by the verifier. Rebuilds never update
+pins. A different expected digest, source/input/runtime or image is rejected.
+Future input changes require source review, explicit digest verification and
+renewed native probes; these pins authorize no production execution.
+
+```text
+python3 tests/fixtures/orchestrator-grt1/build-image.py <reviewed-rootfs-inputs> <pinned-package-directory> <new-output-directory> c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96
+npx vitest run tests/unit/orchestrator-grt1.test.ts tests/unit/orchestrator-grt1-watchdog.test.ts
+node --import tsx tests/fixtures/orchestrator-grt1/probe.ts <pinned-test-image-directory> maximum
+node --import tsx tests/fixtures/orchestrator-grt1/recovery.ts parent <pinned-test-image-directory> death
+```
+
+Root deterministic tests require Python 3.9+ (`python3`, or `python` on Windows),
+with no pip packages. They run the actual fixed Python protocol/data/state source
+against an explicitly labeled portable kernel double, avoiding assumptions that
+Windows implements Linux `openat`, no-follow flags or POSIX modes. They test
+normal/binary/empty/max-size/mixed streams and both duplex directions, hostile
+frames/ACKs/metadata/inventories, aliases/types/modes, corruption, allocation and
+workspace failure, flow control, budgets, cancellation and cleanup uncertainty.
+The separate watchdog tests cover caller loss, forced kill, lease/wire exhaustion,
+broken pipes and refusal to attest surviving groups. These tests do not certify
+native filesystem or VM isolation. The actual Linux helper filesystem operations
+and every file mode are exercised in pinned HVF experiments.
+The native safety CI job also runs the new deterministic protocol/watchdog tests
+on both macOS arm64 and Windows x64; simulated processes/filesystems never count
+as native VM acceptance.
+
+[Observations](../tests/fixtures/orchestrator-grt1/observed.json) retain source-bound
+synthetic results, actual host/watchdog wire counts, operation counts, elapsed
+time, fixed-helper memory/workspace observations and cleanup evidence. Initial
+verification rejection, teardown-diagnostic rejection and an incorrect recovery
+fixture evidence-field lookup remain failed evidence. No failure is relabeled
+as a pass. Real probes cover caller death, guest crash, frozen-QEMU escalation
+and cancellation under load. Caller-death payload/evidence is intentionally
+retained; other passing probes attest removal only after reaping.
+
+The final source-bound maximum run verified **16,777,216 bytes, 2,048 files and
+1,024 directories**, including an 80-level path. It took **279.738 seconds**,
+**1,055 exchanges** and **45,990,689 combined wire bytes**. Host and watchdog counts
+matched exactly, including 81 runtime-diagnostic bytes. Helper peak RSS was
+20,692 KiB; workspace use was 17,281,024 bytes / 3,073 inodes. Maximum measured
+exchange time was 3.528 seconds. Every byte/mode and both inventories matched,
+followed by attested reaping and payload removal. Earlier synthetic results and
+failed attempts remain explicitly identified by image/source digest in the
+observations. These runs overlapped local checks; timings are observations, not
+guarantees or full-tree estimates.
+
+Required root validation passed: `npm run typecheck`, `npm run lint`,
+`npm run format:check`, `npm test -- --maxWorkers=2` including hygiene
+(**3,504 tests / 207 files, zero skips, 122.50 seconds**), `npm run build` and
+`npm run audit` (high threshold passed; nine existing moderate findings).
+New transport/watchdog coverage is **100 tests**. A default-worker full run hit
+the existing #71 CI-selector five-second timeout (3,503 passed / one failed);
+the unchanged focused file subsequently passed all eight tests. Confirmation
+used the complete suite with two workers after the large VM experiment ended.
+No test, timeout, audit or CI gate was weakened. A fixture-only optional-IPC typing
+error was corrected and full typechecking passed afterward. An initial audit
+request failed registry DNS in the sandbox; the authorized network rerun passed.
+Exact-SHA native CI remains a separate required gate after push.
+
+Measured phase walls through final local verification, **20:03:17–20:53:14 UTC**:
+investigation **97 seconds**; implementation/proof **1,976 seconds** across
+20:04:54–20:34:47 and 20:41:23–20:44:26; validation/evidence preparation
+**924 seconds** across the remaining intervals; total **2,997 seconds**.
+Validation includes the final fixture refinement. Earlier setup and exclusive
+approval/network/tool waits were not separately instrumented and are not
+estimated; phase walls include those waits. CI waiting in this interval was
+**zero seconds**. Final review, commit/push and CI inspection/handoff follow.
+
+**No complete Graider tree was imported.** Synthetic inventories use shorter paths
+and different file distributions from Graider. The 600-second lease, full-tree
+metadata/allocation estimates and complete-HEAD source capture still require the
+next review and measured full-tree validation. Native Windows reparse metadata/VM
+and native macOS validation remain unimplemented. Preserve all root/native CI,
+dependency-audit, authorization and execution gates, including the independent
+Windows migration timeout tracked by #68. Stop after this standalone slice.
+
 ### Smallest implementation sequence under the accepted decision
 
 Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,
