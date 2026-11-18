@@ -206,6 +206,33 @@ const expectNoGradingMutations = (): void => {
 // sibling controls must not be clicked to reproduce the pre-ITEM-50 tests.
 // Draft protection still applies when leaving it or replacing an adjustment.
 describe("GradingWorkspacePage current editor draft guards", () => {
+  it("protects an unsaved adjustment before Pull Latest and pulls only after explicit discard", async () => {
+    setApis();
+    const pull = vi.fn().mockResolvedValue({ status: "success" });
+    Object.assign(window.graiderUI, { pullLatestGradingStudentChanges: pull });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
+      target: { value: "9" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved adjustment?" })
+    ).toBeInTheDocument();
+    expect(pull).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(9);
+    expect(pull).not.toHaveBeenCalled();
+    expectNoGradingMutations();
+    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard adjustment" }));
+    await waitFor(() =>
+      expect(pull).toHaveBeenCalledExactlyOnceWith({ ...REQUEST, studentId: "ada" })
+    );
+    expect(screen.queryByRole("spinbutton", { name: "Amount" })).not.toBeInTheDocument();
+    expectNoGradingMutations();
+  });
+
   it.each(["Back to grading", "Cancel comment", "Escape"])(
     "%s protects a comment draft on cancel and discards only on confirmation",
     async (exit) => {

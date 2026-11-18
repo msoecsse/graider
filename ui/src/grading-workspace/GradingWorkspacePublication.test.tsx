@@ -240,6 +240,18 @@ describe("explicit student repository updates", () => {
     configureApis({ statuses: { ada: "complete", grace: "complete" }, loadSnapshot });
     Object.assign(window.graiderUI, {
       pullLatestGradingStudentChanges: pull,
+      loadGradingStudentCommitHistory: vi.fn(async () => ({
+        status: "success",
+        studentId: "ada",
+        submissionCommitSha: (updated ? "b" : "a").repeat(40),
+        commits: [
+          {
+            sha: (updated ? "b" : "a").repeat(40),
+            committedAt: "2026-11-17T12:00:00Z",
+            message: updated ? "New student commit" : "Original student commit"
+          }
+        ]
+      })),
       repairGradingStudentWorkflow: repair
     });
     render(<GradingWorkspacePage request={REQUEST} />);
@@ -255,8 +267,75 @@ describe("explicit student repository updates", () => {
     expect(screen.getByText("Existing deduction")).toBeInTheDocument();
     expect(screen.getByText(/Stale\/unresolved source anchor/u)).toBeInTheDocument();
     expect(screen.getByText("old source")).toBeInTheDocument();
+    expect(window.graiderUI.loadGradingStudentSource).toHaveBeenCalledTimes(2);
+    expect(loadSnapshot).toHaveBeenCalledTimes(2);
+    expect(window.graiderUI.loadGradingStudentCommitHistory).toHaveBeenCalledTimes(2);
+    expect(window.graiderUI.publishGradingStudentReport).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
   });
+
+  it.each(["repository_update_failed", "rejected"])(
+    "releases UI mutation guards and retries after %s without refreshing failed results",
+    async (failure) => {
+      const pending = deferred<{ status: string }>();
+      const pull = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          const result = await pending.promise;
+          if (failure === "rejected") throw new Error("Private Git detail");
+          return result;
+        })
+        .mockResolvedValue({ status: "unchanged" });
+      const { loadSnapshot, publish } = configureApis();
+      Object.assign(window.graiderUI, { pullLatestGradingStudentChanges: pull });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" });
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await waitFor(() => expect(pull).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole("button", { name: "Pulling latest changes…" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeDisabled();
+      await act(async () => pending.resolve({ status: "repository_update_failed" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Pull latest changes" })).toBeEnabled()
+      );
+      expect(loadSnapshot).toHaveBeenCalledTimes(1);
+      expect(window.graiderUI.loadGradingStudentSource).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/Private Git detail/u)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await screen.findByText("This repository is already up to date.");
+      expect(pull).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
+      expect(publish).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["submission_changed", "update_state_record_failed"])(
+    "retains the authoritative snapshot and blocks grading after %s, then recovers explicitly",
+    async (status) => {
+      const { loadSnapshot, publish } = configureApis();
+      const pull = vi
+        .fn()
+        .mockResolvedValueOnce({ status })
+        .mockResolvedValue({ status: "success" });
+      Object.assign(window.graiderUI, { pullLatestGradingStudentChanges: pull });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" });
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Pull latest changes" })).toBeEnabled()
+      );
+      expect(pull).toHaveBeenCalledTimes(1);
+      expect(loadSnapshot).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled()
+      );
+      expect(publish).not.toHaveBeenCalled();
+    }
+  );
 
   it("surfaces conflicts and keeps existing grading visible", async () => {
     configureApis();

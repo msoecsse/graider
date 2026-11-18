@@ -306,6 +306,91 @@ describeGitIntegration("authorized student repository update", () => {
     expect(f.read()).toEqual(f.state);
   });
 
+  it("fast-forwards a clean checkout repeatedly and leaves repeated pulls idempotent", async () => {
+    const f = await fixture();
+    for (const text of ["first newer submission\n", "second newer submission\n"]) {
+      f.advance(text);
+      expect(await f.update()).toEqual({ status: "success" });
+      const saved = f.read();
+      expect(saved.submissionCommitSha).toBe(git(f.student, "rev-parse", "HEAD"));
+      expect(await f.workspace.resolveHead()).toBe(saved.submissionCommitSha);
+      expect(fs.readFileSync(path.join(f.local, "Main.java"), "utf8")).toBe(text);
+      expect(await f.update()).toEqual({ status: "unchanged" });
+      expect(f.read()).toEqual(saved);
+      expect(saved.status).toBe("published");
+      expect(saved.manualAdjustments).toEqual(f.state.manualAdjustments);
+      expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe("Original report");
+    }
+    expect(f.read().repositoryUpdates).toHaveLength(2);
+  });
+
+  it.each(["success", "fetch failure", "inspection failure"] as const)(
+    "refuses overlap and releases the student lock after %s",
+    async (mode) => {
+      const f = await fixture();
+      f.advance();
+      let release!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const head = f.workspace.resolveHead.bind(f.workspace);
+      const inspection = vi.spyOn(f.workspace, "resolveHead").mockImplementationOnce(async () => {
+        entered();
+        await gate;
+        if (mode === "inspection failure") throw new Error("Inspection failed");
+        return head();
+      });
+      const pull = vi.spyOn(f.workspace, "pullUpstream");
+      if (mode === "fetch failure")
+        pull.mockRejectedValueOnce(
+          Object.assign(new Error("Fetch failed"), { kind: "remote_unavailable" })
+        );
+      const first = f.update();
+      await started;
+      try {
+        expect(await f.update()).toEqual({
+          status: "repository_update_failed",
+          message: "A repository update is already running for this student."
+        });
+        expect(pull).not.toHaveBeenCalled();
+        expect(f.read()).toEqual(f.state);
+      } finally {
+        release();
+        await first;
+      }
+      expect((await first).status).toBe(
+        mode === "success" ? "success" : "repository_update_failed"
+      );
+      inspection.mockRestore();
+      if (mode !== "success") {
+        expect(await head()).toBe(f.sha);
+        expect(f.read()).toEqual(f.state);
+      }
+      expect(await f.update()).toEqual({ status: mode === "success" ? "unchanged" : "success" });
+      expect(await f.update()).toEqual({ status: "unchanged" });
+      expect(f.read().repositoryUpdates).toHaveLength(1);
+    }
+  );
+
+  it("preserves a Git index lock and permits retry after its owner removes it", async () => {
+    const f = await fixture();
+    f.advance();
+    const lockPath = path.join(f.local, ".git", "index.lock");
+    const lockContents = "Owned by another Git process";
+    fs.writeFileSync(lockPath, lockContents);
+    expect((await f.update()).status).not.toBe("success");
+    expect(fs.readFileSync(lockPath, "utf8")).toBe(lockContents);
+    expect(await f.workspace.resolveHead()).toBe(f.sha);
+    expect(f.read()).toEqual(f.state);
+    fs.unlinkSync(lockPath);
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(await f.update()).toEqual({ status: "unchanged" });
+  });
+
   it.each([
     ["unstaged", "modified tracked files", "Main.java"],
     ["staged", "staged files", "Main.java"],
@@ -566,6 +651,11 @@ it("reports a partial update if atomic state persistence fails", { timeout: 30_0
   } finally {
     rename.mockRestore();
   }
+  // The failed write must release the operation lock without bypassing SHA checks.
+  expect(await f.update()).toEqual({ status: "success" });
+  expect(f.read().submissionCommitSha).toBe(await f.workspace.resolveHead());
+  expect(f.read().repositoryUpdates).toHaveLength(1);
+  expect(await f.update()).toEqual({ status: "unchanged" });
 });
 
 it(

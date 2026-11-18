@@ -1,3 +1,6 @@
+import { createCourseMutationIpc } from "./courseMutationIpc";
+import type { ManagedCourseMutationGuard } from "./managedCourseMutationGuard";
+import { IPC_CHANNELS } from "./ipc";
 import { describe, expect, it, vi } from "vitest";
 import {
   createGradingStudentRepositoryUpdateService,
@@ -90,3 +93,73 @@ describe("selected student authenticated repository update", () => {
     expect(f.backend.updateGradingStudentRepository).not.toHaveBeenCalled();
   });
 });
+
+it.each(["success", "handler failure", "authorization failure"])(
+  "releases the Pull Latest IPC mutation guard after %s",
+  async (outcome) => {
+    let invoke!: (...args: unknown[]) => Promise<unknown>;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const localGrading = vi.fn(
+      async (_id: unknown, _path: unknown, operation: () => Promise<unknown>) => operation()
+    );
+    if (outcome === "authorization failure")
+      localGrading.mockImplementationOnce(async () => {
+        entered();
+        await gate;
+        throw new Error("Authorization failed");
+      });
+    const handler = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        entered();
+        await gate;
+        if (outcome === "handler failure") throw new Error("Git failed");
+        return { status: "success" };
+      })
+      .mockResolvedValue({ status: "unchanged" });
+    const adapter = createCourseMutationIpc(
+      {
+        handle: (_channel, callback) => {
+          invoke = callback as typeof invoke;
+        }
+      },
+      () => ({ localGrading }) as unknown as ManagedCourseMutationGuard
+    );
+    adapter.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, handler);
+    const event = { sender: { id: 1, isDestroyed: () => false, send: vi.fn() } };
+    const request = { courseFolderId: "registered", studentId: "ada" };
+    const first = invoke(event, request);
+    // Attach rejection handling before opening the gate.
+    const settled = first.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error })
+    );
+    await started;
+    try {
+      await expect(invoke(event, request)).rejects.toMatchObject({
+        result: {
+          reason: "synchronization_retry_required",
+          message: expect.stringContaining("already running")
+        }
+      });
+      expect(localGrading).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await settled;
+    }
+    if (outcome === "success") expect(await first).toEqual({ status: "success" });
+    else await expect(first).rejects.toThrow();
+    expect(handler).toHaveBeenCalledTimes(outcome === "authorization failure" ? 0 : 1);
+    handler.mockReset().mockResolvedValue({ status: "unchanged" });
+    expect(await invoke(event, request)).toEqual({ status: "unchanged" });
+    expect(localGrading).toHaveBeenCalledTimes(2);
+    expect(event.sender.send).toHaveBeenLastCalledWith(expect.any(String), { status: "finished" });
+  }
+);
