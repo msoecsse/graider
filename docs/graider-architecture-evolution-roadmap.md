@@ -305,9 +305,21 @@ version/source-bound release metadata and notes; retain older releases. Explicit
 artifact access, version/tag rules, provenance, protected approval and publication
 failure/retry behavior are specified in #70. No update feed/runtime is included.
 
-**Planning only; implementation is not authorized.** Resolve the remaining
-[faculty release decisions (#69)](https://github.com/msoecsse/graider/issues/69)
-and close #54 with its original manual evidence reconciled. Preserve green
+The [faculty release decisions (#69)](https://github.com/msoecsse/graider/issues/69)
+are explicitly approved: public unauthenticated downloads from `msoecsse/graider`;
+first tag `v0.1.0-rc.1` as GitHub Prerelease, excluded from Latest; matching CLI/UI
+SemVer and `v<version>` tags; sole project-owner (`themrsean`) publication approval
+with reviewed source, protected tags and mandatory technical verification, without
+a second human reviewer; indefinite release/asset retention with owner-only
+emergency withdrawal, visible explanation and new versions for corrections.
+Never silently replace assets or move existing version tags. See the canonical
+[approved decision and enforcement record](electron-packaging.md#approved-release-decisions-69).
+
+**Planning only; implementation is not authorized.** Decisions are resolved, but
+publication controls are not configured: the owner-only environment gate must
+allow owner-initiated-run approval, and effective branch/tag and direct Release
+write permissions must be verified before enabling publication. No settings are
+changed here. Close #54 with its original manual evidence reconciled. Preserve green
 comprehensive exact-SHA CI on both native platforms and native NSIS acceptance.
 [#65](https://github.com/msoecsse/graider/issues/65) blocks the dependency audit;
 [#68](https://github.com/msoecsse/graider/issues/68) separately tracks the Windows

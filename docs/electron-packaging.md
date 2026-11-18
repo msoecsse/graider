@@ -412,22 +412,73 @@ source for artifact access, versioning, metadata, retries and publication contro
 This is a plan, not an implemented pipeline or permission to dispatch signing or
 publish the existing development `0.1.0` archives.
 
-Before implementation, resolve
-[#69's faculty decisions](https://github.com/msoecsse/graider/issues/69): public
-versus restricted artifact access/destination, first version and prerelease/Latest
-designation, source/tag policy, named publication approvers/protection ownership,
-and exceptional withdrawal authority. The source repository is currently public;
-publishing its Release assets would make them public downloads. Do not infer
-approval of that audience from source visibility. The recommended release archive
-retains old versions, assets, hashes, manifests and notes indefinitely, independently
-of seven-day Actions candidate artifacts.
+### Approved release decisions (#69)
+
+The faculty explicitly approved all four decisions on **2026-11-18 UTC**, recorded
+in [#69](https://github.com/msoecsse/graider/issues/69):
+
+1. **Audience and destination:** public signed/notarized macOS arm64 GitHub
+   Releases in the existing `msoecsse/graider` repository. Downloads require no
+   authentication, faculty OAuth token, PAT, GitHub CLI or source build.
+2. **Version and designation:** first release `v0.1.0-rc.1`, marked GitHub
+   **Prerelease**, excluded from **Latest**. CLI and UI use the same SemVer
+   (`0.1.0-rc.1` initially); tags use `v<version>`. This records the policy without
+   changing development manifests or creating a tag. Later production designation
+   requires explicit approval; this is not update-channel implementation.
+3. **Authority and source:** the project owner, GitHub account `themrsean`, is the
+   sole publication authority and owns administration of the required controls.
+   Use owner-reviewed `remote-course-v2` candidates bound to a full source SHA and
+   protected version tag. Require explicit owner approval of that exact tag/SHA,
+   verified signed bytes/hashes, manifest and release notes before publication.
+   Owner source review is sufficient; no second human reviewer or no-self-review
+   requirement applies. Mandatory technical verification and exact-SHA gates in
+   #70 remain independent requirements that owner approval cannot waive.
+4. **Retention and withdrawal:** retain all published versions, tags, assets,
+   checksums, manifests and notes indefinitely, independently of seven-day Actions
+   candidate artifacts. Only the owner may authorize emergency withdrawal; retain
+   a visible explanation/advisory identifying the affected version and reason,
+   with a superseding-version reference when available. Corrections use new
+   versions. Never silently replace published assets or move existing version
+   tags; withdrawal does not permit version/tag reuse or routine pruning.
+
+### Required enforcement before publication
+
+GitHub supports a publication environment whose sole required reviewer is
+`themrsean`. Leave **Prevent self-review** disabled so the owner can approve a run
+they initiated; disable administrator bypass. Restrict eligible deployment refs
+and keep release write authority behind that gate. This supersedes #69's original
+two-person/no-self-review proposal. See GitHub's
+[environment protection rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+
+Require `CI required` on eligible source branches, owner-reviewed source/workflow
+changes and active `v*` tag rulesets. Separate restricted tag creation from rules
+prohibiting updates/deletion so a creation exception does not allow moving an
+existing version. In this organization repository, documented bypass actors are
+roles, teams and apps, not an arbitrary individual-user allowlist. An owner-only
+non-secret team or narrowly scoped approved automation can constrain creation;
+do not grant all admins/writers blanket bypass or claim such a team/app already
+exists. See GitHub's [ruleset configuration](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
+and [tag rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
+
+An environment gates only jobs referencing it. GitHub also permits repository
+writers to create, edit and delete Releases through the UI/API; tag protection
+alone does not gate asset changes. Before enabling publication, the owner must
+review direct user/app/token and other workflow write paths and restrict them to
+the approved authority. Administrators can change controls; no environment rule
+is an immutable sole-owner guarantee against repository administration. Verify
+effective permissions and controls under separately authorized administration,
+and keep #70 blocked if enforcement cannot be demonstrated. See GitHub's
+[Release permissions](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
 
 Read-only API checks on 2026-11-18 UTC found `remote-course-v2` unprotected and no
 repository rulesets. The `macos-production-signing` environment has a branch policy
-but no reviewer approval rule. Future publication must enforce the approved
+but no reviewer approval rule; it is the only current environment. API checks also
+confirmed `themrsean` has repository admin access. Future publication must enforce the approved
 branch/tag/environment protections and exact-candidate approval; the environment
 name alone does not supply them. No repository administration changes are made
-by this plan.
+by this decision record. Decision approval does not authorize Phase 3.3A
+implementation, a concrete release/signing dispatch, credentials or settings
+changes. #70 remains blocked by #54/#65/#68 and the unconfigured controls.
 
 [#54](https://github.com/msoecsse/graider/issues/54) remains open for current
 exact-SHA acceptance and reconciliation of its original downloaded/Finder/quarantine
