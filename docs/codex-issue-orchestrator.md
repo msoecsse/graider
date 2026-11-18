@@ -310,6 +310,90 @@ entries are unchanged. Historical failed-run checkpoints/locks were not reused
 or modified. No executor, unattended mode, #26/#15 execution or Phase 10 work is
 introduced by this follow-up.
 
+### Slice 2A: disposable development VM lifecycle (2026-11-18)
+
+The supervisor-only [typed lifecycle](../scripts/orchestrator/vm/contracts.ts)
+now has a [QEMU/HVF implementation](../scripts/orchestrator/vm/qemu.ts), separate
+from `Agent`, the serial queue and the closed execution gate. It supports
+create/start, bounded guest executable/argv execution, byte-only put/get,
+shutdown and destruction. **This is a Linux arm64 development adapter, not native
+macOS/Windows validation acceptance or permission to execute issues.** Unsupported
+platforms, runtime drift and unavailable HVF fail closed; no TCG or host-command
+fallback exists.
+
+[Reviewed inputs](../scripts/orchestrator/vm/reviewed-inputs.json) pin QEMU 10.0.2,
+Node 24.21.0, the watchdog, the complete non-system linked library closure,
+macOS kernel/build, kernel and complete guest image hashes. Before creation and
+again before launch, the adapter checks `kern.hv_support = 1`, the reviewed OS
+build, file digests, canonical library identities and transitive loader paths.
+Unresolved loader searches are rejected. Apple system libraries and OS tools are
+part of the pinned host OS trust base. The host and reviewed source remain trusted;
+this does not protect against a hostile host administrator changing binaries
+during launch. Input changes require review and renewed native enforcement probes.
+
+The [offline image builder](../tests/fixtures/orchestrator-vm/build-image.py)
+consumes the prior checksum-verified Alpine rootfs/kernel and official Linux Codex
+package. It never extracts or runs guest files on the host. It incorporates the
+proven PID-1 tmpfs-root bootstrap and the bounded guest serial transport. Rebuild
+using `python3 tests/fixtures/orchestrator-vm/build-image.py <reviewed-input-directory>
+<new-output-directory>`; its complete output digest must match the reviewed pin.
+Do not fetch new inputs, regenerate pins automatically, or treat an arbitrary
+operator-supplied digest as reviewed.
+
+Every instance gets a new private directory and RAM-only `/work`, with commands
+running as `nobody`. Start is single-use: another execution requires another
+instance. Host and guest launches use explicit clean environments. Fixed QEMU
+arguments select only `-accel hvf -cpu host`, with no default devices, NIC,
+monitor, disks, host mounts, shared Git metadata, host sockets or credentials.
+Successful boot with that reviewed executable and sole accelerator is required;
+an advertised accelerator or a configuration echo is insufficient. Guest loopback
+is available only inside the VM; there is no external networking or model relay.
+
+The anonymous serial pipes transport bounded base64 bytes and NUL-delimited argv.
+No returned guest path is opened on the host. Commands have at most 128 arguments
+and 16 KiB of argv; transfers and each output stream are capped at 64 KiB, frames
+at 256 KiB, cumulative received bytes at 8 MiB. Startup/verification and commands
+are bounded by 30 seconds; the independent watchdog limits the complete VM lease
+to 120 seconds. Output capture uses bounded guest pipes, without imposing a small
+file-size limit on Codex's own executable/helper files. Transfers accept only a
+narrow relative path syntax and reject protected path components; guest helpers
+reject links/nonregular files. Returned bytes are still untrusted. This API is
+**not** the later frozen candidate manifest, baseline export or promotion validator.
+
+The pinned watchdog starts QEMU in its own process group. Caller pipe/IPC loss,
+signals, transport failure and lease expiry terminate that group, escalate after
+250 ms, wait for child/stream closure and verify group absence. Shutdown allows
+five seconds for verified reaping. QEMU crashes, malformed replies, output overflow,
+startup failure, operation timeout and cancellation stop the lifetime. If reaping
+cannot be verified, destruction refuses to discard resources. A watchdog killed
+abruptly cannot provide a reaping attestation: retain the run for operator
+reconciliation; never infer reaping from a stale PID or automatically resume it.
+
+`destroy()` removes only that instance's disposable payload after verified exit;
+its private state directory retains structured `evidence.json` and independent
+`watchdog.json` (including after caller death). They contain event codes, times,
+runtime digest, process identity, exit status and byte counts; no commands, raw
+output, environment, tokens or exception text. Creation failures retain a redacted
+input-failure event. After a supervisor crash, retain the in-progress evidence and
+create a new instance; no old checkpoint, lock or workspace is reused.
+
+Deterministic lifecycle/input/watchdog tests run on ordinary CI without a VM or
+credentials. They cover cancellation, bounded timeouts/output, drift, protocol
+failure, concurrent operations, startup interruption, caller loss, forced kill,
+lease expiry and refusal to attest/discard an unverified process group. They do
+not certify hardware isolation. Actual adapter probes reran the successful hostile
+native-edit cases in two fresh HVF boots with guest byte assertions, independent
+fake host canaries and the actual sandboxed command descendant. Separate real
+probes cover byte/argv transfer, failed startup, cancellation, QEMU crash, frozen
+QEMU forced kill, abrupt supervisor death and fresh recovery. Concise results and
+local evidence locations are retained in the
+[observations](../tests/fixtures/orchestrator-vm/observed.json).
+
+Native macOS and Windows validation adapters, model relay, supervisor baseline
+export, candidate integrity/promotion and broader architecture acceptance remain
+outstanding. No production integration, authoritative checkout promotion, real
+issue execution, gate change, #26/#15 execution or Phase 10 work is introduced.
+
 ### Smallest implementation sequence under the accepted decision
 
 Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,

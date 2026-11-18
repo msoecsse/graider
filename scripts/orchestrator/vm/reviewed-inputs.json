@@ -1,0 +1,179 @@
+{
+  "scope": "Development-only QEMU 10.0.2 HVF Linux arm64 lifecycle; no native target acceptance",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "23.6.0",
+    "build": "23H626"
+  },
+  "qemu": {
+    "path": "/opt/homebrew/Cellar/qemu/10.0.2/bin/qemu-system-aarch64",
+    "sha256": "e4369ae9d738a75293d5243610f011573d4a11b86288854f64529c00025a0154"
+  },
+  "nodeSha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+  "watchdogSha256": "7ccc0cd3882f906050381685156a65db5e997e96e8fb5f3487af77e0757842f1",
+  "libraries": [
+    {
+      "path": "/opt/homebrew/opt/capstone/lib/libcapstone.5.dylib",
+      "realpath": "/opt/homebrew/Cellar/capstone/5.0.6/lib/libcapstone.5.dylib",
+      "sha256": "7d3c808c592db6a24d951ce6735a2a6266e3091c597c2d889e0eb32582e61240"
+    },
+    {
+      "path": "/opt/homebrew/opt/gnutls/lib/libgnutls.30.dylib",
+      "realpath": "/opt/homebrew/Cellar/gnutls/3.8.11/lib/libgnutls.30.dylib",
+      "sha256": "321745a5fdd9cc4192da405536651e84b6a62b5c8d390a1a977a154b8c1cdcfc"
+    },
+    {
+      "path": "/opt/homebrew/opt/gettext/lib/libintl.8.dylib",
+      "realpath": "/opt/homebrew/Cellar/gettext/1.0/lib/libintl.8.dylib",
+      "sha256": "6ca8278ccca353a10b5e4d2beb0ad3df32c0d3323d4c42063786b4a755c06071"
+    },
+    {
+      "path": "/opt/homebrew/opt/p11-kit/lib/libp11-kit.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/p11-kit/0.25.10/lib/libp11-kit.0.dylib",
+      "sha256": "533fca0112b3b2204c67f2738444a78d175fb25ee001655ad4955e610168e2a6"
+    },
+    {
+      "path": "/opt/homebrew/opt/libidn2/lib/libidn2.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/libidn2/2.3.8/lib/libidn2.0.dylib",
+      "sha256": "843f2e1134d37c758108f66c9b24711904bb0e33ca925a50794ac9250e4747f7"
+    },
+    {
+      "path": "/opt/homebrew/opt/libunistring/lib/libunistring.5.dylib",
+      "realpath": "/opt/homebrew/Cellar/libunistring/1.4.2/lib/libunistring.5.dylib",
+      "sha256": "195ee7e07f18a422b650a827861f7ccc4f95cd10d8295e89401e544103d4162f"
+    },
+    {
+      "path": "/opt/homebrew/opt/libtasn1/lib/libtasn1.6.dylib",
+      "realpath": "/opt/homebrew/Cellar/libtasn1/4.20.0/lib/libtasn1.6.dylib",
+      "sha256": "09ef41a5fb4a381898e938fdc91c549bc2a37b326e9ef9714b72b1c92992d5d2"
+    },
+    {
+      "path": "/opt/homebrew/opt/nettle/lib/libhogweed.6.dylib",
+      "realpath": "/opt/homebrew/Cellar/nettle/3.10.2/lib/libhogweed.6.11.dylib",
+      "sha256": "bea75381b278fbebd219d2ee4ba6657a99b8d0a0a130a845cfb9ec54ff292f6d"
+    },
+    {
+      "path": "/opt/homebrew/Cellar/nettle/3.10.2/lib/libnettle.8.dylib",
+      "realpath": "/opt/homebrew/Cellar/nettle/3.10.2/lib/libnettle.8.11.dylib",
+      "sha256": "3f3201aede452089adb317b19bbf87aff9c5d8f87979d4d886451fdb8eefda5a"
+    },
+    {
+      "path": "/opt/homebrew/opt/nettle/lib/libnettle.8.dylib",
+      "realpath": "/opt/homebrew/Cellar/nettle/3.10.2/lib/libnettle.8.11.dylib",
+      "sha256": "3f3201aede452089adb317b19bbf87aff9c5d8f87979d4d886451fdb8eefda5a"
+    },
+    {
+      "path": "/opt/homebrew/opt/gmp/lib/libgmp.10.dylib",
+      "realpath": "/opt/homebrew/Cellar/gmp/6.3.0/lib/libgmp.10.dylib",
+      "sha256": "1bb9184824b82f40bd50279634290d6cbdf9c1a371c045c7b10815e7955cd696"
+    },
+    {
+      "path": "/opt/homebrew/opt/pixman/lib/libpixman-1.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/pixman/0.46.4/lib/libpixman-1.0.dylib",
+      "sha256": "a7b4e2fa224886b30916010195ffea36f17a2bc6eab541b0e30f2bc2d040399e"
+    },
+    {
+      "path": "/opt/homebrew/opt/libpng/lib/libpng16.16.dylib",
+      "realpath": "/opt/homebrew/Cellar/libpng/1.6.55/lib/libpng16.16.dylib",
+      "sha256": "1e66b979a8322e672461cfeb40108763c2053913c4d6d9ba8d7f356578a29812"
+    },
+    {
+      "path": "/opt/homebrew/opt/jpeg-turbo/lib/libjpeg.8.dylib",
+      "realpath": "/opt/homebrew/Cellar/jpeg-turbo/3.1.3/lib/libjpeg.8.3.2.dylib",
+      "sha256": "7502ccda5fa7e08d570ddbc77e56182b3df32953bd7c9eb78755843b6b14627e"
+    },
+    {
+      "path": "/opt/homebrew/opt/snappy/lib/libsnappy.1.dylib",
+      "realpath": "/opt/homebrew/Cellar/snappy/1.2.2/lib/libsnappy.1.2.2.dylib",
+      "sha256": "05adc30512e691e48615ffc25d0b8b99b1dfdd8ef65c7eed0312486fecba1429"
+    },
+    {
+      "path": "/opt/homebrew/opt/lzo/lib/liblzo2.2.dylib",
+      "realpath": "/opt/homebrew/Cellar/lzo/2.10/lib/liblzo2.2.dylib",
+      "sha256": "07ac6bb51974d59e2bad94aa7d84e5577a00f1079d2a989140c7360f91f06713"
+    },
+    {
+      "path": "/opt/homebrew/opt/dtc/lib/libfdt.1.dylib",
+      "realpath": "/opt/homebrew/Cellar/dtc/1.7.2/lib/libfdt.dylib.1.7.2",
+      "sha256": "dc869de035b16e284f15062e9a2118cc4a4615f569722a26f5af93bd1f1057fe"
+    },
+    {
+      "path": "/opt/homebrew/opt/glib/lib/libgio-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgio-2.0.0.dylib",
+      "sha256": "b641e7540c153aced1b41fd48e2d93a8a5aa4293399c12eede38e501df944e1d"
+    },
+    {
+      "path": "/opt/homebrew/Cellar/glib/2.86.4/lib/libglib-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libglib-2.0.0.dylib",
+      "sha256": "e7e28284fc2c779ba5ee9e0b78435fd423a2b8aff51af3347fd736d51a41d425"
+    },
+    {
+      "path": "/opt/homebrew/opt/glib/lib/libglib-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libglib-2.0.0.dylib",
+      "sha256": "e7e28284fc2c779ba5ee9e0b78435fd423a2b8aff51af3347fd736d51a41d425"
+    },
+    {
+      "path": "/opt/homebrew/opt/pcre2/lib/libpcre2-8.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/pcre2/10.47_1/lib/libpcre2-8.0.dylib",
+      "sha256": "5b55b5256a3da30b4a7e41c36f6861e49c6ddb54cb4e47ced8d0b88e49522984"
+    },
+    {
+      "path": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgobject-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgobject-2.0.0.dylib",
+      "sha256": "a3dfb12aa21086a4958a9cc59ed96513ca239755157795d9c5fdf0dbf12564a7"
+    },
+    {
+      "path": "/opt/homebrew/opt/glib/lib/libgobject-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgobject-2.0.0.dylib",
+      "sha256": "a3dfb12aa21086a4958a9cc59ed96513ca239755157795d9c5fdf0dbf12564a7"
+    },
+    {
+      "path": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgmodule-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgmodule-2.0.0.dylib",
+      "sha256": "1265b73e2762c1ff3841b7f08d72320f0fef73b648275bab72128f9d111a606b"
+    },
+    {
+      "path": "/opt/homebrew/opt/glib/lib/libgmodule-2.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/glib/2.86.4/lib/libgmodule-2.0.0.dylib",
+      "sha256": "1265b73e2762c1ff3841b7f08d72320f0fef73b648275bab72128f9d111a606b"
+    },
+    {
+      "path": "/opt/homebrew/opt/zstd/lib/libzstd.1.dylib",
+      "realpath": "/opt/homebrew/Cellar/zstd/1.5.7_1/lib/libzstd.1.5.7.dylib",
+      "sha256": "a4cd4e3c8453bb4fdcc2f85ce6f6e0574af97ec8b8c020f5e4f962cf90ad0c3e"
+    },
+    {
+      "path": "/opt/homebrew/opt/libslirp/lib/libslirp.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/libslirp/4.9.1/lib/libslirp.0.dylib",
+      "sha256": "51e7d033d4cf345f70738957a1d1ccf59dc574ddbd71694673b5b44b64679df0"
+    },
+    {
+      "path": "/opt/homebrew/opt/vde/lib/libvdeplug.3.dylib",
+      "realpath": "/opt/homebrew/Cellar/vde/2.3.3/lib/libvdeplug.3.dylib",
+      "sha256": "0cfe9d1f640e1a18cc23d56de98e0c3131683aff818877d8c1d4fbc364fa1461"
+    },
+    {
+      "path": "/opt/homebrew/opt/ncurses/lib/libncursesw.6.dylib",
+      "realpath": "/opt/homebrew/Cellar/ncurses/6.5/lib/libncursesw.6.dylib",
+      "sha256": "46d28e25152dcdaf62d58b7513e1e68aa28bf56c93d94d138b4dfe1f46b6255e"
+    },
+    {
+      "path": "/opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib",
+      "realpath": "/opt/homebrew/Cellar/libusb/1.0.29/lib/libusb-1.0.0.dylib",
+      "sha256": "c9ab16fb3be9ae7d39f43feb6b3b0f35106b3d9b775351d171a1764adff43bf1"
+    },
+    {
+      "path": "/opt/homebrew/opt/libssh/lib/libssh.4.dylib",
+      "realpath": "/opt/homebrew/Cellar/libssh/0.11.3/lib/libssh.4.10.3.dylib",
+      "sha256": "2a54963d45d30a5d5621f9795745f4962adb941f23e52fb94399682782d44d64"
+    },
+    {
+      "path": "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+      "realpath": "/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libcrypto.3.dylib",
+      "sha256": "a1f0b4e4c7003da07f03ba9788b9006c483cab73c93cab30798bf3573b6c3fe5"
+    }
+  ],
+  "kernelSha256": "cd05fed9e617b5df93dc62ece9b78c422fd94e9b432a2f7c092714b139d5eef4",
+  "imageSha256": "0bc6c58baff447f3a4d722f46213e981ee9e4de126432a182310e24c0312e033"
+}
