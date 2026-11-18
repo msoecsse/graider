@@ -219,7 +219,7 @@ describe("production artifact provenance", () => {
       (step: { name?: string }) =>
         step.name === "Test signing and existing packaging paths without credentials"
     ).run;
-    expect(command).not.toContain("windowsInstallerConfig");
+    expect(command).toContain("electron/windowsInstallerConfig.test.ts");
     expect(command).toContain("macProductionArtifacts.test.ts");
     expect(command).toContain("packagingConfig.test.ts");
   });
