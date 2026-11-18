@@ -196,8 +196,9 @@ Node.js, npm, system Git or GitHub CLI and is never prompted to configure a secr
 
 This is **unsigned Preview/testing software**; Windows security/SmartScreen
 warnings are expected for now. Phase 3.1 adds a signed Windows installer separately;
-the portable Preview handoff remains available. Full Phase 3.3 will replace short-lived workflow
-artifacts with the formal GitHub Release pipeline and permanent release archive.
+the portable Preview handoff remains available. The approved staged plan keeps
+Windows distribution manual while Phase 3.3A prepares permanent signed macOS
+GitHub Releases; it does not replace Windows handoffs with signed release assets.
 This precursor does not complete Phase 3.3 or add update channels or auto-update.
 
 The workflow is manual (`workflow_dispatch`) only, restricted to the upstream
@@ -377,7 +378,8 @@ Before publishing the first update-capable release, record and validate:
    reaches installed clients; draft/test/prerelease artifacts must not enter Stable.
    Retain versioned installers, macOS ZIP/DMG, blockmaps, checksums and matching
    metadata/release notes. Define channel behavior separately in 3.4.
-4. Native signed version-to-version update tests on both platforms, differential
+4. Native signed version-to-version update tests on each platform before enabling
+   that platform's updater, differential
    download/full-package fallback, offline/failure recovery and explicit deferred
    restart during grading. Main owns asynchronous update work through validated,
    narrow IPC; renderer and faculty credentials never supply update authority.
@@ -386,9 +388,76 @@ Before publishing the first update-capable release, record and validate:
    Schema v2 migration or satisfy its production-enablement gates.
 
 These are acceptance requirements for later slices, not capabilities of this
-unsigned installer. Next is a narrow signed Windows configuration/verification
-slice once the owner's signing identity and service are available. Production
-3.1 remains incomplete until those prerequisites and signed acceptance pass.
+unsigned installer. macOS updates may proceed separately; Windows updater
+requirements remain deferred, not waived. Production 3.1 remains incomplete until
+the owner's signing identity/service and signed Windows acceptance are available.
+Schema v2 production enablement still requires both compatible production platforms
+and its separate release/update gates.
+
+## Staged release distribution plan (Phase 3.3)
+
+The faculty-approved direction recorded **2026-11-18 UTC** prioritizes signed,
+notarized macOS arm64 downloads and eventual macOS automatic updates. Windows
+Preview/unsigned installer handoffs remain manual; Windows production signing
+and updates wait for Microsoft credentials under
+[#50](https://github.com/msoecsse/graider/issues/50). Native Windows x64 testing
+and existing security/migration gates remain mandatory.
+
+The smallest next implementation issue is
+[#70 — Phase 3.3A](https://github.com/msoecsse/graider/issues/70): promote approved
+signed DMG/ZIP bytes to GitHub Releases with archive SHA-256 files, versioned
+release manifest and notes, exact source/signing/CI provenance, durable retention
+and protected draft-to-public approval. Its acceptance criteria are the planning
+source for artifact access, versioning, metadata, retries and publication controls.
+This is a plan, not an implemented pipeline or permission to dispatch signing or
+publish the existing development `0.1.0` archives.
+
+Before implementation, resolve
+[#69's faculty decisions](https://github.com/msoecsse/graider/issues/69): public
+versus restricted artifact access/destination, first version and prerelease/Latest
+designation, source/tag policy, named publication approvers/protection ownership,
+and exceptional withdrawal authority. The source repository is currently public;
+publishing its Release assets would make them public downloads. Do not infer
+approval of that audience from source visibility. The recommended release archive
+retains old versions, assets, hashes, manifests and notes indefinitely, independently
+of seven-day Actions candidate artifacts.
+
+Read-only API checks on 2026-11-18 UTC found `remote-course-v2` unprotected and no
+repository rulesets. The `macos-production-signing` environment has a branch policy
+but no reviewer approval rule. Future publication must enforce the approved
+branch/tag/environment protections and exact-candidate approval; the environment
+name alone does not supply them. No repository administration changes are made
+by this plan.
+
+[#54](https://github.com/msoecsse/graider/issues/54) remains open for current
+exact-SHA acceptance and reconciliation of its original downloaded/Finder/quarantine
+evidence. [CI 44212369331](https://github.com/msoecsse/graider/actions/runs/44212369331)
+at `fb694a705d36d290abb903db282190b432f6b88e` failed both the
+[#65 audit gate](https://github.com/msoecsse/graider/issues/65) and a separate
+[Windows migration publication test (#68)](https://github.com/msoecsse/graider/issues/68).
+The restored [NSIS run 44210961954](https://github.com/msoecsse/graider/actions/runs/44210961954)
+passed at earlier SHA `3c458efdad05a601c89c776a3be3d1429db284dd`; it is not
+exact-SHA acceptance of a newer release candidate. Require green comprehensive
+CI on macOS arm64/Windows x64, native NSIS evidence and approved signed/downloaded
+macOS acceptance at the release SHA. Past artifact acceptance does not authorize
+release publication or waive current gates. The approved public-native OAuth
+decision in [#27](https://github.com/msoecsse/graider/issues/27) remains unchanged.
+
+Keep Windows outputs outside signed macOS Release assets/tags and future update
+feeds. Portable Preview remains `graider-windows-preview-<full-sha>` with executable
+and SHA-256 file, retained seven days. Current unsigned NSIS CI validates an
+installer/blockmap and installed bundled Git but uploads **no installer**; this
+plan does not add a download path. Any separately authorized manual installer
+handoff must identify its unsigned/test status, source SHA and checksum. Preserve
+`--publish never`, disabled feed inference and the existing packaging paths.
+
+Phase 3.3A's release manifest is not updater metadata. macOS feed/channel design
+(3.4), runtime/IPC/UI and signed version-to-version update acceptance (3.5) remain
+separate; no Windows executable/blockmap or update feed belongs in the signed
+macOS release set. Windows production signing/updates remain deferred. Neither
+macOS publication nor unsigned Windows handoffs satisfy the separately required
+cross-platform production compatibility gates for Schema v2 migration; migration
+must remain disabled.
 
 ## macOS arm64 archive foundation (Phase 3.2A)
 

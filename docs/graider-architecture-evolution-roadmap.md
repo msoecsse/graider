@@ -235,9 +235,18 @@ and Windows x64 before production migration is enabled. Signing, release distrib
 update infrastructure and compatible production-release availability remain unverified
 dependencies; Phase 9 development or a Preview artifact does not mark them complete.
 
+**Approved staged distribution (2026-11-18 UTC):** prioritize signed/notarized
+macOS arm64 downloads, then macOS automatic updates. Continue manual Windows
+Preview/unsigned installer handoffs; defer Windows production signing and updates
+until Microsoft signing credentials and native acceptance are available under
+[#50](https://github.com/msoecsse/graider/issues/50). This changes release order,
+not Windows x64's first-class compatibility status or required native/security CI.
+It does not relax the separate cross-platform production migration gates above.
+
 ## Slice 3.1 — Windows production installer
 
-Replace the portable-only release path with a signed Windows x64 installer.
+The signed Windows x64 installer remains a deferred production target under #50;
+it is not a prerequisite of macOS-only manual release publication.
 
 First foundation slice **3.1A** ([#49](https://github.com/msoecsse/graider/issues/49))
 adds a separate unsigned NSIS test configuration and native Windows x64
@@ -288,14 +297,29 @@ This status does not authorize Phase 3.3 or claim overall release readiness.
 
 ## Slice 3.3 — GitHub Release pipeline
 
-Automate tagged releases with:
+The next proposed implementation is **3.3A — signed macOS arm64 manual-download
+releases**, [#70](https://github.com/msoecsse/graider/issues/70). It replaces the
+former simultaneous macOS/Windows installer publication requirement with staged
+delivery. Publish approved signed/notarized DMG and ZIP, their SHA-256 sidecars,
+version/source-bound release metadata and notes; retain older releases. Explicit
+artifact access, version/tag rules, provenance, protected approval and publication
+failure/retry behavior are specified in #70. No update feed/runtime is included.
 
-- macOS installer;
-- Windows installer;
-- checksums/metadata;
-- release notes.
+**Planning only; implementation is not authorized.** Resolve the remaining
+[faculty release decisions (#69)](https://github.com/msoecsse/graider/issues/69)
+and close #54 with its original manual evidence reconciled. Preserve green
+comprehensive exact-SHA CI on both native platforms and native NSIS acceptance.
+[#65](https://github.com/msoecsse/graider/issues/65) blocks the dependency audit;
+[#68](https://github.com/msoecsse/graider/issues/68) separately tracks the Windows
+migration publication timeout observed in
+[CI 44212369331](https://github.com/msoecsse/graider/actions/runs/44212369331).
+Historical signing/artifact acceptance is not current release authorization.
 
-Preserve older releases.
+Windows Preview/unsigned installers remain separate manual handoffs, outside
+signed macOS Release assets/tags and all future update feeds. Existing NSIS CI
+uploads no installer; this plan adds no installer download workflow. Windows
+production publication stays deferred with #50. See the
+[staged distribution plan](electron-packaging.md#staged-release-distribution-plan-phase-33).
 
 ### Temporary precursor — Windows Preview Build Artifact
 
@@ -306,18 +330,23 @@ and its SHA-256 checksum as a commit-identified artifact retained for 7 days;
 loose generated OAuth configuration is explicitly removed before upload.
 See the [Preview handoff instructions](electron-packaging.md#windows-preview-build-artifact-phase-33-precursor).
 
-This is unsigned Preview/testing software, not completion of Slice 3.3. Signing
-and the Windows installer remain Slice 3.1; permanent GitHub Releases remain full
-Slice 3.3. No release tags, update channels or auto-update are added. After this
-temporary detour, return to Phase 9 / Slice 9.2 — Migration Review UI review;
-the existing Slice 9.2 completion record below is preserved.
+This is unsigned Preview/testing software, not completion of Slice 3.3. Windows
+signing remains deferred in Slice 3.1; the precursor does not create release tags,
+update channels or auto-update. Manual Windows distribution remains available
+alongside the planned signed macOS releases. The former instruction to return to
+Slice 9.2 was historical; that slice's completion record below remains unchanged.
 
 ## Slice 3.4 — Stable and Preview channels
 
-Add update-channel metadata and channel selection.
+Plan macOS update-channel metadata and selection separately after 3.3A. Release
+manifest metadata in 3.3A is not an update feed. Windows feeds/channels remain
+deferred until signing credentials and signed production acceptance are available.
 
 ## Slice 3.5 — Auto-update
 
+Implement macOS automatic updates in a separately authorized slice, with native
+signed version-to-version, failure recovery and deferred-restart acceptance.
+Windows updates remain deferred pending #50 and equivalent native signed acceptance.
 Routine updates:
 
 - check automatically;
