@@ -1,0 +1,71 @@
+{
+  "scope": "Synthetic file only; not full repository or proposed production protocol acceptance",
+  "vmId": "graider-vm-CbKOHZ",
+  "bytes": 131089,
+  "sha256": "b4935a6cd264749cf4ad8533daaafb8c8d7e4fdd23d9f43a3ec1b91d462bc554",
+  "chunks": 5,
+  "operations": 19,
+  "bootMs": 5756.353959,
+  "ingressMs": 1803.8436250000004,
+  "readbackMs": 645.1605420000005,
+  "totalMs": 8335.530375,
+  "ingressInnerFrameBytes": 175386,
+  "decodedCommandOutputBytes": 131892,
+  "receiverSha256": "5799234f23af154287479cb2f1691660b2f98d108bbcc6ec0207bbba9f11cbcf",
+  "probeSha256": "275e313b1397e0e86a686858f737264dc41574e784e9101d5abcaf5469d93b62",
+  "modelSha256": "dc48b4909be886e2b752891d9fff83007637664b12786555c48e0671dc313a17",
+  "imageSha256": "0bc6c58baff447f3a4d722f46213e981ee9e4de126432a182310e24c0312e033",
+  "capacity": "Filesystem           1K-blocks      Used Available Use% Mounted on\ntmpfs                    65536         0     65536   0% /work\nMemTotal:        1503052 kB\nMemFree:          973660 kB\nMemAvailable:     940632 kB\n",
+  "byteAndModeVerification": true,
+  "payloadRemoved": true,
+  "rejectedDuplicate": true,
+  "watchdog": {
+    "status": "reaped",
+    "pid": 20207,
+    "code": 0,
+    "stopReason": "caller-stop",
+    "stderrBytes": 81,
+    "at": "2026-11-18T19:35:36.881Z"
+  },
+  "localEvidence": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-IzW4lh",
+  "timingRuns": [
+    {
+      "localEvidence": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-eAfeIV",
+      "operations": 18,
+      "bootMs": 4902.982959,
+      "ingressMs": 1469.0318750000006,
+      "readbackMs": 626.8901659999992,
+      "totalMs": 7057.377167
+    },
+    {
+      "localEvidence": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-JMgyKL",
+      "operations": 19,
+      "bootMs": 4342.560125,
+      "ingressMs": 1422.2920830000003,
+      "readbackMs": 636.0467920000001,
+      "totalMs": 6456.321875000001
+    },
+    {
+      "localEvidence": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-nG9OE6",
+      "operations": 19,
+      "bootMs": 5186.764375,
+      "ingressMs": 3159.893500000001,
+      "readbackMs": 715.7397500000006,
+      "totalMs": 9203.275125
+    },
+    {
+      "localEvidence": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-IzW4lh",
+      "operations": 19,
+      "bootMs": 5756.353959,
+      "ingressMs": 1803.8436250000004,
+      "readbackMs": 645.1605420000005,
+      "totalMs": 8335.530375
+    }
+  ],
+  "limitations": [
+    "Synthetic file only; no complete tracked repository import",
+    "GRT1 inner frames over unchanged GVM1; outer wire bytes not instrumented",
+    "No native Windows/macOS validation, Agent, relay, promotion or issue execution",
+    "Design model tests are not full protocol or hardware isolation acceptance"
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "head": "6a402bf21798c5ba8073d1492c1ae072a9d949a2",
+  "files": 1530,
+  "totalBytes": 12679270,
+  "directories": 444,
+  "manifestBytes": 246631,
+  "inventoryBytes": 210533,
+  "manifestSha256": "d03e3647bbf766beff9ebea4108608be15773384fc360a4e1717c2fe8edebdee",
+  "maximumPathBytes": 94,
+  "above64KiB": 20,
+  "largest": [
+    {
+      "path": "docs/graider-remote-course-architecture.md",
+      "mode": "100644",
+      "size": 251877,
+      "sha256": "401b81f7ea0d0e889071fa4fc9de665b61ea3481266c9110c8889449b8e98d6f"
+    },
+    {
+      "path": "ui/package-lock.json",
+      "mode": "100644",
+      "size": 220738,
+      "sha256": "2ff82a83b953fddd2ed0037cbdf2d2d25b36d02510ece1d783f816cb791e30d7"
+    },
+    {
+      "path": "ui/src/grading-workspace/GradingWorkspacePage.test.tsx",
+      "mode": "100644",
+      "size": 184439,
+      "sha256": "c25399a64fb562e29a311e619964f768bf922be72f20fe7ea64355f8e6154bbe"
+    },
+    {
+      "path": "ui/src/grading-workspace/GradingWorkspacePage.tsx",
+      "mode": "100644",
+      "size": 162306,
+      "sha256": "c8a3de90f4bb2a9a3ff8f595464c5495d7d8ec8e6054a5cc4c6d5b179f6c3852"
+    },
+    {
+      "path": "package-lock.json",
+      "mode": "100644",
+      "size": 161708,
+      "sha256": "18c528795a922cee26068a283532a5a9895540ba6db3a08453a778412c20f0ef"
+    },
+    {
+      "path": "docs/graider-traceability-matrix.md",
+      "mode": "100644",
+      "size": 128250,
+      "sha256": "df4933d35808acc115ea7c906e9470bc4388eb83428dae1512d247eeeadeaa8b"
+    },
+    {
+      "path": "docs/graider_complete_requirements.md",
+      "mode": "100644",
+      "size": 121520,
+      "sha256": "0b9a6324c1644f3c2d8ef96ebbbcc1ac6f413febc99bacb053d986a759b5eee4"
+    },
+    {
+      "path": "docs/electron-packaging.md",
+      "mode": "100644",
+      "size": 115545,
+      "sha256": "f10877c3a7f565760175a3870f5efff975f49a3a974e94389cd6ffd0980f023a"
+    },
+    {
+      "path": "docs/graider-schema-v2-migration.md",
+      "mode": "100644",
+      "size": 109594,
+      "sha256": "38d2aa359d4248100f054a65e6f0c88d5d2ba3af289af46bacd2abe9158ff08e"
+    },
+    {
+      "path": "docs/graider-architecture-evolution-roadmap.md",
+      "mode": "100644",
+      "size": 101199,
+      "sha256": "56a688dcb27c10457bdd9d5d79ab34fa3f89037a23635ac95477f9f15cf76824"
+    }
+  ],
+  "perFileChunks": 1630,
+  "packedDataChunks": 387,
+  "manifestChunks": 8,
+  "elapsedMs": 327.57495800000004
+}

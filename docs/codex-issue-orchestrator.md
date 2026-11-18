@@ -472,6 +472,364 @@ native macOS/Windows validation, full Graider import, a hostile guest kernel or 
 later relay/promotion boundary. All existing execution, authorization, audit and
 CI gates remain unchanged.
 
+### Slice 2C1: bounded full-checkout transport proposal (2026-11-18)
+
+**Design for review, not approved production integration.** This slice of
+[#72](https://github.com/msoecsse/graider/issues/72) records a resource/framing
+review and a separate synthetic-file feasibility experiment. It does not meet
+#72's complete-checkout/native acceptance. #72 stays open; #41 stays open/blocked,
+and unattended execution stays disabled. The Slice 2A transport, reviewed image,
+watchdog and Slice 2B admission/component are unchanged. No established isolation
+assumption needs to change for this proposal. Human review of the proposed bounds
+and guest implementation is required before a later implementation slice.
+
+#### Fresh tracked-checkout measurement
+
+The read-only [sizing fixture](../tests/fixtures/orchestrator-transfer/measure.ts)
+used bundled Git `ls-tree -rlz --full-tree HEAD`, regular-file reads and SHA-1 Git
+blob identity comparison against every tracked file. It ran at
+`6a402bf21798c5ba8073d1492c1ae072a9d949a2`, independently of the older Slice 2B
+numbers. This is sizing, not a substitute for the locked, race-aware production
+capture validator. No repository hooks, filters, scripts or tests were executed
+to process source bytes. Untracked/ignored files and `.git` are excluded; no
+tracked entry was omitted. The measurement precedes the additions in this slice;
+future admission must always measure its own exact HEAD. The complete concise
+[measurement record](../tests/fixtures/orchestrator-transfer/measurement.json)
+retains the largest-file digests and chunk counts.
+
+| Measured quantity                          | Value          |
+| ------------------------------------------ | -------------- |
+| Tracked regular files                      | 1,530          |
+| Aggregate raw bytes                        | 12,679,270     |
+| Distinct parent directories (excludes `.`) | 444            |
+| Longest path                               | 94 ASCII bytes |
+| Files above 65,536 bytes                   | 20             |
+| Canonical baseline v1 manifest             | 246,631 bytes  |
+| Proposed canonical inventory projection    | 210,533 bytes  |
+| Sizing run wall time                       | 327.575 ms     |
+
+Manifest means compact UTF-8 `JSON.stringify` with the existing ordered keys
+`version,repository,branch,head,issue,files`, issue 72, and file keys
+`path,mode,size,sha256`, files sorted by ASCII path. Its SHA-256 is
+`d03e3647bbf766beff9ebea4108608be15773384fc360a4e1717c2fe8edebdee`.
+The proposed inventory is one sorted array with ordered keys
+`path,type,mode,size,links`: regular files have modes `0644`/`0755`, exact size and
+link count one; directories have mode `0755`, normalized size/link fields zero.
+Directory filesystem sizes/link counts are not portable identities. Actual type,
+mode and absence of links/reparse points must still be checked before projection.
+These byte counts are measurements of serialized expected metadata, not observed
+inventories from a full imported guest.
+
+| Largest tracked paths                                    | Bytes   |
+| -------------------------------------------------------- | ------- |
+| `docs/graider-remote-course-architecture.md`             | 251,877 |
+| `ui/package-lock.json`                                   | 220,738 |
+| `ui/src/grading-workspace/GradingWorkspacePage.test.tsx` | 184,439 |
+| `ui/src/grading-workspace/GradingWorkspacePage.tsx`      | 162,306 |
+| `package-lock.json`                                      | 161,708 |
+| `docs/graider-traceability-matrix.md`                    | 128,250 |
+| `docs/graider_complete_requirements.md`                  | 121,520 |
+| `docs/electron-packaging.md`                             | 115,545 |
+| `docs/graider-schema-v2-migration.md`                    | 109,594 |
+| `docs/graider-architecture-evolution-roadmap.md`         | 101,199 |
+
+The existing 64-KiB file/output limit rejects 20 files, and a single inventory or
+manifest also exceeds that output limit. The 256-file and 1-MiB source admission
+caps reject the file count and total; the 64-KiB manifest admission cap rejects
+the manifest. Readback alone needs 12,679,270 decoded bytes, already above the
+8-MiB cumulative receive budget before its base64 expansion (at least 16,905,696
+wire bytes), replies and inventories. Existing Slice 2B also requires at least
+one put, one mode operation and one get per file: at least 4,590 exchanges
+before inventory operations (parent creation occurs within puts). The
+120-second lease leaves under 26.15 ms/exchange even with zero startup/cleanup
+time. The synthetic guest below measured roughly 125–316 ms/exchange across runs; this is
+illustrative extrapolation, not a full-tree timing measurement. There is no
+supported full-tree schedule within the existing lease. Byte/count rejection is
+conclusive; it would be inaccurate to infer a universal timing impossibility
+from a small experiment alone.
+
+#### Alternatives and recommendation
+
+| Alternative                               | Exchanges for current data in each direction | Memory/complexity and attack surface                                                                                                                   |
+| ----------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Per-file 32-KiB chunks                    | 1,630 including empty-file records           | Simple file-local offsets; many round trips and file-open transitions; bounded one-chunk memory                                                        |
+| General tar/zip/compressed archive        | About 387 chunks before archive overhead     | Adds extractor, link/type/path/metadata semantics and decompression limits; archive inventory still cannot replace supervisor readback                 |
+| Manifest-defined concatenated byte stream | 387                                          | One open destination file and one frame at a time; stream offsets derived from bounded manifest; small files share a frame and large files span frames |
+| Pipelined/windowed stream                 | Same frame count, fewer waits                | Multiple unacknowledged frames, reorder buffers, credit accounting and cancellation races; no demonstrated need yet                                    |
+
+Recommend the third option, uncompressed, with stop-and-wait credit of **one**.
+Do not introduce archive extraction, arbitrary guest shell commands, a general
+RPC endpoint or a sliding window. Files are opened in sorted manifest order;
+zero-byte files consume no data frames and must still be created/verified. A
+frame may finish several small files or part of one large file. The receiver
+derives all offsets/boundaries from supervisor-owned metadata, never guest paths
+or embedded archive names. Prefix sums need checked integer arithmetic.
+
+#### Proposed GRT1 protocol and independent acceptance
+
+A later reviewed helper must be incorporated into a newly pinned guest image,
+outside the imported workspace, with reviewed source/build/digest provenance.
+Do not run a helper supplied by the baseline. The current experiment instead
+loads a fixed synthetic-only shell fixture through the unchanged API and does
+not implement the complete protocol or baseline integration.
+
+Proposed framing is ASCII headers, canonical padded base64 and exactly one LF:
+
+```text
+GRT1 <session32hex> <sequence> <M|D|R|I> <offset> <decoded-length> <sha256> <base64>\n
+GRT1 <session32hex> <sequence> ACK <next-offset> <accepted-chunk-sha256>\n
+```
+
+`M` is manifest ingress, `D` is concatenated source ingress, `R` is independently
+read file bytes, and `I` is inventory. Integers are canonical unsigned decimal,
+without signs or leading zeroes. Header/control messages are at most 256 bytes;
+a data frame carries at most 32,768 decoded bytes and is at most 44,000 wire
+bytes. Each nonfinal frame must have exactly 32,768 bytes; a final frame has the
+exact declared remainder. Empty streams use their sealed zero size/empty digest,
+not an empty DATA frame. Enforce the line bound before allocation/base64 decoding,
+re-encode to reject noncanonical padding and verify declared length and SHA-256.
+No output/noise, ignored fields, CR aliases, extra lines or unknown versions.
+Partial pipe writes/reads are normal: keep only one bounded partial frame,
+wait for LF within the operation deadline, and reject incomplete data at EOF.
+
+A fresh unpredictable 128-bit session ID, immutable manifest digest, concatenated
+data digest and protocol/profile/runtime/image identities are recorded outside
+the guest. START fits the 256-byte control bound by sending session, manifest
+length/digest and data length/digest; repository/branch/HEAD/issue stay in the
+digested manifest. SHA-256 detects byte corruption and identity drift; it is not
+authentication of a hostile guest. Neither guest hashes nor ACKs grant acceptance.
+
+Use globally monotonic operation sequence numbers across control/data and both
+directions, with exact expected phase/offset and no reuse. Sequence is bounded
+by the admitted operation budget; byte offsets reset only at the specified
+stream transition. For ingress, the guest ACKs only after bounded write/hash
+accounting. For egress the supervisor requests one exact next frame; the next
+request carries acknowledgment of the preceding verified frame. A final control
+acknowledges the last response. An ACK repeats session, sequence, next offset
+and accepted digest. No next operation is authorized until all fields match.
+One read-only stream model in the tests exercises a phase in isolation; it is
+not a production duplex parser or complete session state machine.
+
+The six fixed control exchanges are START, SEAL_MANIFEST, SEAL_DATA,
+BEGIN_READBACK, END_READBACK and FINISH. START returns an exact empty workspace
+inventory before import. SEAL_MANIFEST checks canonical metadata, digest and
+admission; SEAL_DATA closes all writes and fixes modes. Then stream inventory
+before readback, perform BEGIN_READBACK and stream all sorted file bytes,
+perform END_READBACK, and stream inventory again. FINISH seals the transcript.
+Each transfer/request header includes the expected phase; only these transitions
+are legal. No separate per-file create/chmod/hash RPC is needed. Shutdown/reaping
+is separately bounded by the lifecycle, not an extra guest command.
+
+The supervisor compares both bounded canonical inventories to its own exact
+expected entries (including directories), rejecting missing/extra/duplicate or
+aliased paths, mode/type/size changes and nonregular/multiply-linked files. It
+independently hashes every returned byte into per-file and concatenated SHA-256,
+checks exact lengths, empty-file digests and final stream EOF, and compares the
+manifest digest again. Inventory cannot establish content identity on its own;
+readback cannot replace inventory/type checks. No imported program runs between
+these checks. Final success still requires attested guest shutdown/destruction
+and the existing locked authoritative HEAD/index/source identity/byte/mode
+recheck. Return only a receipt, never a live executor.
+
+#### Calculated resource envelope (proposal, not new constants in production)
+
+All limits are independent admission conditions; larger files/trees require a
+new reviewed profile. Do not silently omit files or choose bounds from guest
+input. Proposed caps leave finite growth room around this measurement:
+
+| Resource           | Proposed bound and justification                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Per file           | 512 KiB; just over twice the current 251,877-byte maximum; always chunked                                    |
+| Source bytes `T`   | 16 MiB; 32.3% above current bytes, not an unbounded stream                                                   |
+| File count         | 2,048; 33.9% above measured 1,530; caps metadata/inodes/work                                                 |
+| Directories        | 1,024; derived parents count independently, accommodating 444 with bounded metadata                          |
+| Path               | Existing 240 ASCII bytes; preserve the exact safe path/alias restrictions                                    |
+| Manifest `M`       | 1 MiB hard serialized cap; 2,048 entries of at most about 360 bytes plus identity fit below it               |
+| Each inventory `I` | 1 MiB; at most 3,072 entries, paths 240 bytes and fixed bounded metadata; still enforce serialized admission |
+| Guest workspace    | Retain 64-MiB tmpfs; no disk or host mount needed for this byte-only profile                                 |
+| Guest RAM          | Retain 1,536 MiB; no agent, builds, dependencies or model in this resource profile                           |
+| Bidirectional wire | 64 MiB hard total, counting malformed bytes and both directions before parsing                               |
+| Exchanges          | At most 1,126, including six controls; no per-file guest process launch                                      |
+
+The [executable calculation model](../tests/fixtures/orchestrator-transfer/model.ts)
+uses `C(x) = ceil(x / 32768)` and
+`N = C(M) + 2*C(T) + 2*C(I) + 6`. With measured metadata, ingress is 8 manifest
+frames + 387 data frames; readback is 387 frames and the inventories are 7 frames
+each: **802 exchanges** total. Raw transferred payload is
+`M + 2*T + 2*I = 26,026,237` bytes. The conservative base64/framing calculation
+is `4*ceil(raw/3) + 4*(N-6) + 512*N`: **35,115,460 bytes** for the current
+measurement. This includes per-frame base64 padding slack, both request/response
+headers, ACKs and controls; it excludes the old GVM1 wrapper because GRT1 is a
+proposed replacement internal transport, not nested inside GVM1 in production.
+
+At maximum admission, `C(M)=32`, `C(T)=512`, `C(I)=32`, so `N=1126`;
+raw payload is **36,700,160 bytes**, base64 plus padding/headers/ACKs is at most
+**49,514,540 bytes**, leaving 17,594,324 bytes below the 64-MiB combined wire cap.
+The cap counts _all_ bytes, including errors and stderr; reserve no unlimited
+diagnostic channel. Each direction is also bounded by its admitted expected
+stream sizes and transcript, so a malicious guest cannot consume the margin as
+additional accepted data. Decoded file-byte ingress/readback are each at most
+16 MiB; inventory output is at most 2 MiB plus fixed controls. Mismatched
+declarations fail admission before transfer.
+
+Workspace calculation assumes the reviewed Linux image's 4-KiB page allocation:
+16 MiB source + less than 8 MiB file-tail rounding (2,048 files) + at most 4 MiB
+initial directory pages + less than 1 MiB directory-entry allowance + 2 MiB
+manifest/inventory staging + under 1 MiB
+frame/control staging = **under 32 MiB**. Reserve the other 32 MiB of the
+existing 64-MiB tmpfs for filesystem metadata/accounting uncertainty. Helpers
+must stream directly into files, not keep a second full source/archive copy,
+and enforce workspace/inode exhaustion as failure. No dependency installation
+or build workload is included. Future native Windows workspace allocation must
+be measured independently, not inferred from Linux page sizes.
+
+Host/guest transport buffers should retain at most one decoded chunk, its
+44-KiB encoded frame, bounded header/ACK, and fixed write/read buffers: reserve
+256 KiB. Reserve 16 MiB separately for parsed manifest/path tables/digests;
+serialized size alone is not a bound on managed-language heap expansion. Use a
+reviewed helper with explicit allocation/work limits; validate this memory
+reserve in later full-tree tests. Guest baseline memory is measured below;
+these estimates do not certify worst-case runtime heap or guest-kernel behavior.
+The supervisor can use its immutable external captured-byte spool and stream
+readback hashes; it need not hold two full trees in memory.
+
+Propose an independent **600-second hard VM lease**, without renewal, and
+30-second startup/operation ceilings plus the existing five-second verified
+shutdown and 250-ms forced-kill grace. This is a finite import-only profile, not
+an agent execution lease. A planning allowance of 400 ms per exchange (above the slowest synthetic
+ingress average of 316 ms, measured during concurrent typechecking) gives
+450.4 seconds at maximum admission; allow 30 seconds startup, 30 seconds sealing/
+verification and five seconds cleanup: **515.4 seconds**, leaving 84.6 seconds
+for stalls/scheduling. Current-tree calculation is 320.8 seconds of exchanges
+under that assumption. Maximum operation timeout multiplied by operation count
+does **not** fit this lease: the independent watchdog must terminate stalled
+sessions even when each individual operation has not expired. The 400-ms allowance,
+metadata sealing time and worst-case memory estimates are assumptions requiring
+full-tree measurements before approval. Do not increase the current watchdog
+lease or repin it automatically in this slice.
+
+The exchange count also bounds data handling: at maximum admission, splitting
+512 data frames across 2,048 file boundaries needs at most 2,559 nonempty
+file/frame fragments in each direction. Two inventories visit at most 6,144
+entries, and mode setting visits at most 2,048 files. There must be no shell or
+subprocess per entry. A 240-byte path has at most 120 nonempty components, so
+even repeated per-file parent walks are bounded by 245,760 component checks per
+validation pass; cache only identities that remain valid under the existing
+race checks. Guest sealing and path/stat work still need measured 30-second
+deadline acceptance at maximum admission. These are calculated work bounds,
+not observed full-tree syscall counts.
+
+#### Failure, cancellation and retained evidence
+
+| Trigger                                                                      | Required outcome                                                                                               |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Partial frame, truncated base64, premature EOF                               | Bounded partial buffer/deadline; no ACK; terminal failure and teardown                                         |
+| Reordered/duplicate chunk or ACK, wrong session/phase/offset/length          | Reject even if bytes/digest match; no retries or duplicate-write acknowledgment                                |
+| Corrupt chunk, per-file/final digest mismatch, missing/extra inventory entry | Reject before receipt; preserve failure code/identity/counts and destroy only after reaping                    |
+| Cancellation, startup/operation/lease expiry                                 | First failure wins; stop writes/credit, cancel pending work, terminate VM process group and attest exit        |
+| Guest crash, pipe loss, malformed response                                   | Terminal session failure; ACK/guest success cannot override independent lifecycle evidence                     |
+| Supervisor death or uncertain reaping                                        | Independent watchdog still owns lease/kill; retain payload/state/lock unless reaping is independently attested |
+
+Neither an accepted chunk nor a final guest response releases the authoritative
+lock. Preserve bounded redacted counts, manifest/protocol/runtime identities and
+timestamps outside the guest, without raw repository bytes/commands/credentials.
+Never infer cleanup from stale PID absence or delete an uncertain payload. No
+automatic resume, replay, lease extension or checkpoint repair: reconciliation
+is deliberate, and a later attempt needs a fresh ID, capture, workspace and VM.
+Historical interrupted state/locks/evidence remain untouched.
+
+All Slice 2B protections remain mandatory: supervisor-owned path validation,
+protected paths, bounded source reads/raw Git blob comparison, source/parent
+identity and mode checks, lock ownership, immutable repository/branch/HEAD/index
+and manifest identity, exact final inventory and independent byte verification.
+Unsupported host rejection still precedes source capture. Windows short-name,
+case/prefix, drive/UNC/device/ADS/reserved-name aliases and native reparse-point
+requirements remain fail-closed; unknown reparse metadata is not approximated.
+This proposal does not enable Windows capture or claim native macOS/Windows VM
+acceptance. Renderer/preload/backend authority is unchanged. No host mounts,
+shared `.git`, credentials, sockets, NIC/general networking, unrestricted host
+execution, Agent/relay, candidate export/promotion, guest commits, issue execution,
+#26/#15 or Phase 10 work is included.
+
+#### Experimental evidence and review questions
+
+The [manual probe](../tests/fixtures/orchestrator-transfer/probe.ts) runs the
+reviewed [synthetic receiver](../tests/fixtures/orchestrator-transfer/receive.sh)
+as `nobody` in the unchanged pinned no-NIC HVF guest. It sends inner GRT1 frames
+as bounded GVM1 files, validates sequence/offset/length/canonical base64/digest
+in guest code, appends to one fixed guest file, validates ACKs on the host, then
+reads the file independently with five bounded `dd` requests. Every returned
+byte, SHA-256, exact size, mode `0644` and link count one is supervisor-checked.
+A duplicate final chunk must fail, followed immediately by teardown. This fixture
+uses no repository baseline, host mounts, source capture lock or credentials.
+It has a fixed synthetic size/path/session and is not reusable production code.
+
+The [observations](../tests/fixtures/orchestrator-transfer/observed.json) bind
+the final probe/model/guest source digests, pinned image and independently
+reaped VM identity. The first successful boot measured 131,089 bytes, five data
+chunks, 18 operations, 4.903-second startup, 1.469-second ingress, 0.627-second
+readback and 7.057 seconds total. Inner frames were 175,386 bytes; these are
+not outer GVM1 wire counts (which base64-encode them again). The final source-bound run used **19 operations**, with 5.756-second startup,
+1.804-second ingress and 0.645-second readback, 8.336 seconds total; its duplicate final chunk was rejected before attested teardown and verified
+payload removal. Operation counts exclude create/start/shutdown/destroy lifecycle
+calls. An earlier 19-operation run overlapped root typechecking and took 3.160 seconds
+for ingress, demonstrating timing variation; all four timings are retained.
+An initial managed-sandbox input-verification failure is retained at
+`/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-synthetic-KF9Vrq`;
+the existing verifier failed closed and no runtime/pin/limit was changed.
+
+The guest reported an empty 65,536-KiB tmpfs and 1,503,052-KiB total memory,
+935,848-KiB available in the first run. This is a point measurement, not maximum
+memory certification. The synthetic data digest is
+`b4935a6cd264749cf4ad8533daaafb8c8d7e4fdd23d9f43a3ec1b91d462bc554`.
+No complete checkout was transferred. Linux/HVF proof cannot certify native
+Windows/macOS validation, hostile-kernel safety, full protocol/state transitions,
+full-tree latency, filesystem race defenses or allocation bounds.
+
+[Deterministic tests](../tests/unit/orchestrator-transfer-design.test.ts) exercise
+malformed/partial/oversized frames, padding, corruption, session/sequence/offset/
+phase mismatch, duplicate/truncated streams, forged/stale ACKs, per-file readback,
+exact inventory, admission/wire/operation exhaustion, cancellation, lease expiry
+and cleanup uncertainty. These tests execute a design model, not a production
+adapter or real VM. The existing VM/baseline failure suites remain unchanged.
+
+Review before Slice 2C2: approve or revise these explicit admission/lifetime
+budgets; review the future complete duplex state machine and pinned helper;
+measure complete-HEAD transfer with all paths/modes/independent readback and
+actual wire/operation/memory/time accounting; prove maximum-profile failure
+behavior and cancellation under load; separately provision native Windows
+reparse metadata/VM and macOS validation. Keep #72 open until its full acceptance
+is proven. Preserve required root checks, native CI, dependency audit and all
+authorization/execution gates. Stop here for review; no production transport
+implementation is authorized by this design slice.
+
+Reproduction uses only existing reviewed VM artifacts; a changed pin or unknown
+runtime must fail rather than trigger a download/rebuild:
+
+```text
+node --import tsx tests/fixtures/orchestrator-transfer/measure.ts
+npx vitest run tests/unit/orchestrator-transfer-design.test.ts
+node --import tsx tests/fixtures/orchestrator-transfer/probe.ts <existing-reviewed-artifact-directory>
+```
+
+Local validation passed: full `npm run typecheck`, `npm run lint`,
+`npm run format:check`, `npm test` including hygiene (**3,404 tests / 205 files,
+zero skips, 79.64 seconds**), and `npm run build`. Final fixture edits also passed
+`npm run typecheck:prepared`, scoped ESLint and all **38** design tests.
+Initial fixture-authoring lint errors and a transient typecheck against the
+pre-update observation schema were corrected; no gate or assertion was weakened.
+No production/migration/UI behavior changed. Comprehensive native CI and audit
+remain required at the pushed exact SHA; local results do not establish CI
+acceptance or issue closure.
+
+Measured phase walls through primary local-check completion, 19:24:23–19:37:56
+UTC: investigation **51 seconds**, implementation/proof **520 seconds**, local
+validation/final evidence preparation **242 seconds**, total **813 seconds**.
+The validation phase overlaps the final fixture/evidence refinement. Earlier
+setup and exclusive tool/approval waits were not separately instrumented; they
+are not estimated. No CI waiting occurred in this interval. Commit/push/CI
+inspection and issue handoff follow these measured intervals.
+
 ### Smallest implementation sequence under the accepted decision
 
 Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,
