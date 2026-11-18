@@ -389,10 +389,88 @@ QEMU forced kill, abrupt supervisor death and fresh recovery. Concise results an
 local evidence locations are retained in the
 [observations](../tests/fixtures/orchestrator-vm/observed.json).
 
-Native macOS and Windows validation adapters, model relay, supervisor baseline
+Native macOS and Windows validation adapters, model relay, full-checkout baseline
 export, candidate integrity/promotion and broader architecture acceptance remain
 outstanding. No production integration, authoritative checkout promotion, real
 issue execution, gate change, #26/#15 execution or Phase 10 work is introduced.
+
+### Slice 2B: bounded supervisor baseline import (2026-11-18)
+
+The supervisor-only [baseline component](../scripts/orchestrator/baseline.ts)
+captures and verifies one small tracked baseline in a fresh Slice 2A guest, then
+destroys that guest. Its only result is a supervisor receipt; it exposes no live
+executor, CLI/Agent integration, model relay, candidate promotion or GitHub/Git
+mutation capability. **Execution remains disabled and #41 remains open/blocked.**
+
+Under the existing common-Git-directory `graider-orchestrator.lock`, it checks the
+authorized repository, branch and exact HEAD. Read-only bundled Git plumbing
+compares the complete tracked tree/index and detects untracked, nonignored files.
+It never invokes `status`, content filters, hooks, dependency installation,
+repository scripts, tests or validation while processing the baseline. Git has a
+clean environment, disabled fsmonitor/hooks/lazy fetching, no ambient global/system
+configuration or credential variables. Ignored untracked files are never exported.
+
+The canonical manifest records issue/repository/branch/HEAD and sorted paths, Git
+modes, byte sizes and SHA-256 digests. Capture bounds each read, verifies raw Git
+blob identity without filters/line-ending conversion, rejects links, hardlinks,
+nonregular files, special permissions and path aliases, and checks file/parent
+identities before and after reading. This also detects dirty bytes hidden by
+assume-unchanged/skip-worktree index flags. Source paths must fit the current ASCII
+transport syntax; absolute, traversal, drive/UNC/device/ADS, reserved Windows names,
+trailing dots, short-name syntax, case-fold/prefix collisions and protected
+Git/credential/configuration components fail closed. No tracked file is silently
+omitted. Source mode/identity/byte checks and authoritative Git identity are repeated
+after verified VM shutdown, before success and lock release. The lock still
+requires an exclusively assigned checkout; it does not exclude unrelated editors
+or a hostile host administrator.
+
+A new private external directory retains the manifest, its receipt digest and VM
+identity/evidence. Only captured regular-file bytes cross anonymous serial pipes;
+there are no host mounts, shared `.git`, homes/configuration, credentials, GitHub
+authority or sockets. Fixed guest commands inventory the initially empty workspace
+and set/check canonical file modes. Before and after bounded readback, inventory
+must contain exactly the expected directories and regular files, with no extra
+entries, links or mode/size discrepancies. The supervisor hashes returned bytes
+itself; guest exit status, inventory and bytes are untrusted inputs, never a guest
+claim of acceptance. No repository executable is run. Every exit destroys only
+this guest after attested shutdown; uncertain reaping retains its payload. Failure
+retains the new lock and redacted evidence for deliberate operator reconciliation.
+Historical interrupted checkpoints, locks and evidence are never used or changed.
+
+Admission bounds are **65,536 bytes/file, 256 files, 1,048,576 total source bytes,
+65,536 serialized manifest bytes and 240 ASCII bytes/path**. Host Git metadata is
+bounded at 262,144 bytes. These conservative Slice 2B bounds do not enlarge Slice
+2A's unchanged 64 KiB transfer/output, 256 KiB frame, 8 MiB cumulative receive,
+30-second operation/startup and independent 120-second VM lease limits. The import
+also has a 120-second overall cancellation deadline. A limit, truncation, partial
+transfer, malformed response, timeout or digest mismatch fails closed; there is no
+chunking/streaming fallback. Unsupported host/runtime platforms are rejected before
+source capture, including Windows until reviewed native reparse-point metadata and
+a native VM adapter exist. Cross-platform deterministic tests mock that platform
+gate and VM; their portable path/Git/filesystem checks are not native isolation
+acceptance.
+
+**Full Graider import is blocked by [#72](https://github.com/msoecsse/graider/issues/72).**
+The starting tree `2d573f9c0c8e54662d9f0f9d9c4860897a603d31` has 1,527 tracked
+files / 12,629,114 bytes; 20 files exceed the existing per-file transport cap.
+For example, `docs/graider-remote-course-architecture.md` is 251,877 bytes and
+`ui/package-lock.json` is 220,738. Importing this complete baseline requires a
+separately reviewed bounded transport/resource plan, not larger constants, file
+omission or weaker verification. Slice 2B stops at the independently verifiable
+small-baseline component.
+
+[Manual observations](../tests/fixtures/orchestrator-baseline/observed.json)
+record two fresh pinned HVF imports with empty/binary/executable/exactly-64-KiB
+files, deterministic manifest digests, byte/mode verification, independent reaping
+and disposable-payload removal. A third fresh boot proves cancellation after
+confirmed HVF startup, failure/lock retention and reaping; a fake host canary stays
+unchanged. These are actual Linux arm64 guest observations. Deterministic failure
+tests separately cover source/HEAD/index drift, unsafe tracked entries, path
+aliases, limits, malformed manifests/inventories, partial transfer, cancellation,
+cleanup uncertainty and digest mismatches. They do not certify hardware isolation,
+native macOS/Windows validation, full Graider import, a hostile guest kernel or any
+later relay/promotion boundary. All existing execution, authorization, audit and
+CI gates remain unchanged.
 
 ### Smallest implementation sequence under the accepted decision
 

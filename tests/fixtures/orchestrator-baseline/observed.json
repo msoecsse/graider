@@ -1,0 +1,47 @@
+{
+  "scope": "Actual pinned Linux arm64/HVF Slice 2B import, not native macOS/Windows validation",
+  "componentSha256": "8023a25bb89fe03e636b4624ec8506886e6e89acc1985f6da3b49391df6f5465",
+  "runtimeManifestSha256": "6e9958e8b70c47efe0c87d4c1b4f3c0fdc35f72dacd156af0417cd431cf7c971",
+  "imageSha256": "0bc6c58baff447f3a4d722f46213e981ee9e4de126432a182310e24c0312e033",
+  "localEvidence": "/private/tmp/graider-41-slice2b-native-eTW0AH",
+  "imports": [
+    {
+      "attempt": 0,
+      "vmId": "graider-vm-bzTLuK",
+      "manifestSha256": "2e694caf0da990d29ae757f8dc3adb42646d733f8ba1b1efd9903bb65364e7b5",
+      "files": 4,
+      "byteAndModeVerification": true,
+      "freshEmptyWorkspace": true,
+      "reaped": true,
+      "payloadRemoved": true
+    },
+    {
+      "attempt": 1,
+      "vmId": "graider-vm-OYqZvG",
+      "manifestSha256": "2e694caf0da990d29ae757f8dc3adb42646d733f8ba1b1efd9903bb65364e7b5",
+      "files": 4,
+      "byteAndModeVerification": true,
+      "freshEmptyWorkspace": true,
+      "reaped": true,
+      "payloadRemoved": true
+    }
+  ],
+  "cancellation": {
+    "confirmedHvfBoot": true,
+    "vmId": "graider-vm-crXRQT",
+    "reaped": true,
+    "lockAndFailureEvidenceRetained": true,
+    "payloadRemoved": true
+  },
+  "fakeHostCanaryUnchanged": true,
+  "limitations": [
+    "Full Graider baseline rejected; reviewed transport follow-up #72 required",
+    "No native macOS/Windows validation or reparse-point acceptance",
+    "No Agent, model relay, candidate promotion or execution gate change",
+    "Mocked VM/platform CI tests are not hardware enforcement evidence"
+  ],
+  "earlierProbeFailures": [
+    "Managed sandbox denied kern.hv_support input check; no fallback used",
+    "Initial cancellation observer ended before VM startup; successful import does not count as cancellation proof; corrected in fresh boots"
+  ]
+}
