@@ -134,10 +134,10 @@ The approved replacement is isolated, disposable **per-issue execution**:
   both native targets before enabling execution. Preserve failed-run evidence.
 
 The current repository has no verified whole-process isolation adapter or safe
-promotion implementation. A local macOS sandbox launch in the managed development
-environment failed with `sandbox_apply: Operation not permitted`; no installed
-VM/container runtime was found. This is an environment limitation, not proof that
-isolation is impossible elsewhere. Windows enforcement has not been established.
+promotion implementation. The November 10 assessment found a denied nested macOS
+sandbox launch and no VM runtime on PATH. The November 17 development-host proof
+below supersedes that runtime inventory: QEMU/HVF can now boot a disposable Linux
+guest. It does not establish native macOS or Windows validation or safe promotion.
 The official [OS sandbox documentation](https://learn.chatgpt.com/docs/agent-approvals-security)
 describes platform mechanisms; it does not verify this supervisor's boundary.
 Consequently `AppServer.assertIsolation()` fails closed, and both the CLI and
@@ -151,11 +151,198 @@ by this work. Preserve the original evidence and broker-bypass probe. A new #26
 dry-run plan is deferred until #41 is fully verified and closed. Do not execute
 #26, #15 or Phase 10.
 
+### Development-host isolation assessment (2026-11-17)
+
+Host: macOS 14.7.6, Apple Silicon arm64. Installed CLI: `codex-cli 0.167.0`.
+The existing gates in `index.ts`, `runner.ts` and `AppServer.assertIsolation()`
+remain authoritative and unchanged. The earlier raw protocol adapter still
+inherits the host environment and exposes host validation/GitHub broker actions;
+it must never become the isolated executor merely by removing the gate.
+
+**Approval compatibility:** installed `codex --help` lists `on-request` and
+`never`; `codex --ask-for-approval untrusted --help` exits 2. A newly generated
+experimental app-server schema still includes `untrusted`, illustrating why
+schema acceptance is insufficient. Current official
+[approval guidance](https://learn.chatgpt.com/docs/agent-approvals-security) and
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+retire explicit `untrusted`. Do not restart the historical configuration below.
+An eventual unattended guest must use a verified supported policy (`never`, with
+`workspace-write` and network restrictions retained), deny permission expansion,
+and rely on the outer VM for whole-process containment. This is a future adapter
+requirement, not an approval-policy change to the disabled runner.
+
+**Native process sandbox:** a minimal deny-default `sandbox-exec` invocation
+inside this managed session still exits 71, `sandbox_apply: Operation not
+permitted`. An explicitly approved host-level invocation of the same profile
+aborted with exit 134. The latter does not establish that Seatbelt is unavailable
+on the host, nor that its policy successfully isolates a working toolchain.
+Neither result is successful containment evidence. No unrestricted issue agent
+was launched to work around either result.
+
+**VM foundation:** QEMU 10.0.2 successfully booted Alpine Linux aarch64 with
+`-machine virt -accel hvf -cpu host`. The probe uses explicit HVF, without an
+accelerator fallback. QEMU's [security model](https://www.qemu.org/docs/master/system/security.html)
+requires supported hardware virtualization for security guarantees and explicitly
+excludes TCG emulation. Advertising HVF in help or keeping a paused VM alive was
+not counted as boot/containment evidence.
+
+The probe supplies a checksum-verified kernel and a generated RAM-only initramfs.
+It has `-nodefaults -display none -serial stdio -monitor none -nic none`, no host
+directory shares, no block devices, no guest agent, no clipboard or credential
+forwarding. Only the kernel/initramfs and bounded process I/O cross the boundary.
+Guest work runs as `nobody`, with a fresh writable `/work`. Fake host credentials,
+Git metadata, protected files and a sibling workspace exist only under the new
+disposable evidence directory; no real credential files are read or copied.
+
+| Probe                                                                  | Observed result                                                     | Scope of evidence                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Guest native file creation and `sed` editing                           | PASS, two fresh boots                                               | Ordinary native guest file I/O, not by itself Codex `apply_patch`                               |
+| Fake protected host, `.git/config`, credentials and sibling read/write | PASS; host SHA-256 values unchanged                                 | Direct absolute paths are absent from the guest namespace                                       |
+| Symlink, hardlink and `/proc/1/root` path escapes                      | PASS, access failed                                                 | Disposable host canaries only                                                                   |
+| Network attempts                                                       | PASS; external HTTP and loopback connection fail; only `lo` exists  | No NIC; no model gateway or dependency download access                                          |
+| Hostile validation shell and its child                                 | PASS; host file access/network failed, guest output created         | Actual descendants in the guest, not a mocked command runner                                    |
+| Cancellation and fresh restart                                         | PASS; SIGTERM reaped QEMU; next boot had no previous workspace edit | All guest processes die with the VM; production crash recovery remains unimplemented            |
+| Linux Codex 0.167.0 with scripted loopback Responses                   | PASS, fixture-only response completed                               | No model credentials, inference or real issue execution                                         |
+| Native Codex `apply_patch` in the same guest                           | FAIL: `Failed to write file /work/native-codex.txt`                 | Both initramfs and tmpfs workspace attempts failed; later hostile native edits were not reached |
+
+Local evidence is under `/private/tmp/graider-41-host-proof-yas7jxtj`: `proof.py`,
+`result.json`, `guest-1.log`, `guest-2.log`, fixture files, generated schema and
+package/checksum metadata. Alpine 3.24.4 rootfs SHA-256:
+`4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de`;
+source virtual ISO SHA-256:
+`cf88d8ba67389d20d9ed307366b52e487c15d7d3ee3233b62b95f709daa1d430`.
+Both matched the publisher's HTTPS release manifest before boot. These identify
+the disposable fixture, not an approved production image/runtime version.
+The official Linux Codex package matched its npm SHA-512 integrity metadata;
+`codex-guest-http-1.log` records the completed fixture response, while
+`codex-guest-native-valid-1.log` and `codex-guest-native-tmpfs-1.log` record the
+native-tool failures. `codex-native-proof.py` and `codex-native-tmpfs-proof.py`
+retain their sources. Guest-only loopback served scripted Responses with the
+supported `never`/`workspace-write` configuration and network restrictions kept.
+No native-write success or working inner command sandbox is inferred from these
+failures; the underlying write failure has not been diagnosed. The minimal guest
+is not yet a demonstrated Codex executor. Stop adapter implementation here rather
+than removing sandbox controls to make this fixture work.
+
+This is a viable development-host VM foundation, **not security acceptance for
+unattended execution**. Native Codex editing, its inner sandbox, credential-free
+model transport, native macOS/Windows validation, trusted export/promotion and
+crash recovery must all pass before the execution gate can change. No production
+isolation adapter, promotion code, plan flag or unattended issue execution is
+introduced by this assessment. Failed exploratory fixtures remain evidence, not
+passing checks. The original interrupted checkpoints/locks are never opened for
+execution or reused.
+
+### Smallest implementation sequence under the accepted decision
+
+Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,
+checkpoint fingerprint and exact-SHA CI/closure logic. Add a narrow isolated
+executor and supervisor-owned promotion; do not build a replacement orchestrator.
+
+1. **Verify and pin the VM adapter before connecting it to `Agent`.** Define
+   create/start/run/export/stop/destroy operations using executable/argv arrays
+   and an explicit clean environment. Pin reviewed runtime/image/toolchain
+   digests, require hardware virtualization and reject missing/unknown controls.
+   Run hostile fixtures at startup and after runtime/image/policy changes. A
+   configuration echo, schema, model response or mocked test cannot certify it.
+   Put the native-platform differences behind this adapter. No TCG, unrestricted
+   process or ordinary directory-copy fallback is permitted.
+2. **Export one supervisor-verified baseline into a fresh guest.** Hold the
+   existing authoritative-checkout lock and record repository/branch/HEAD plus
+   the tracked-file manifest. Transfer selected file bytes, with no `.git`, Git
+   alternates, host home/config, tokens, SSH/credential agents or host sockets.
+   Give the guest no host filesystem mount. Provision dependencies/toolchains
+   from a separately trusted image/cache; never run repository dependency hooks
+   on the credentialed host. Record the baseline and issue identity outside the
+   guest; use a new state directory, never the historical interrupted state.
+3. **Run app-server and every validation descendant inside the VM.** Use fresh
+   guest Codex configuration/home, supported approval policy, restricted inner
+   sandbox and no arbitrary network. Replace the agent's `repository_development`
+   host-validation/GitHub mutation capabilities: the guest may return proposals,
+   not execute host actions. The supervisor retains issue writes, bundled Git,
+   commits, pushes and CI. First prove native Codex tool calls using scripted
+   loopback Responses fixtures and no model credentials. For future inference,
+   a separately reviewed, bounded supervisor relay must hold model credentials
+   outside the guest and allow only the fixed provider/model API. No general
+   proxy, URL forwarding, credential endpoint or host-service route. Verify relay
+   framing/size limits, destination enforcement and cancellation with fake
+   credentials before any authenticated execution; a no-NIC boot does not prove
+   that future relay safe. Fail closed if the inner sandbox cannot initialize.
+4. **Freeze and validate an exact candidate outside host authority.** Stop agent
+   writes; transfer a bounded manifest of regular-file bytes and explicit
+   deletions through the adapter into supervisor-owned staging. Never mount an
+   untrusted guest filesystem on the host or execute its export helper there.
+   Independently reject absolute/traversal paths, duplicate/case-fold aliases,
+   `.git`/protected paths, symlinks, hardlinks, devices, FIFOs, Windows reparse
+   points/ADS/reserved names, unapproved mode changes and unsafe deletions. Hash
+   and size-check every byte. Require explicit review for changes to orchestrator,
+   security policy, CI or validation commands; the candidate cannot redefine its
+   acceptance checks. Reconstruct this exact candidate in fresh credential-free
+   native validation guests. Run the issue-required checks from the trusted
+   validation plan and bind their results to candidate/runtime/image digests.
+5. **Promote only the validated bytes.** Under the supervisor lock, recheck
+   authoritative branch/HEAD, cleanliness, file identities and baseline hashes.
+   Reject any intervening edit. Apply only the reviewed manifest, without hooks,
+   repository scripts or agent-supplied Git commands; recheck resulting bytes and
+   unexpected changes. Preserve a recoverable transaction journal so partial
+   promotion or a crash stops the queue for reconciliation. Only then use bundled
+   Git to commit/push normally and require the exact commit's current required CI
+   gate. `CI required` must be taken from the reviewed current workflow; the old
+   example check names above are historical. Pending/red/missing checks never
+   permit closure or the next issue. Preserve all existing test/audit gates.
+6. **Prove cancellation/recovery, then separately accept execution.** Bind each
+   VM ID to a fresh issue/run ID. Bound startup, tool, export and shutdown time;
+   cancel the turn, stop/kill the entire VM and verify its stopped state before
+   releasing resources. Preserve failed-run diagnostics and checkpoints outside
+   the guest, discard only that run's disposable disks after exit, and never
+   auto-resume an in-progress issue. Test startup failure, hung descendants,
+   broken export, interrupted promotion, baseline drift and supervisor crash.
+   Enable nothing until both native targets, hostile Codex/native-edit fixtures,
+   hostile validation, relay and promotion/recovery acceptance plus required root
+   validation/native CI are green. #41 stays open until then.
+
+### Windows x64 enforcement without Windows signing
+
+Use the same supervisor/executor/promotion contract with a disposable **Hyper-V
+Generation 2 Windows x64 guest** on a Windows x64 host supporting hardware
+virtualization. Microsoft's [Hyper-V overview](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/overview?pivots=windows)
+documents VM isolation and management. Use an independently provisioned trusted
+Windows image with Node, bundled Git and the native Codex executable. No Graider
+installer signing, custom kernel driver, Windows signing certificate or release
+secret is needed to run these developer tools in a normal VM. Provisioning the
+Hyper-V feature/image is an operator prerequisite, not permission to bypass OS
+policy or elevate the issue agent.
+
+Attach only disposable guest disks. Disconnect network adapters; disable enhanced
+session clipboard/drive sharing and host/guest service integrations not needed
+for the bounded transport. No SMB/host directory mapping, WSL host automount,
+Docker socket, credential forwarding or host home. Control the guest from the
+trusted supervisor with the Hyper-V APIs/PowerShell module; any guest account
+credential is disposable and distinct from host/GitHub/model credentials. Treat
+PowerShell Direct and all returned bytes as a restricted untrusted transport,
+not a generic agent-to-host command API. If Hyper-V, the configured transport or
+native sandbox is unavailable, execution stays disabled; neither a job object
+nor process-tree killing alone establishes filesystem/network isolation.
+
+Run the same credential-free hostile fixtures on the actual Windows host/guest,
+including native `apply_patch`, PowerShell/cmd/npm grandchildren, junctions and
+reparse points, UNC/device/drive-relative paths, case aliases, locked files,
+network/host-service denial, forced termination and fresh boot. Verify fake host
+canary hashes and that no VM/descendant survives cancellation. Use provisioned
+native acceptance workers if hosted CI lacks virtualization; a skipped probe or
+Linux guest cannot pass native Windows acceptance. Keep normal macOS arm64 and
+Windows x64 CI plus dependency audit gates unchanged.
+
+The local Linux guest likewise cannot replace native macOS validation: provision
+a disposable macOS arm64 validation VM (or another independently proven native
+whole-process boundary) before enabling that path. That native image/adapter and
+the Windows adapter have not been provisioned or verified by this assessment.
+
 ### Earlier execution workflow (disabled)
 
 The runner starts a new app-server process and `thread/start` for every issue.
 It checks Codex authentication and model/effort availability, keeps
-`workspace-write`, restricted network access, and `untrusted` approval policy,
+`workspace-write`, restricted network access, and the now-retired `untrusted` approval policy,
 and supplies the repository contracts and issue text. No turn is resumed.
 
 The `repository_development` dynamic tool permits only the declared issue actions
