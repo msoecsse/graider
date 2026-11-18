@@ -264,15 +264,27 @@ and native extraction/install-copy plus isolated CLI/Dugite verification. Existi
 unpacked/RC1 and Windows packaging remain unchanged. No signing, notarization,
 release publishing, update feed/runtime or Schema v2 activation is included.
 See [commands and Phase 3.2B prerequisites](electron-packaging.md#macos-arm64-archive-foundation-phase-32a).
-Slice **3.2B** ([#54](https://github.com/msoecsse/graider/issues/54)) now has a separate
-fail-closed signing configuration, credential-free safety tests and a protected
-manual verification workflow. The owner confirms active personal Apple membership,
-verified Developer ID/P12 and validated Team API notarization credentials. The
-`macos-production-signing` environment still needs the documented secrets/variables.
-Full 3.2 remains pending real signed/notarized DMG and ZIP verification, downloaded
-quarantined installation/Finder launch on native Apple Silicon and exact-SHA CI.
-No signed production acceptance is claimed; #54 remains open. See the
-[configuration and acceptance checklist](electron-packaging.md#phase-32b-signing-configuration--acceptance-pending-54).
+Slice **3.2B** ([#54](https://github.com/msoecsse/graider/issues/54)): macOS signing
+and owner-reported downloaded DMG/ZIP acceptance succeeded; recorded 2026-11-18 UTC.
+[Production run 43670168047](https://github.com/msoecsse/graider/actions/runs/43670168047)
+passed on 2026-11-15 at `15354c7260cb1c73014b2def0f91bd895cdd7835`,
+including independent archive/signature/notarization/stapling and isolated bundled
+CLI/Git verification plus checksum upload. The owner installed/launched both
+downloads without a security bypass, verified both checksums and staples, and
+authenticated via OAuth from ZIP. Historical exact-SHA CI passed normal and native
+macOS checks; its Windows jobs were temporarily excluded.
+
+**Phase 3.2 CI closeout remains blocked**, not complete: current required CI fails
+the separate [#65 picomatch audit](https://github.com/msoecsse/graider/issues/65).
+Main CI already restores both native platforms; this follow-up restores scoped
+branch-push unsigned NSIS testing and the Windows packaging prechecks. Require
+green exact-SHA main CI and native NSIS acceptance before closing #54. Preserve
+the [acceptance record's manual evidence limits](electron-packaging.md#macos-signing-acceptance-record-54);
+no unreported macOS version or download-quarantine details are assumed.
+Reconcile the original clean-download/Finder/quarantine evidence before closure.
+Windows signing remains deferred in #50; public release publishing, channels,
+auto-update, signed version-to-version acceptance and Schema v2 remain separate.
+This status does not authorize Phase 3.3 or claim overall release readiness.
 
 ## Slice 3.3 — GitHub Release pipeline
 

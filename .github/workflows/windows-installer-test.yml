@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      # Temporary #54: no automatic NSIS builds on remote-course-v2 pushes.
+      - remote-course-v2
       - master
       - "release/**"
     paths:

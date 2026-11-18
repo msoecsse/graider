@@ -20,6 +20,11 @@ interface ValidationWorkflow {
     string,
     {
       if?: string;
+      strategy?: {
+        matrix: {
+          include: { runner: string; architecture: string; target: string }[];
+        };
+      };
       "continue-on-error"?: boolean;
       steps: {
         name?: string;
@@ -47,6 +52,20 @@ const readTextFiles = (directory: string): string[] =>
   });
 
 describe("CI and dependency hardening", () => {
+  it("retains both native platforms for every selected domain without branch exclusions", () => {
+    const workflow = parse(fs.readFileSync(CI_WORKFLOW_PATH, "utf8")) as ValidationWorkflow;
+    for (const domain of ["apply", "grading", "safety", "signing", "migration"]) {
+      const job = workflow.jobs[domain];
+      expect(job?.strategy?.matrix).toEqual({
+        include: [
+          { runner: "macos-15", architecture: "arm64", target: "macOS arm64" },
+          { runner: "windows-latest", architecture: "x64", target: "Windows x64" }
+        ]
+      });
+      expect(job?.if).toBe(`\${{ needs.select.outputs.${domain} == 'true' }}`);
+    }
+  });
+
   it("defines normal and gated-live npm scripts", () => {
     const packageJson = readPackageJson();
 

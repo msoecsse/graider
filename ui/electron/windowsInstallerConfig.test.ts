@@ -167,7 +167,7 @@ describe("Windows NSIS installer foundation", () => {
       )
     );
     expect(workflow.permissions).toEqual({ contents: "read" });
-    expect(workflow.on.push.branches).toEqual(["master", "release/**"]);
+    expect(workflow.on.push.branches).toEqual(["remote-course-v2", "master", "release/**"]);
     expect(workflow.on.pull_request.branches).toEqual(["master", "release/**"]);
     const job = workflow.jobs["windows-installer-test"];
     expect(job["runs-on"]).toBe("windows-latest");

@@ -1494,6 +1494,11 @@ describe("fail-closed macOS production signing", () => {
     expect(job["runs-on"]).toBe("macos-15");
     expect(job.env).toBeUndefined();
     expect(workflow.env).toBeUndefined();
+    const packagingTests = job.steps.find(
+      (step: any) => step.name === "Test signing and existing packaging paths without credentials"
+    );
+    expect(packagingTests.run).toContain("electron/windowsInstallerConfig.test.ts");
+    expect(packagingTests.env).toBeUndefined();
     const checkout = job.steps.find((step: any) => step.uses === "actions/checkout@v4");
     expect(checkout.with).toEqual({ ref: "${{ github.sha }}", "persist-credentials": false });
     const credentialSteps = job.steps.filter((step: any) =>

@@ -316,17 +316,16 @@ and end-to-end update validation. See the versioned
 [NSIS documentation](https://www.electron.build/v26/docs/nsis/).
 
 `Windows NSIS installer test` runs automatically for scoped packaging changes on
-`master` and `release/**` pushes and pull requests targeting those branches.
-It supports manual dispatch once available on the default branch. Automatic
-`remote-course-v2` pushes are temporarily excluded during #54; see the
-[restoration requirement](#temporary-windows-ci-pause-during-54). On a clean native Windows x64 runner it runs deterministic packaging
+`remote-course-v2`, `master` and `release/**` pushes and pull requests targeting
+`master` or `release/**`. It supports manual dispatch once available on the default
+branch. The temporary #54 branch-push exclusion has been removed; see
+[Windows CI restoration](#windows-ci-restoration-54). On a clean native Windows x64 runner it runs deterministic packaging
 tests, builds with no real credentials, checks the unsigned installer and its
 blockmap, verifies no update feed/metadata, silently installs and reinstalls to
 a temporary path with spaces, checks installed Electron x64 and bundled Git using
 the existing offline packaged proof, then uninstalls. It records the commit and
 SHA-256 but uploads no test package and publishes no release. Normal CI retains
-macOS arm64 coverage and Windows x64 coverage outside the temporary branch-push
-exception below. This proves installer construction
+macOS arm64 and Windows x64 coverage for every selected native domain. This proves installer construction
 and local installation, not signed version-to-version updates or faculty UI acceptance.
 
 ### Personal owner signing and external prerequisites
@@ -336,7 +335,8 @@ project owner's **personal** accounts; the repository organization does not impl
 an MSOE publisher identity. Windows provisioning remains pending; the owner has
 confirmed active personal Apple membership, a verified Developer ID Application
 identity/exported password-protected P12 and validated App Store Connect Team API
-credentials. Protected CI credentials and native signed acceptance remain pending.
+credentials. Protected macOS CI signing and owner-reported downloaded-artifact
+acceptance have succeeded; see the [acceptance record](#macos-signing-acceptance-record-54).
 
 - **Windows:** finish personal Microsoft signing-account enrollment, identity
   verification and eligibility for the selected Authenticode signing service.
@@ -345,9 +345,9 @@ credentials. Protected CI credentials and native signed acceptance remain pendin
   configuring builder's publisher verification; do not invent a publisher name.
   Validate the supported signing integration against the locked builder 26 version.
   See [Windows signing](https://www.electron.build/v26/docs/features/code-signing/code-signing-win/).
-- **macOS (3.2):** configure the owner's existing Developer ID and Team API
-  credentials in the protected environment below. Validate signed/notarized arm64
-  DMG **and ZIP** on a native Apple Silicon host before claiming acceptance.
+- **macOS (3.2):** retain the protected Developer ID and Team API configuration
+  below. Both signed/notarized arm64 archives passed automated verification and
+  owner-reported native installation/launch testing. Current CI closeout remains separate.
 - **GitHub Releases (3.3):** verify public unauthenticated release-asset access for
   `msoecsse/graider`, protected release credentials and an explicit human approval
   gate before a release can become visible to clients. Publishing authorization
@@ -442,16 +442,95 @@ loose fixture even on failure, and records exact-SHA acceptance. Ordinary source
 changes use normal comprehensive cross-platform CI without rebuilding these
 archives. No cross-platform CI checks are removed.
 
-### Phase 3.2B signing configuration — acceptance pending (#54)
+### macOS signing acceptance record (#54)
+
+Recorded **2026-11-18 UTC** from GitHub run evidence and the owner's supplied
+manual results; the owner did not supply the manual test date or macOS version.
+**macOS production signing and the reported downloadable DMG/ZIP acceptance
+checks are complete. Issue #54 remains open for current exact-SHA CI closeout
+and reconciliation of the manual evidence limits below.**
+This accepts the tested artifacts, not overall production-release readiness.
+
+- [Production signing run 43670168047](https://github.com/msoecsse/graider/actions/runs/43670168047)
+  succeeded on **2026-11-15 UTC**, at
+  `15354c7260cb1c73014b2def0f91bd895cdd7835` on `remote-course-v2`.
+  Job `signing`, step `Sign, notarize and verify both archives`, cleanup and upload
+  all succeeded. Credential-free packaging checks passed **373 tests in 8 files**.
+- [Historical CI 43669424182](https://github.com/msoecsse/graider/actions/runs/43669424182)
+  succeeded at that exact SHA: normal checks (including audit), macOS arm64 grading
+  boundary and permanent migration regression passed. Windows x64 jobs were
+  omitted under the then-active #54 branch-push exception. This is historical
+  macOS evidence, not exact-SHA cross-platform acceptance.
+- Artifact **14144800103**, named
+  `graider-macos-signed-verification-15354c7260cb1c73014b2def0f91bd895cdd7835`,
+  belongs to that production run and SHA. Upload logs confirm four files:
+  `Graider-0.1.0-mac-arm64-signed.dmg`,
+  `Graider-0.1.0-mac-arm64-signed.zip`, and each archive's `.sha256` file.
+  Retention is seven days (reported expiry **2026-11-22 03:11:42 UTC**).
+  The Actions artifact-container digest is not an individual archive checksum.
+  Individual digest values are not transcribed here; the owner reports both
+  downloaded archive checksum comparisons as `OK`.
+
+Inspection of the successful SHA's workflow and unchanged verification scripts
+establishes the automated checks credited to that run:
+
+| Requirement                                                                     | Verified evidence                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fail-closed protected signing; no unsigned fallback                             | Native arm64 guard, protected environment, step-scoped credentials, mandatory preflight and builder completion/artifact gates; signing and cleanup succeeded.                                                                                                                                |
+| Developer ID, hardened runtime, entitlements, nested Electron/Dugite signatures | Independent exact certificate and Team ID verification, recursive Mach-O verification and component-specific entitlement policy passed before archives; repeated on both installed app copies.                                                                                               |
+| Notarization and stapling                                                       | Builder app notarization and independent app staple gate; explicit signed DMG verification, Accepted notarization response, staple and validate; ZIP contains a stapled app.                                                                                                                 |
+| Archive installation and Gatekeeper                                             | ZIP extraction and read-only DMG mount/install-copy outside checkout; both apps checked for identity/version/resources and arm64, synthetically quarantined and assessed; DMG signature, ticket, Gatekeeper and image integrity checked.                                                     |
+| Bundled CLI/Git independence                                                    | Both installed copies run Electron-as-Node with empty PATH, isolated HOME/temp/Git configuration and the offline packaged Dugite proof: bundled resolution/architecture, CLI help and local Git operations/binary patches. No automated GUI launch or live GitHub authentication is claimed. |
+| Checksums and provenance                                                        | Wrapper generates each archive's SHA-256 only after both installation proofs; successful upload contains only the archives and their checksum files.                                                                                                                                         |
+
+The verifier's subprocess output is captured by the wrapper, so the signing log
+does not contain individual proof markers or native command output. Credit comes
+from the successful mandatory step and inspected fail-closed script sequence,
+not invented per-command log entries. Codex reviewed this evidence without
+rebuilding, rerunning signing or executing the owner's manual tests.
+
+**Owner-reported manual acceptance on an Apple Silicon Mac:**
+
+| Downloaded artifact                  | Owner's observed results                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Graider-0.1.0-mac-arm64-signed.dmg` | Downloaded and installed; launched normally without a Gatekeeper bypass. Independent `codesign --verify --strict --verbose=2` succeeded (`satisfies its Designated Requirement`). `xcrun stapler validate`: `The validate action worked!`. Downloaded-file SHA-256: `Graider-0.1.0-mac-arm64-signed.dmg: OK`.                                                                                            |
+| `Graider-0.1.0-mac-arm64-signed.zip` | Extracted separately into a Desktop testing folder; app launched normally without a security bypass; GitHub OAuth succeeded. `codesign --verify --deep --strict --verbose=2` reported no verification errors. Stapler validation succeeded. `spctl --assess --type execute --verbose=4`: `accepted`, `source=Notarized Developer ID`. Downloaded-file SHA-256: `Graider-0.1.0-mac-arm64-signed.zip: OK`. |
+
+The report does not separately document browser/Finder launch mechanics,
+download-quarantine metadata/preservation, clean-host state, the owner's macOS
+version, a DMG-specific OAuth test, or a manual bundled CLI/Git run. Do not infer
+these from a normal launch or substitute synthetic quarantine for observed
+download metadata. The automated isolated CLI/Git proof is credited separately.
+Retain these evidence limits when reviewing the original clean-download checklist;
+no additional owner results or individual digest values are assumed.
+The original clean-download/Finder/quarantine requirement is not fully documented
+by the supplied report. Reconcile those details with the owner before issue
+closure; this does not demonstrate a need to rebuild or repeat signing.
+
+**Current closeout blocker:** [#65](https://github.com/msoecsse/graider/issues/65)
+prevents green required CI. At pre-closeout head
+`ad75a0d0f47dd13966e7d4afbf79e26513029426`,
+[CI 44206073153](https://github.com/msoecsse/graider/actions/runs/44206073153)
+passed root/UI regression and all selected macOS arm64/Windows x64 jobs, including
+migration and credential-free signing. Fast feedback failed the unchanged
+high-severity picomatch audit (`GHSA-fc5q-39xc-vjpf`), making `CI required` fail.
+The closeout commit must also receive green exact-SHA CI and restored native
+unsigned NSIS validation before #54 closes. Keep the audit intact; remediation
+belongs to #65. Historical green macOS CI cannot replace these gates or fill
+unreported manual details.
+
+Windows production signing remains intentionally deferred in
+[#50](https://github.com/msoecsse/graider/issues/50) pending Microsoft identity/account
+provisioning. Windows testing remains required. Public releases (3.3), channels
+(3.4), auto-update and signed version-to-version validation (3.5), Schema v2
+activation and overall production-release acceptance remain separate work.
+
+### Phase 3.2B signing configuration
 
 The separate `electron-builder.mac-production.cjs` and manual **macOS production
 signing verification** workflow use the owner's personal Developer ID Application
 identity. Existing unsigned archive-test, unpacked/RC1 and Windows paths retain
-their behavior. The first real signing attempt at `0636ab0296e95a3baeb7e95642336f92406d29c0`
-([run 43501894766](https://github.com/msoecsse/graider/actions/runs/43501894766))
-passed preliminary checks/builds but failed in the signing wrapper. Its generic
-error discarded the stage and cause; successful fallback cleanup cannot recover
-that information. No signed acceptance was recorded. Issue #54 remains open.
+their behavior. The successful run and acceptance limits are recorded above.
 
 Configure **Settings → Environments → macos-production-signing**. The environment
 holds the owner-configured credentials. Restrict deployment branches to
@@ -530,11 +609,8 @@ Cleanup failures are reported separately without replacing the original failure,
 and each cleanup action is attempted independently. Cleanup-only failure still
 fails the command and prevents workflow uploads/acceptance.
 
-A new owner-dispatched attempt is appropriate after the diagnostic commit has
-passed normal and native cross-platform CI at its exact SHA and has been reviewed.
-Do not change credentials based solely on the first run's generic error. Use the
-next attempt's safe stage/category to guide further investigation; a successful
-attempt still requires the downloaded native acceptance below.
+Future credential rotation or demonstrated signing regressions require separately
+authorized verification. The completed #54 signing run does not need a retry.
 
 The wrapper captures the original user keychain search list before keychain
 creation, then appends its private temporary keychain while preserving all
@@ -559,6 +635,18 @@ temporary keychain and secure timestamp, then separately requires an Accepted DM
 and staples/validates it. ZIP itself cannot be stapled; it contains the stapled app.
 No unsigned fallback is allowed. Actual runtime/entitlement compatibility remains
 subject to native acceptance; do not relax entitlements just to pass packaging.
+
+#### Historical signing investigations
+
+The following investigations preserve evidence and uncertainty **as recorded at
+each failed attempt**. Statements about pending acceptance or a next diagnostic
+run are historical and superseded by the acceptance record above. They do not
+authorize another signing run or describe today's signing status.
+
+The first attempt at `0636ab0296e95a3baeb7e95642336f92406d29c0`
+([run 43501894766](https://github.com/msoecsse/graider/actions/runs/43501894766))
+failed in signing after preliminary checks/builds; discarded output prevents
+recovery of its cause.
 
 The second attempt at `afd2dba` failed inside builder without recoverable internal
 evidence. Inspection of installed `app-builder-lib` **26.15.3** confirms
@@ -1270,30 +1358,25 @@ extra permissions on executables and libraries, command failures, role/format
 classification and exact safe diagnostic propagation. This investigation dispatches
 no production signing and claims no release acceptance. #54 remains open.
 
-#### Temporary Windows CI pause during #54
+### Windows CI restoration (#54)
 
-During macOS signing diagnosis, main CI excludes Windows x64 matrix entries
-**only for pushes to `remote-course-v2`**. macOS arm64 boundary and migration jobs,
-normal root/UI checks, audits and all security coverage remain. The Windows NSIS
-workflow does not automatically run for those pushes; its workflow and tests
-remain in the repository and manual dispatch is retained. Windows-only portable
-test cases now live in the Windows packaging suite, which is excluded from the
-production macOS workflow's focused command. Shared/macOS packaging checks remain.
+The diagnostic branch-push pause is historical. The current change-aware
+`ci.yml` already includes macOS arm64 and Windows x64 in every selected Apply,
+grading, security/recovery, credential-free signing and migration matrix, with
+no #54 branch exclusion. Run 44206073153 confirms both platforms executed at
+`ad75a0d0f47dd13966e7d4afbf79e26513029426`.
 
-Every pull request retains both native main-CI platforms, including PRs from this
-branch into `master` or release branches. `master` and `release/**` pushes keep
-both native CI jobs; scoped NSIS validation runs on those pushes and PRs targeting
-them. Matrix entries are omitted before scheduling; no macOS job depends on an
-omitted Windows job.
+This acceptance follow-up restores the two remaining exclusions:
+`remote-course-v2` is again in the scoped unsigned NSIS workflow push list, and
+`windowsInstallerConfig.test.ts` is again in the production macOS workflow's
+credential-free test command. Existing master/release/PR coverage, unsigned
+packaging, audit gates and protected manual signing behavior are preserved.
+Regression assertions cover both restorations and the main-CI native matrices.
+Native unsigned NSIS install/reinstall/uninstall and bundled Git must pass at the
+closeout SHA alongside required main CI; restoring configuration alone is not
+acceptance. Windows production signing remains deferred under #50.
 
-**Before release:** remove the branch-push condition from both main-CI matrices,
-restore `remote-course-v2` to the NSIS push list, and restore the Windows suite
-to the macOS production workflow's focused command. Keep the master/release/PR
-gates. Update the workflow regression assertions and this temporary note, then
-require green exact-SHA Windows x64 boundary/migration and native NSIS installation
-validation alongside macOS checks. This temporary exception is not cross-platform
-release acceptance. #54 remains open until real signing/notarization and downloaded
-native DMG/ZIP acceptance succeed. No production signing run is dispatched here.
+### Signed archive outputs and acceptance checklist
 
 Outputs live only under `ui/release/macos-production/`:
 
@@ -1314,8 +1397,9 @@ certificates, keys and keychains are excluded. No GitHub Release is created and 
 feed/channel/updater implementation is added. The current version is development
 `0.1.0`, not a production release milestone.
 
-**Remaining acceptance, required before closing #54:** record the signed workflow
-run, archive hashes and green normal/native cross-platform CI at the exact commit.
+Retain this original #54 checklist for reviewing the supplied acceptance record
+and future signed builds. Unreported details remain unverified. Record the signed workflow run, archive checksums and
+green normal/native cross-platform CI at the exact commit.
 Download both archives onto a clean native Apple Silicon Mac through a browser;
 verify their hashes, preserve download quarantine, extract ZIP and drag-install DMG
 separately into clean locations. Confirm Developer ID/team, `codesign --verify
@@ -1477,8 +1561,9 @@ mutate GitHub/course state or start GitHub Actions workflows.
 ## Known Limitations
 
 - GitHub CLI is an external dependency for token fallback.
-- macOS signing/notarization configuration is implemented separately; real signed
-  archive and clean downloaded installation/launch acceptance remain pending #54.
+- macOS signing/notarization and owner-reported downloaded DMG/ZIP acceptance
+  succeeded; #54 remains open for current exact-SHA CI closeout. See the
+  [acceptance record and manual evidence limits](#macos-signing-acceptance-record-54).
 - No custom app icon is configured.
 - Native Windows x64 unsigned NSIS install/reinstall and bundled-Git validation
   run in CI; signed production Windows acceptance remains pending. Linux is not validated.
