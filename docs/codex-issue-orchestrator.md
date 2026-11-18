@@ -1018,6 +1018,136 @@ and native macOS validation remain unimplemented. Preserve all root/native CI,
 dependency-audit, authorization and execution gates, including the independent
 Windows migration timeout tracked by #68. Stop after this standalone slice.
 
+### Slice 2C3: real-checkout proof blocked at admission (2026-11-18)
+
+**The complete real checkout was not imported. Stop before production integration.**
+The exact requested starting HEAD
+`029ec235625507afe7669349248f90351a793384` contains tracked path
+`docs/bugs/resolved/260605/student_report_push)_addendum.md`. Its closing parenthesis
+is outside the reviewed `/^[A-Za-z0-9_./-]+$/` source/GRT1 path policy. Locked
+admission correctly rejected it **before capture or VM creation**. No tracked file
+was omitted, renamed or remapped; no path rule, transport/resource cap, pin or
+600-second lease changed. The file needs explicit review before another full-tree
+proof. Numeric capacity alone does not establish admission or feasibility.
+#72 remains open and blocked on this review/proof; #41 remains open/blocked,
+and unattended execution stays disabled.
+
+The original authoritative checkout also retains its November 10
+`graider-orchestrator.lock`. Two attempts stopped at that lock; it was never
+removed or reused. The first also used the ambient Node 23.9.0, never reaching
+runtime verification; subsequent attempts selected reviewed Node 24.21.0 explicitly.
+A fresh **independent** bundled-Git clone (no hardlinked objects, inherited config,
+credentials or old lock) at exactly the starting commit was therefore used for
+locked admission. Every file in both checkouts was independently compared with its
+raw Git blob, size and mode; their complete tracked records match. The clone's
+new failed-run lock and evidence remain for deliberate reconciliation. This is
+not admission of the original locked checkout or authorization to clear its lock.
+
+The [read-only measurement](../tests/fixtures/orchestrator-grt1/measure-checkout.ts)
+is deliberately separate from admission: it measures unsafe names but never
+imports or accepts them. [All 1,556 starting-tree records](../tests/fixtures/orchestrator-grt1/starting-tree.json)
+retain each path, Git mode, raw SHA-1 blob identity, exact size and SHA-256.
+The canonical v1 manifest (issue 72) is **250,743 bytes**, SHA-256
+`708318d4ba43820a053f4d8981b13c30cc4cc9f3dce12f387a10e7a4975732c8`.
+All 1,556 files have Git mode `100644`; 21 exceed 65,536 bytes. Source bytes
+were compared without filters or line-ending conversion. The two sizing passes
+took **345.253 ms** (original) and **914.910 ms** (independent clone), respectively;
+these are sizing measurements, not race-aware capture/transfer acceptance.
+
+| Quantity                    | Exact starting tree | GRT1 test cap | Numeric margin |
+| --------------------------- | ------------------: | ------------: | -------------: |
+| Tracked files               |               1,556 |         2,048 |            492 |
+| Distinct parent directories |                 447 |         1,024 |            577 |
+| Source bytes                |          12,889,699 |    16,777,216 |      3,887,517 |
+| Largest file bytes          |             251,877 |       524,288 |        272,411 |
+| Manifest bytes              |             250,743 |     1,048,576 |        797,833 |
+| Inventory projection bytes  |             213,526 |     1,048,576 |        835,050 |
+| Longest path ASCII bytes    |                  94 |           240 |            146 |
+
+Compared with Slice 2C1, the starting tree adds 26 files, three directories and
+210,429 bytes. Applying the same **calculation only** gives 8 manifest frames,
+394 data frames each way, seven frames per inventory and six controls:
+**816 exchanges / 35,697,292 conservative wire bytes**, versus 802 /
+35,115,460 in 2C1. This leaves calculated margins of 310 exchanges and
+31,411,572 wire bytes. These projections include the rejected path; they are
+not an admitted transfer plan or observed traffic. The earlier 2C2 synthetic
+maximum remains **1,055 exchanges / 45,990,689 bytes / 279.738 seconds**, helper
+RSS 20,692 KiB, workspace 17,281,024 bytes / 3,073 inodes. Its different path
+population cannot establish that the actual repository imports within the lease.
+
+The new supervisor-only [checkout proof](../scripts/orchestrator/grt1/checkout.ts)
+uses the reviewed GRT1 **test** profile. Shared
+[read-only source invariants](../scripts/orchestrator/baseline-source.ts) were
+extracted from 2B: the production `importBaseline` interface and immutable
+`BASELINE_LIMITS` retain their original behavior and all 84 regression tests.
+The fixed production entry point supplies only its original limits; it accepts
+no caller-selected profile. Both capture callers retain safe paths/aliases,
+protected components, bounded raw-blob checks, clean bundled-Git plumbing,
+HEAD/index/untracked checks and source/parent identity/mode/drift detection.
+Unsupported host/reparse metadata is rejected before source capture.
+
+For an admitted tree, the separate adapter holds the common-directory lock,
+creates a canonical manifest and bounded in-memory captured-byte source, and calls
+only the existing standalone GRT1 verifier. That verifier checks every byte/hash,
+mode, link count and exact inventories before attested destruction. Under the
+same lock, the adapter then rechecks manifest/tracked evidence, authoritative
+repository/branch/HEAD/index, source bytes/modes and filesystem identities,
+including common Git directory, worktree Git directory, HEAD and index. Only then
+can it write a receipt and release the new lock. Failure retains redacted phase
+and reason plus this run's lock/evidence. No Agent, relay, validation execution,
+candidate export/promotion, commit/push authority, CI progression or production
+baseline call site is connected.
+
+The [manual HVF probe](../tests/fixtures/orchestrator-grt1/checkout-probe.ts)
+requires an explicit clean source, exact HEAD and existing pinned image. It can
+compare host/watchdog wire counts, verify payload removal and sample host RSS and
+workspace use after a successful admission. **None of these full-import
+measurements is available in this slice:** the actual attempt created no VM,
+exchanged zero transport bytes/operations and produced no success receipt.
+Guest helper/VM memory, workspace allocation, latency, readback, shutdown and
+destruction were not exercised. No positive HVF result or resource margin is
+inferred from the deterministic fixtures. Captured buffers are bounded to 16 MiB
+per capture, but host peak memory including final recapture and input verification
+also remains unmeasured; the 2C1 staging estimates are not an enforced host heap cap.
+
+[Failed-attempt observations](../tests/fixtures/orchestrator-grt1/checkout-observed.json)
+retain the three new attempt directories, source/image identities, original lock
+digest and exact blocker. The independent source is
+`/private/tmp/graider-72-2c3-source-kG9YEb`; its failed lock remains untouched.
+Historical checkpoints, locks and preserved evidence were not changed. Failure
+coverage includes the exact closing-parenthesis case, production count/byte limits,
+raw-source/index/HEAD/parent/manifest drift, protected names, links, partial/corrupt
+transfer, cancellation/deadline and cleanup uncertainty using credential-free
+fixtures. Portable protocol tests use the existing explicitly labeled filesystem
+double; they do not certify native VM enforcement. Both native safety CI jobs
+now include the new adapter and unchanged 2B regression tests. Existing root,
+dependency-audit, native CI, authorization and execution gates remain required.
+
+Local validation passed: full root `npm run typecheck`, `npm run lint`,
+`npm run format:check`, `npm test -- --maxWorkers=2` including hygiene
+(**3,537/3,537 tests, 208 files, zero skips, 122.65 seconds**), `npm run build`
+and `npm run audit` at the unchanged high threshold (nine existing moderate
+findings). The new checkout suite has **33 tests**; all **84** unchanged baseline
+regressions and **100** existing GRT1/watchdog tests remain covered. Tests were
+written first; initial missing-module, extracted text-helper and measurement
+fixture typing/lint failures were corrected without weakening assertions or gates.
+An initial registry DNS failure required the authorized audit network rerun.
+Full exact-SHA native CI is required after push; local success does not establish
+CI acceptance or completion of #72.
+
+Measured phase walls through local-check completion, **22:08:08–22:24:48 UTC**:
+investigation **121 seconds**; implementation/failed proof/evidence preparation
+**709 seconds**; final local validation **170 seconds**; total **1,000 seconds**.
+CI waiting was **zero seconds**. Exclusive tool/network/approval waits were not
+separately measured and are included in phase walls, not estimated. Final
+review/documentation, commit/push and CI inspection/handoff follow this interval.
+
+Next review must resolve the tracked path under the security policy, then repeat
+fresh exact-HEAD admission and genuine pinned-HVF full import/readback/resource
+measurement. Do not reuse the failed locks, omit files, enlarge bounds or call the
+production importer. Native Windows reparse metadata/VM and native macOS validation
+remain separate outstanding acceptance. No #26/#15 or Phase 10 was executed.
+
 ### Smallest implementation sequence under the accepted decision
 
 Keep the serial issue queue, dependency/phase checks, approval lifecycle, reports,

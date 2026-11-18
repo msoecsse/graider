@@ -1,0 +1,65 @@
+{
+  "scope": "Slice 2C3 BLOCKED before VM startup; no complete-checkout or native acceptance",
+  "head": "029ec235625507afe7669349248f90351a793384",
+  "imageSha256": "c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96",
+  "blocker": {
+    "path": "docs/bugs/resolved/260605/student_report_push)_addendum.md",
+    "reason": "Closing parenthesis is outside unchanged /^[A-Za-z0-9_./-]+$/ path policy; no omission, rename, remapping or policy bypass attempted."
+  },
+  "originalLock": {
+    "lockSha256": "96a4841334c7ef46e77dc7bb917be2d977dc4578e8db851135d70fda3fbe69b7",
+    "unchanged": true,
+    "source": "/private/tmp/graider-72-2c3-source-kG9YEb",
+    "head": "029ec235625507afe7669349248f90351a793384"
+  },
+  "independentSource": "/private/tmp/graider-72-2c3-source-kG9YEb",
+  "independentCheckoutMatchesEveryStartingBlob": true,
+  "startingTreeFileSha256": "ace6b4c8af40823b1f2763e04b41648ca6543a83fe2f11341c940ecef61f8bea",
+  "sourceHashes": {
+    "scripts/orchestrator/baseline-source.ts": "e444c94633f2c9d634439cc553b7a53e133bc873e88a43446b2adee9c1aa7646",
+    "scripts/orchestrator/baseline.ts": "d2d047eca6fa5d7fcc026697c0446d6423a54c6135fa797f36ca1f497f809d62",
+    "scripts/orchestrator/grt1/checkout.ts": "489f18ad7d4070bbe1dc9dc03b7db14f26948db970e08b06e39bbc8968028212",
+    "tests/unit/orchestrator-grt1-checkout.test.ts": "c524cab48c2ba94f6fd62c69425933eba6a992b9bda0df69f8a3a16238fc9112",
+    "tests/fixtures/orchestrator-grt1/measure-checkout.ts": "8d60ba1658f77d37d03219ffa5a30256b9905a85ae0a648f8984de4e584ff8e0",
+    "tests/fixtures/orchestrator-grt1/checkout-probe.ts": "8e960d49852894e0af8de2a0e8a21805bff5630e1a07c91ee121bcf2e374be81"
+  },
+  "attempts": [
+    {
+      "directory": "/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-06O7QA",
+      "attemptEvidenceSha256": "dcaf83ce64d9bcea46d7dca7720b9f073b779975a83d21b7ee73643c2e4efd21",
+      "failure": "existing authoritative checkout lock; rejected before new state/capture",
+      "vmStarted": false,
+      "wireBytes": 0,
+      "exchanges": 0,
+      "successfulReceipt": false
+    },
+    {
+      "directory": "/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-WZrBGJ",
+      "attemptEvidenceSha256": "b382a9231e67dfb700f97897047370fd2015c0df0ab695994592241911858fbd",
+      "failure": "existing authoritative checkout lock; rejected before new state/capture",
+      "vmStarted": false,
+      "wireBytes": 0,
+      "exchanges": 0,
+      "successfulReceipt": false
+    },
+    {
+      "directory": "/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-nRD9df",
+      "attemptEvidenceSha256": "51d39b022e0296d86d73e15738b17080de3ea27acfaab9dc36ac34c5c0bea733",
+      "failure": {
+        "event": "checkout-proof-failed",
+        "failure": "Baseline unsafe or aliased source path; execution remains disabled.",
+        "phase": "capture",
+        "profile": "GRT1-test-2c2",
+        "at": "2026-11-18T22:17:36.775Z"
+      },
+      "vmStarted": false,
+      "wireBytes": 0,
+      "exchanges": 0,
+      "successfulReceipt": false
+    }
+  ],
+  "guestResources": null,
+  "fullImportMetrics": null,
+  "remaining": "Review the unsafe tracked path and re-run fresh locked admission/HVF proof; keep all failed state/locks. Production GRT1 integration and issue execution remain disabled.",
+  "independentLockSha256": "f43f53351525d5644f5f716c123be9c56546a99db86a2e2cbc335e46b4dfab7b"
+}
