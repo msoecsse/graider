@@ -122,6 +122,10 @@ export const managedOperationalFixture = async (
     disabled: false,
     topics: []
   };
+  // Remote API metadata is immutable at a full commit SHA. Reusing those bytes
+  // avoids spawning Git for every authorization check in this local API fixture.
+  // Moving references and revision observations must always read the real remote.
+  const metadataByCommit = new Map<string, string>();
   const reader: RemoteRepositoryReader = {
     revision: async () =>
       measure("remote-revision", () => git(remote, ["rev-parse", "refs/heads/main"])),
@@ -129,7 +133,12 @@ export const managedOperationalFixture = async (
     resolve: async () => repository,
     file: async (_repo, file, revision = "refs/heads/main") =>
       measure("remote-file", async () => {
+        const immutable = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/iu.test(revision);
+        const key = `${revision}:${file}`;
+        const cached = immutable ? metadataByCommit.get(key) : undefined;
+        if (cached !== undefined) return cached;
         const result = await exec(["show", `${revision}:${file}`], remote);
+        if (immutable && result.exitCode === 0) metadataByCommit.set(key, result.stdout);
         return result.exitCode === 0 ? result.stdout : null;
       }),
     terms: async () => ["27s1"],

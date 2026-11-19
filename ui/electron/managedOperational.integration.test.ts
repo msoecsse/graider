@@ -8,6 +8,7 @@ import {
   removeGitFixture
 } from "./gitIntegrationFixtures";
 import fs from "node:fs";
+import childProcess from "node:child_process";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
@@ -44,6 +45,29 @@ vi.mock("./githubRemoteRepositories.js", async (original) => ({
   createRemoteRepositoryReader: () => remote.reader
 }));
 const roots: string[] = [];
+const startGitIntegrationTiming = () => {
+  const sample = gitIntegrationTiming();
+  const execute = childProcess.execFile;
+  const remove = fs.rmSync;
+  const observer = vi.spyOn(childProcess, "execFile").mockImplementation(((...args: unknown[]) => {
+    const child: childProcess.ChildProcess = Reflect.apply(execute, childProcess, args);
+    const executable = typeof args[0] === "string" ? path.basename(args[0]) : "";
+    if (/^git(?:\.exe)?$/u.test(executable))
+      child.once("close", sample.git(Array.isArray(args[1]) ? args[1] : []));
+    return child;
+  }) as typeof childProcess.execFile);
+  const cleanupObserver = vi
+    .spyOn(fs, "rmSync")
+    .mockImplementation((...args) => sample.cleanup(() => remove(...args)));
+  return {
+    ...sample,
+    finish(): void {
+      observer.mockRestore();
+      cleanupObserver.mockRestore();
+      sample.finish();
+    }
+  };
+};
 let timing: ReturnType<typeof gitIntegrationTiming> | undefined;
 const fixture = async () => {
   const f = await managedOperationalFixture(timing);
@@ -493,6 +517,28 @@ describe("managed IPC routing and view read versions", () => {
 });
 
 describe("course admin transaction inventory", () => {
+  itGitIntegration(
+    "reuses immutable fixture metadata without caching moving remote references",
+    async () => {
+      const f = await fixture();
+      const repository = (await f.reader.resolveId(20))!;
+      const commands = vi.spyOn(childProcess, "execFile");
+      const initial = await f.reader.file(repository, "course.yml", f.head);
+      expect(await f.reader.file(repository, "course.yml", f.head)).toBe(initial);
+      expect(await f.reader.file(repository, "course.yml", f.head)).toBe(initial);
+      const immutableReads = commands.mock.calls.filter((call) => call[1]?.[0] === "show").length;
+      expect(await f.reader.file(repository, "course.yml")).toBe(initial);
+      const next = await f.advance("Updated remote metadata");
+      expect(next).not.toBe(f.head);
+      expect(await f.reader.revision(repository)).toBe(next);
+      expect(await f.reader.file(repository, "course.yml", next)).toContain(
+        "Updated remote metadata"
+      );
+      expect(await f.reader.file(repository, "course.yml")).toContain("Updated remote metadata");
+      expect(await f.reader.file(repository, "course.yml", f.head)).toBe(initial);
+      expect(immutableReads).toBe(1);
+    }
+  );
   it.each(COURSE_ADMIN_CHANNELS)(
     "%s rejects missing read versions before domain work or clone",
     async (channel) => {
@@ -511,7 +557,7 @@ describe("course admin transaction inventory", () => {
   itGitIntegration(
     "uses existing assignment create/edit/delete and roster validators in isolated transactions",
     async () => {
-      timing = gitIntegrationTiming();
+      timing = startGitIntegrationTiming();
       const measured = timing.phase;
       const f = await measured("fixture", fixture);
       await measured("cutover", () => f.guard.cutover("registered"));

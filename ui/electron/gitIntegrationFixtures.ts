@@ -1,10 +1,7 @@
 import { rm } from "node:fs/promises";
-import fs from "node:fs";
-import childProcess from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
-import path from "node:path";
-import { describe, it, vi } from "vitest";
+import { describe, it } from "vitest";
 
 // Multi-repository Git transactions can exceed the unit-test budget on hosted
 // Windows runners. Keep their timeout bounded and opt in only Git integration cases.
@@ -60,39 +57,31 @@ export const gitIntegrationTiming = () => {
       })
     );
   };
-  const original = childProcess.execFile;
-  const remove = fs.rmSync;
-  const cleanupObserver = vi.spyOn(fs, "rmSync").mockImplementation((...args) => {
-    const began = performance.now();
-    try {
-      remove(...args);
-    } finally {
-      const entry = totals.get("transaction-cleanup") ?? { count: 0, durationMs: 0 };
-      entry.count++;
-      entry.durationMs += performance.now() - began;
-      totals.set("transaction-cleanup", entry);
-    }
-  });
-  const observer = vi.spyOn(childProcess, "execFile").mockImplementation(((...args: unknown[]) => {
-    const child: childProcess.ChildProcess = Reflect.apply(original, childProcess, args);
-    const executable = typeof args[0] === "string" ? path.basename(args[0]) : "";
-    if (/^git(?:\.exe)?$/u.test(executable)) {
-      const argv = Array.isArray(args[1]) ? args[1] : [];
+  return {
+    git(argv: readonly string[]): () => void {
       const command = argv.find((arg) => commands.has(arg)) ?? "other";
       const key = `${phases.getStore() ?? "unscoped"}/${command}`;
       const began = performance.now();
       pending.add(key);
-      child.once("close", () => {
+      return () => {
         pending.delete(key);
         const entry = totals.get(key) ?? { count: 0, durationMs: 0 };
         entry.count++;
         entry.durationMs += performance.now() - began;
         totals.set(key, entry);
-      });
-    }
-    return child;
-  }) as typeof childProcess.execFile);
-  return {
+      };
+    },
+    cleanup<T>(operation: () => T): T {
+      const began = performance.now();
+      try {
+        return operation();
+      } finally {
+        const entry = totals.get("transaction-cleanup") ?? { count: 0, durationMs: 0 };
+        entry.count++;
+        entry.durationMs += performance.now() - began;
+        totals.set("transaction-cleanup", entry);
+      }
+    },
     async phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
       const began = performance.now();
       const announce = !name.startsWith("remote-");
@@ -105,8 +94,6 @@ export const gitIntegrationTiming = () => {
       }
     },
     finish(): void {
-      observer.mockRestore();
-      cleanupObserver.mockRestore();
       report("summary", {
         git: Object.fromEntries(
           [...totals].map(([key, value]) => [
