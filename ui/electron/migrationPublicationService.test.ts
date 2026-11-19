@@ -1,9 +1,12 @@
 // @vitest-environment node
 import fs from "node:fs";
+import childProcess from "node:child_process";
+import { performance } from "node:perf_hooks";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { gitIntegrationTiming } from "./gitIntegrationFixtures.js";
 import { serializeManagedOperation } from "./managedCourses.js";
 import { createMigrationPublicationStore } from "./migrationPublicationStore.js";
 import { createMigrationPublicationService } from "./migrationPublicationService.js";
@@ -14,6 +17,112 @@ import {
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
 import type { RemoteCourse } from "./remoteCourseTypes.js";
 import type * as Backend from "../dist-electron/migrationReviewBackend.cjs";
+
+// Test-only bounded diagnostics: fixed stage/command labels and numeric totals.
+// Never retain command arguments, paths, output, errors, credentials or environment.
+let timing: ReturnType<typeof gitIntegrationTiming> | undefined;
+const stages = new Map<string, { count: number; durationMs: number }>();
+let testBegan = 0;
+const measureSync = <T>(name: string, operation: () => T): T => {
+  const began = performance.now();
+  try {
+    return operation();
+  } finally {
+    if (timing) {
+      const entry = stages.get(name) ?? { count: 0, durationMs: 0 };
+      entry.count++;
+      entry.durationMs += performance.now() - began;
+      stages.set(name, entry);
+    }
+  }
+};
+const measure = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+  const began = performance.now();
+  try {
+    return timing ? await timing.phase(`remote-${name}`, operation) : await operation();
+  } finally {
+    if (timing) {
+      const entry = stages.get(name) ?? { count: 0, durationMs: 0 };
+      entry.count++;
+      entry.durationMs += performance.now() - began;
+      stages.set(name, entry);
+    }
+  }
+};
+let restoreTiming: (() => void) | undefined;
+beforeEach(({ task }) => {
+  if (
+    /authoritative acceptance|retains unknown outcomes|tampered durable intent|disconnected notification/u.test(
+      task.name
+    )
+  ) {
+    timing = gitIntegrationTiming();
+    testBegan = performance.now();
+    stages.clear();
+    const execute = childProcess.execFile;
+    const remove = fs.rmSync;
+    const observer = vi.spyOn(childProcess, "execFile").mockImplementation(((
+      ...args: unknown[]
+    ) => {
+      const child: childProcess.ChildProcess = Reflect.apply(execute, childProcess, args);
+      const executable = typeof args[0] === "string" ? path.basename(args[0]) : "";
+      if (/^git(?:\.exe)?$/u.test(executable))
+        child.once("close", timing!.git(Array.isArray(args[1]) ? args[1] : []));
+      return child;
+    }) as typeof childProcess.execFile);
+    const cleanup = vi
+      .spyOn(fs, "rmSync")
+      .mockImplementation((...args) => timing!.cleanup(() => remove(...args)));
+    restoreTiming = () => {
+      observer.mockRestore();
+      cleanup.mockRestore();
+    };
+  }
+});
+vi.mock("./migrationPublicationStore.js", async (original) => {
+  const real = await original<typeof import("./migrationPublicationStore.js")>();
+  return {
+    ...real,
+    createMigrationPublicationStore: (userData: string) => {
+      const store = real.createMigrationPublicationStore(userData);
+      return {
+        read: (...args: Parameters<typeof store.read>) =>
+          measureSync("durable-read", () => store.read(...args)),
+        write: (...args: Parameters<typeof store.write>): void => {
+          measureSync("durable-write", () => store.write(...args));
+        }
+      };
+    }
+  };
+});
+vi.mock("./migrationPublicationService.js", async (original) => {
+  const real = await original<typeof import("./migrationPublicationService.js")>();
+  return {
+    ...real,
+    createMigrationPublicationService: (
+      ...args: Parameters<typeof real.createMigrationPublicationService>
+    ) => {
+      const service = real.createMigrationPublicationService(...args);
+      return {
+        ...service,
+        publish: (...input: Parameters<typeof service.publish>) =>
+          measure("publish", () => {
+            const began = performance.now();
+            return service.publish(input[0], input[1], input[2], (phase, cancellable) => {
+              if (timing)
+                console.info(
+                  "Graider migration boundary",
+                  JSON.stringify({ phase, elapsedMs: Math.round(performance.now() - began) })
+                );
+              input[3]?.(phase, cancellable);
+            });
+          }),
+        recover: (...input: Parameters<typeof service.recover>) =>
+          measure("recover", () => service.recover(...input))
+      };
+    }
+  };
+});
 
 // Only this test module replaces unavailable production evidence/transport. No test
 // switch, synthetic grant issuer or release assertion exists in production code.
@@ -36,42 +145,53 @@ vi.mock("./migrationPublicationReadiness.js", async (original) => {
   const real = await original<typeof import("./migrationPublicationReadiness.js")>();
   return {
     ...real,
-    readMigrationPublicationReadiness: async (context: Backend.MigrationPublicationContext) => {
-      await seams.beforeValidation(context);
-      if (!seams.synthetic) return real.readMigrationPublicationReadiness(context);
-      const fixture = (await loadSyntheticFixtures()).syntheticPublicationFixture();
-      const compatibility = seams.evidence({
-        ...fixture.context.compatibility,
-        binding: context.binding,
-        observationId: context.observationId,
-        acknowledgement: {
-          ...fixture.context.compatibility!.acknowledgement,
+    readMigrationPublicationReadiness: (context: Backend.MigrationPublicationContext) =>
+      measure("readiness", async () => {
+        await seams.beforeValidation(context);
+        if (!seams.synthetic) return real.readMigrationPublicationReadiness(context);
+        const fixture = (await loadSyntheticFixtures()).syntheticPublicationFixture();
+        const compatibility = seams.evidence({
+          ...fixture.context.compatibility,
           binding: context.binding,
-          githubUserId: context.binding.authenticatedGithubUserId
-        }
-      }) as Backend.MigrationCompatibilityEvidence;
-      const b = loadMigrationReviewBackend();
-      const result = b.validateMigrationPublication(
-        { ...context, environment: "synthetic", compatibility },
-        { candidate: context.candidate, binding: context.binding }
-      );
-      return {
-        ...result,
-        publicationReady:
-          result.internalReady && result.productionEnablement.releaseAvailability === "verified",
-        productionEnablement: {
-          ...result.productionEnablement,
-          enabled:
-            result.internalReady && result.productionEnablement.releaseAvailability === "verified"
-        }
-      };
-    }
+          observationId: context.observationId,
+          acknowledgement: {
+            ...fixture.context.compatibility!.acknowledgement,
+            binding: context.binding,
+            githubUserId: context.binding.authenticatedGithubUserId
+          }
+        }) as Backend.MigrationCompatibilityEvidence;
+        const b = loadMigrationReviewBackend();
+        const result = b.validateMigrationPublication(
+          { ...context, environment: "synthetic", compatibility },
+          { candidate: context.candidate, binding: context.binding }
+        );
+        return {
+          ...result,
+          publicationReady:
+            result.internalReady && result.productionEnablement.releaseAvailability === "verified",
+          productionEnablement: {
+            ...result.productionEnablement,
+            enabled:
+              result.internalReady && result.productionEnablement.releaseAvailability === "verified"
+          }
+        };
+      })
   };
 });
 const roots: string[] = [];
 const OWNER = 1;
 const author = { name: "Fictional faculty", email: "faculty@example.test" };
 afterEach(async () => {
+  if (timing) {
+    const processingMs = ["fixture", "publish", "recover"].reduce(
+      (total, name) => total + (stages.get(name)?.durationMs ?? 0),
+      0
+    );
+    stages.set("assertions-and-test-control", {
+      count: 1,
+      durationMs: performance.now() - testBegan - processingMs
+    });
+  }
   vi.unstubAllEnvs();
   seams.synthetic = false;
   seams.evidence = (value) => value;
@@ -79,9 +199,18 @@ afterEach(async () => {
   const { removeGitFixture } = (await import(
     path.resolve("../tests/support/git/integration-fixtures.ts")
   )) as { removeGitFixture(root: string): Promise<void> };
-  await Promise.all(roots.splice(0).map(removeGitFixture));
+  try {
+    await measure("cleanup", () => Promise.all(roots.splice(0).map(removeGitFixture)));
+  } finally {
+    restoreTiming?.();
+    restoreTiming = undefined;
+    timing?.finish();
+    if (timing)
+      console.info("Graider migration stages", JSON.stringify(Object.fromEntries(stages)));
+    timing = undefined;
+  }
 });
-const setup = async () => {
+const setupFixture = async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider migration publication "));
   roots.push(root);
   const { BasicCourse } = await loadSyntheticFixtures();
@@ -149,7 +278,7 @@ const setup = async () => {
       archived: false,
       topics: []
     },
-    sourceCommitSha: await git(remote, ["rev-parse", "main"])
+    sourceCommitSha: await measure("revision-observation", () => git(remote, ["rev-parse", "main"]))
   }));
   const reviewService = createMigrationReviewService({
     backend: loadMigrationReviewBackend,
@@ -208,39 +337,41 @@ const setup = async () => {
     defaultBranch: "main",
     authorization: "authorized"
   } as RemoteCourse;
-  const resynchronize = vi.fn(async (afterPublication = false) => {
-    if (afterPublication) {
-      if (!sessionCurrent) throw new Error("Synthetic session changed");
-      const cache = await transport.open(active);
-      await cache.fetchOrigin({ authentication });
-      const target = await git(remote, ["rev-parse", "main"]);
-      const head = await cache.resolveHead();
-      if (target !== head)
-        await cache.fastForwardToCommit({
-          expectedHead: head,
-          expectedBranch: b.createBranchName("main")!,
-          targetCommit: target as Backend.ObjectId
-        });
+  const resynchronize = vi.fn((afterPublication = false) =>
+    measure("synchronization", async () => {
+      if (afterPublication) {
+        if (!sessionCurrent) throw new Error("Synthetic session changed");
+        const cache = await transport.open(active);
+        await cache.fetchOrigin({ authentication });
+        const target = await git(remote, ["rev-parse", "main"]);
+        const head = await cache.resolveHead();
+        if (target !== head)
+          await cache.fastForwardToCommit({
+            expectedHead: head,
+            expectedBranch: b.createBranchName("main")!,
+            targetCommit: target as Backend.ObjectId
+          });
+        return {
+          status: "updated" as const,
+          currentCommit: target,
+          diagnostic: null,
+          retryable: false
+        };
+      }
       return {
-        status: "updated" as const,
-        currentCommit: target,
+        status: "up_to_date" as const,
+        currentCommit: sha,
         diagnostic: null,
         retryable: false
       };
-    }
-    return {
-      status: "up_to_date" as const,
-      currentCommit: sha,
-      diagnostic: null,
-      retryable: false
-    };
-  });
+    })
+  );
   const input: ManagedOperationInput = {
     token: "fictional-token",
     userId: snapshot.binding.authenticatedGithubUserId,
     course,
     signal: new AbortController().signal,
-    revalidateSession: async () => sessionCurrent,
+    revalidateSession: () => measure("session-check", async () => sessionCurrent),
     resynchronize
   };
   // URL rewriting is restricted to this fixture's isolated bundled Git runner.
@@ -264,10 +395,14 @@ const setup = async () => {
     }
     if (mutationStarted && pushMode === "unknown" && r.args.includes("fetch"))
       throw new Error("Synthetic unavailable remote");
-    const result = await transportRunners.runGit({
-      ...r,
-      args: ["-c", `url.${pathToFileURL(remote).href}.insteadOf=${course.url}.git`, ...r.args]
-    });
+    const result = await measure(
+      mutationPush ? "branch-push" : mutationStarted ? "remote-proof" : "transport",
+      () =>
+        transportRunners.runGit({
+          ...r,
+          args: ["-c", `url.${pathToFileURL(remote).href}.insteadOf=${course.url}.git`, ...r.args]
+        })
+    );
     if (mutationPush) {
       await afterPush();
       if (pushMode === "lost" || pushMode === "unknown") throw new Error("Lost synthetic response");
@@ -278,7 +413,11 @@ const setup = async () => {
     runGit: run,
     runGitBinary: transportRunners.runGitBinary,
     credentialResolver: {
-      resolve: async () => ({ kind: "github_token", host: "github.com", token: "fictional-token" })
+      resolve: async () => ({
+        kind: "github_token",
+        host: "github.com",
+        token: "fictional-token"
+      })
     }
   });
   const authenticate = () =>
@@ -309,7 +448,10 @@ const setup = async () => {
         workspace: Backend.GitRemoteCheckpointWorkspace,
         auth: Backend.GitAuthenticationContext
       ) => Promise<T>
-    ) => operation(await transport.openCheckpoint(seed), authentication)
+    ) =>
+      measure("checkpoint", async () =>
+        operation(await transport.openCheckpoint(seed), authentication)
+      )
   };
   await git(active, ["remote", "set-url", "origin", `${course.url}.git`]);
   // Infrastructure mocks are confined to fixture composition, never a production grant.
@@ -355,6 +497,7 @@ const setup = async () => {
     }
   };
 };
+const setup = () => measure("fixture", setupFixture);
 
 describe(
   "trusted migration publication transaction",
