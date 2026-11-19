@@ -245,6 +245,17 @@ const setupFixture = async () => {
   const sha = await git(seed, ["rev-parse", "HEAD"]);
   const inputSnapshot = BasicCourse({ sourceSha: sha });
   await git(root, ["clone", "--bare", seed, remote]);
+  // This isolated remote has one direct SHA-1 branch and never packs refs. Make
+  // main explicitly loose even when clone stored it in packed-refs. Real Git
+  // pushes still update this ref; every simulated API observation rereads it.
+  const revisionFile = path.join(remote, "refs", "heads", "main");
+  fs.mkdirSync(path.dirname(revisionFile), { recursive: true });
+  fs.writeFileSync(revisionFile, `${sha}\n`);
+  const readRevision = async () => {
+    const value = await fs.promises.readFile(revisionFile, "utf8");
+    if (!/^[0-9a-f]{40}\n$/u.test(value)) throw new Error("Invalid fixture revision");
+    return value.trim();
+  };
   let generation = 1;
   let trustedUserId = snapshot.binding.authenticatedGithubUserId;
   let sessionCurrent = true;
@@ -278,7 +289,7 @@ const setupFixture = async () => {
       archived: false,
       topics: []
     },
-    sourceCommitSha: await measure("revision-observation", () => git(remote, ["rev-parse", "main"]))
+    sourceCommitSha: await measure("revision-observation", readRevision)
   }));
   const reviewService = createMigrationReviewService({
     backend: loadMigrationReviewBackend,
@@ -547,6 +558,45 @@ describe(
       await f.git(f.seed, ["push", f.remote, "main"]);
       return f.git(f.remote, ["rev-parse", "main"]);
     };
+    it("observes the fixture revision afresh without launching Git for each observation", async () => {
+      seams.synthetic = true;
+      const f = await setup();
+      const execute = vi.spyOn(childProcess, "execFile");
+      try {
+        expect((await f.observe()).sourceCommitSha).toBe(f.sha);
+        expect((await f.observe()).sourceCommitSha).toBe(f.sha);
+        expect(execute).not.toHaveBeenCalled();
+      } finally {
+        execute.mockRestore();
+      }
+      const winner = await advance(f);
+      expect(winner).not.toBe(f.sha);
+      expect((await f.observe()).sourceCommitSha).toBe(winner);
+      expect(await f.service.publish(OWNER, f.request)).toMatchObject({ status: "blocked" });
+      expect(f.commands.some((args) => args.includes("push"))).toBe(false);
+    });
+    it.each(["malformed", "missing"] as const)(
+      "fails closed on a %s fixture revision after a successful observation",
+      async (fault) => {
+        seams.synthetic = true;
+        const f = await setup();
+        expect((await f.observe()).sourceCommitSha).toBe(f.sha);
+        const revisionFile = path.join(f.remote, "refs", "heads", "main");
+        if (fault === "malformed") fs.writeFileSync(revisionFile, `${f.sha}\ninvalid\n`);
+        else fs.unlinkSync(revisionFile);
+        try {
+          await expect(f.observe()).rejects.toThrow();
+          expect(await f.service.publish(OWNER, f.request)).toMatchObject({ status: "blocked" });
+          expect(f.commands.some((args) => args.includes("push"))).toBe(false);
+        } finally {
+          fs.writeFileSync(revisionFile, `${f.sha}\n`);
+        }
+        expect((await f.observe()).sourceCommitSha).toBe(
+          await f.git(f.remote, ["rev-parse", "main"])
+        );
+        await unchanged(f);
+      }
+    );
     const evidenceRefusals: readonly [
       string,
       (e: Backend.MigrationCompatibilityEvidence) => unknown
@@ -920,6 +970,38 @@ describe(
       f.observe.mockRejectedValue(new Error("Synthetic unavailable remote"));
       expect(await f.service.publish(OWNER, f.request)).toMatchObject({
         status: "outcome_unknown"
+      });
+      expect(
+        f.commands.filter((args) => args.some((arg) => arg.startsWith("HEAD:refs/heads/")))
+      ).toHaveLength(1);
+    });
+    it("observes an interrupted publication after a failed revision read without publishing twice", async () => {
+      seams.synthetic = true;
+      const f = await setup();
+      f.push("unknown");
+      expect(await f.service.publish(OWNER, f.request)).toMatchObject({
+        status: "outcome_unknown"
+      });
+      const published = await f.git(f.remote, ["rev-parse", "main"]);
+      expect(published).not.toBe(f.sha);
+      const revisionFile = path.join(f.remote, "refs", "heads", "main");
+      const unavailable = `${revisionFile}.unavailable`;
+      fs.renameSync(revisionFile, unavailable);
+      try {
+        await expect(f.observe()).rejects.toThrow();
+        expect(await f.service.recover(f.input.userId, f.course.repositoryId)).toMatchObject({
+          status: "outcome_unknown"
+        });
+        expect(await f.service.publish(OWNER, f.request)).toMatchObject({
+          status: "outcome_unknown"
+        });
+      } finally {
+        fs.renameSync(unavailable, revisionFile);
+      }
+      expect((await f.observe()).sourceCommitSha).toBe(published);
+      f.push("normal");
+      expect(await f.service.recover(f.input.userId, f.course.repositoryId)).toMatchObject({
+        status: "published"
       });
       expect(
         f.commands.filter((args) => args.some((arg) => arg.startsWith("HEAD:refs/heads/")))
