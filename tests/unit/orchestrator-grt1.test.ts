@@ -36,11 +36,24 @@ function required<T>(value: T | undefined): T {
 }
 const temporary: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
+// Test-only timing: fixed operation labels and numeric counts, never paths, argv,
+// environment, wire contents or raw subprocess errors. Snapshot before Vitest's
+// existing deadline so a stalled startup/exchange remains distinguishable.
+const TIMING_SNAPSHOT_MS = 4_000;
+const timedReceivers: { timer: ReturnType<typeof setTimeout>; report: () => void }[] = [];
+let receiverOrdinal = 0;
 afterEach(async () => {
+  const began = performance.now();
   for (const child of children.splice(0)) child.kill();
   await Promise.all(
     temporary.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true }))
   );
+  for (const timing of timedReceivers.splice(0)) {
+    clearTimeout(timing.timer);
+    timing.report();
+  }
+  if (performance.now() - began >= TIMING_SNAPSHOT_MS)
+    console.info("GRT1 teardown timing", JSON.stringify({ elapsedMs: performance.now() - began }));
   vi.useRealTimers();
 });
 function fixture(sizes = [0, SMALL_BYTES, MAX_FILE, 1, CHUNK + 1]) {
@@ -81,7 +94,57 @@ async function receiver(
   mutation = "",
   uncertain = false
 ): Promise<Transport & { root: string; child: ChildProcessWithoutNullStreams }> {
+  const began = performance.now();
+  const ordinal = ++receiverOrdinal;
+  const marks: Record<string, number> = {};
+  const exchanges: Record<string, { count: number; elapsedMs: number; maximumMs: number }> = {};
+  let pending: string | undefined;
+  const report = () => {
+    console.info(
+      "GRT1 receiver timing",
+      JSON.stringify({ ordinal, elapsedMs: performance.now() - began, marks, pending, exchanges })
+    );
+  };
+  timedReceivers.push({ timer: setTimeout(report, TIMING_SNAPSHOT_MS), report });
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- The observer reapplies the original Channel receiver with apply below.
+  const exchange = Channel.prototype.exchange;
+  const operations = new Set([
+    "START",
+    "M",
+    "SEAL_MANIFEST",
+    "D",
+    "SEAL_DATA",
+    "GET",
+    "BEGIN_READBACK",
+    "END_READBACK",
+    "FINISH"
+  ]);
+  vi.spyOn(Channel.prototype, "exchange").mockImplementation(async function (
+    this: Channel,
+    ...args: Parameters<Channel["exchange"]>
+  ) {
+    const field = args[0]?.toString("ascii").trimEnd().split(" ")[3];
+    const operation = field === undefined ? "READY" : operations.has(field) ? field : "unknown";
+    pending = operation;
+    const started = performance.now();
+    marks.sentBytes = (marks.sentBytes ?? 0) + (args[0]?.length ?? 0);
+    try {
+      const response = await exchange.apply(this, args);
+      marks.receivedBytes = (marks.receivedBytes ?? 0) + response.length;
+      return response;
+    } finally {
+      const elapsedMs = performance.now() - started;
+      const entry = exchanges[operation] ?? { count: 0, elapsedMs: 0, maximumMs: 0 };
+      entry.count++;
+      entry.elapsedMs += elapsedMs;
+      entry.maximumMs = Math.max(entry.maximumMs, elapsedMs);
+      exchanges[operation] = entry;
+      pending = undefined;
+      marks.lastExchangeMs = performance.now() - began;
+    }
+  });
   const root = await mkdtemp(path.join(tmpdir(), "graider-grt1-test-"));
+  marks.workspaceMs = performance.now() - began;
   temporary.push(root);
   const helper = fileURLToPath(
     new URL("../../scripts/orchestrator/grt1/guest.py", import.meta.url)
@@ -90,6 +153,7 @@ async function receiver(
   const harness = fileURLToPath(
     new URL("../fixtures/orchestrator-grt1/harness.py", import.meta.url)
   );
+  const spawnBegan = performance.now();
   const child = spawn(
     process.platform === "win32" ? "python" : "python3",
     ["-I", "-B", harness, helper, root, mutation],
@@ -101,10 +165,18 @@ async function receiver(
       }
     }
   );
+  marks.spawnCallMs = performance.now() - spawnBegan;
+  child.once("spawn", () => {
+    marks.spawnEventMs = performance.now() - began;
+  });
+  child.once("exit", () => {
+    marks.exitMs = performance.now() - began;
+  });
   children.push(child);
   let closed = false;
   const exit = new Promise<void>((resolve) =>
     child.on("close", () => {
+      marks.closeMs = performance.now() - began;
       closed = true;
       resolve();
     })
@@ -115,8 +187,10 @@ async function receiver(
     start: () =>
       Promise.resolve({ input: child.stdin, output: child.stdout, diagnostics: child.stderr }),
     stop: async () => {
+      marks.stopMs = performance.now() - began;
       if (!closed) child.kill();
       await exit;
+      marks.reapedMs = performance.now() - began;
       return { reaped: !uncertain, payloadRemoved: !uncertain };
     }
   };

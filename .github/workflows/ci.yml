@@ -264,6 +264,9 @@ jobs:
         run: npx vitest run --maxWorkers=2 electron/reviewImportService.test.ts electron/reviewImportSynchronization.integration.test.ts src/review-import/ReviewImportWorkflow.test.tsx
       - name: Test serial issue orchestrator process and recovery safeguards
         run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts tests/unit/orchestrator-grt1.test.ts tests/unit/orchestrator-grt1-watchdog.test.ts tests/unit/orchestrator-grt1-checkout.test.ts tests/unit/orchestrator-baseline.test.ts
+      - name: Diagnose standalone GRT1 receiver timings for issue 74
+        if: ${{ always() }}
+        run: npx vitest run --maxWorkers=2 --silent=false tests/unit/orchestrator-grt1.test.ts
       - name: Job duration summary
         if: ${{ always() }}
         shell: bash
