@@ -1296,6 +1296,78 @@ rejected outright, even if routine delegation exists. Blocked/human-decision iss
 cannot be automatically closed. Sandbox and organization restrictions remain
 authoritative; a rejected operation stops the run.
 
+### Slice 2C3 repair: literal parentheses and portable fixture (2026-11-18)
+
+The explicit follow-up authorizes only literal `(` and `)` in repository paths;
+parentheses need not balance. Source admission, both manifest validators, the
+production inventory parser, VM transfer validator and fixed guest receivers now
+accept exactly the previous ASCII alphabet plus those two characters. Traversal,
+protected components, case/prefix aliases, Windows reserved names/ADS/short names,
+unknown reparse metadata, links, types, modes, identity checks and resource limits
+retain their previous rejection behavior. Unsupported hosts still fail before
+source capture. No production Slice 2B limit or GRT1 budget/lease changed.
+
+Every affected consumer passes paths as data: bundled Git receives argv arrays;
+source capture uses filesystem APIs; GRT1 carries JSON/base64 and Python uses
+`os.open` with directory descriptors. Slice 2A base64-encodes transfer paths; its
+fixed guest script uses variable expansion with globbing disabled and quotes
+filesystem operands. Shell expansion does not reparse parentheses as syntax.
+The inventory command is fixed argv, and chmod takes `--` followed by the path.
+No filename becomes interpolated shell source, evaluated code or an imported
+executable. Tests cover balanced/unmatched names across capture, inventory,
+readback and the actual Python receiver, plus the complete prohibited ASCII
+alphabet and independent guest rejection of reserved names and punctuation.
+
+[Prior exact-SHA CI run 44411546982](https://github.com/msoecsse/graider/actions/runs/44411546982)
+finished red in Windows IPC/security. The log identifies fixture line 279:
+`git update-index --add --cacheinfo 100644,<oid>,NUL.txt`. Windows Git rejects that
+reserved path before `proveCheckoutImport` runs; neither commit nor admission
+was reached. The checkout fixture now commits Windows-valid `short~1.txt`, which
+admission rejects before VM creation. Portable manifest tests still explicitly
+reject `NUL.txt`; independently digested hostile guest metadata does too. The
+checkout assertion and Windows coverage remain enabled.
+
+The guest path changes require new image identities, never reuse of old image
+attestations. Both images were rebuilt twice from unchanged verified rootfs,
+kernel and packages. GRT1 image SHA-256 is
+`938a11e962f0c0ee3db05372e8480d5cf0b552051c3fac8fdd9d09842698a5bd`;
+Slice 2A image SHA-256 is
+`92dad01b3ef19b3dd0d0b0c216f84dac463cd5f380d9c4496b294e310ee9894e`.
+Only the relevant guest character class changed; runtime, watchdogs, toolchains,
+lease and limits did not. Original images and all previous observation files
+remain preserved. Renewed [Slice 2A observations](../tests/fixtures/orchestrator-vm/path-policy-observed.json)
+record two native Codex boots (ordinary edits and all 14 hostile denials each),
+inner command sandboxing, unchanged fake host canaries, two literal-parentheses
+transfer/fresh-boot probes, startup/operation cancellation, crash, forced kill,
+caller-death watchdog attestation and fresh recovery. Renewed
+[GRT1 observations](../tests/fixtures/orchestrator-grt1/path-policy-observed.json)
+record deep-tree byte/mode/inventory verification and caller-death/crash/forced-kill/
+cancellation recovery with the new pinned helper. Caller-death payloads stay
+retained for reconciliation. An initial managed runtime-verification rejection
+is preserved as a failed attempt; the authorized HVF run passed.
+
+The manual checkout sampler now canonicalizes its temporary root so `/var` versus
+`/private/var` aliases cannot hide QEMU RSS. This affects measurement only.
+Full root validation passed: `npm run typecheck`, `npm run lint`,
+`npm run format:check`, `npm test -- --maxWorkers=2` including hygiene
+(**3,564 tests / 208 files, zero skips, 126.36 seconds**), `npm run build`
+and `npm run audit` at the unchanged high threshold (nine moderate findings).
+`npm run test:migration` passed **880 root + 332 UI tests**, zero skips
+(17.63 seconds and 106.85 seconds respectively). Final prepared typecheck,
+scoped lint and focused checkout/input-policy (38 tests) and design (38 tests)
+checks passed. The first complete root pass had one historical image-pin
+assertion failure (3,563 passed); that historical 2C1 probe now binds to its
+original native image evidence, while the current pin is independently bound
+to the renewed native observations. No old observation was rewritten or reused
+as a current-image attestation. The sandbox audit DNS failure and authorized
+passing rerun are retained in local logs.
+
+The real-checkout proof and exact-SHA CI results will be recorded below after
+a fresh independently verified source capture.
+The original November 10 lock and prior failed-source lock remain byte-identical.
+#72 and #41 stay open/blocked; execution remains disabled. Stop after the proof;
+no production integration, Agent/relay/promotion or #26/#15/Phase 10 work.
+
 ## Cancellation and recovery
 
 Ctrl+C/SIGTERM requests turn interruption and closes the app-server. Cancellation

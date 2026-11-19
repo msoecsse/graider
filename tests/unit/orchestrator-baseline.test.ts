@@ -500,6 +500,21 @@ describe("manifest admission uses portable path semantics on every host", () => 
       }))
     };
   }
+  it.each(["reports/a(b).md", "reports/a(.md", "reports/a).md"])(
+    "imports literal parentheses through inventory and readback: %s",
+    async (name) => {
+      await mkdir(path.join(cwd, "reports"));
+      await writeFile(path.join(cwd, name), "literal bytes");
+      await commit();
+      const receipt = await importBaseline(options());
+      expect(receipt.manifest.files.map((file) => file.path)).toContain(name);
+      expect(vm.putFile).toHaveBeenCalledWith(
+        name,
+        Buffer.from("literal bytes"),
+        expect.anything()
+      );
+    }
+  );
   it.each([
     "/absolute",
     "../escape",
@@ -524,6 +539,14 @@ describe("manifest admission uses portable path semantics on every host", () => 
     ".gitconfig",
     ".gitmodules",
     "a/é",
+    "a;b",
+    "a$b",
+    "a`b",
+    "a[b]",
+    "a{b}",
+    "a!b",
+    "a&b",
+    "a b",
     "a\nline"
   ])("rejects unsafe path %j", (name) => {
     expect(() => validateBaselineManifest(manifest([name]))).toThrow(/^Baseline/);

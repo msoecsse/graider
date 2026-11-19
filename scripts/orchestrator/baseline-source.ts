@@ -39,7 +39,7 @@ export function safePaths(paths: readonly string[]): Map<string, "file" | "direc
     const parts = name.split("/");
     if (
       name.length > SOURCE_PATH_BYTES ||
-      !/^[A-Za-z0-9_./-]+$/.test(name) ||
+      !/^[A-Za-z0-9_./()-]+$/.test(name) ||
       (previous !== undefined && previous >= name) ||
       parts.some(
         (part) =>

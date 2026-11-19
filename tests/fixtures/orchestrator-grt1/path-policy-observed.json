@@ -1,0 +1,173 @@
+{
+  "scope": "Renewed standalone GRT1 helper/image enforcement after parentheses-only path change; no complete-tree acceptance in these synthetic records",
+  "imageSha256": "938a11e962f0c0ee3db05372e8480d5cf0b552051c3fac8fdd9d09842698a5bd",
+  "helperSha256": "c995a289cf0c7671ea34989a5c8417427a70a59720e5f0c05c87c4e1c935cf43",
+  "reproducibility": {
+    "expectedDigestVerifiedTwice": true,
+    "outputs": [
+      "/private/tmp/graider-72-repair-grt1-image-a",
+      "/private/tmp/graider-72-repair-grt1-image-b"
+    ],
+    "packages": "/private/tmp/graider-72-grt1-inputs",
+    "rootfsInputs": "/private/tmp/graider-41-native-edit-2jax2fgj"
+  },
+  "probes": {
+    "deep": {
+      "scope": "Synthetic GRT1 only; no full-Graider/native acceptance or production integration",
+      "scenario": "deep",
+      "files": 5,
+      "directories": 83,
+      "sourceBytes": 557073,
+      "manifestBytes": 952,
+      "inventoryBytes": 12266,
+      "sourceReads": 36,
+      "receipt": {
+        "profile": "GRT1-test-2c2",
+        "session": "c8a5b64788449d6e7b84ae5232a3badf",
+        "manifestSha256": "154717797a313ca29c24574ee7db89a82051f5e3cbef55fa0ad7a192f334f603",
+        "dataSha256": "11fa1247f927354e41c81c2790b45fc1d41f66d99d770793efbaf749954f13e8",
+        "wireBytes": 1530670,
+        "sentBytes": 749617,
+        "receivedBytes": 780972,
+        "diagnosticBytes": 81,
+        "operations": 45,
+        "guestUsage": [17756, 561152, 89, 1503052, 1374524],
+        "transcriptSha256": "0ccbcf5264afcb22fee3f7d2cb6b0f3697bb797c32d542960f912588d74134ce",
+        "maxExchangeMs": 2474.6505420000003,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        },
+        "elapsedMs": 19111.070459000002
+      },
+      "rejected": false,
+      "elapsedMs": 19132.134125,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      },
+      "watchdog": {
+        "status": "reaped",
+        "pid": 27006,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 81,
+        "sentBytes": 749617,
+        "receivedBytes": 780972,
+        "at": "2026-11-19T00:51:22.584Z"
+      },
+      "imageSha256": "938a11e962f0c0ee3db05372e8480d5cf0b552051c3fac8fdd9d09842698a5bd",
+      "helperSha256": "c995a289cf0c7671ea34989a5c8417427a70a59720e5f0c05c87c4e1c935cf43",
+      "probeSha256": "acac0b3f17cb8cd9093965f3839cde50ae55b21be12cb23e33ac441126f259b6",
+      "sourceHashes": {
+        "protocol.ts": "032fc8b855146888a761128f18b930e18d303524ca4edb5227b95ce7f396050e",
+        "manifest.ts": "0fd8d252e8b23bef36a7e6acfcddca23647d5e75d1d1f48e21758346a9cbf456",
+        "channel.ts": "1c40c2a19356b65417de45a40c4f06bb0f0863bb7940196974b07557a58fddb5",
+        "transfer.ts": "a728ba78c7dffbced17195500b6774718e13930db6bac9578395bd1ce316377e",
+        "hvf.ts": "bfd686ccc83e7a162aea73aa59aba9c4bdabb14479c5b120a34dc8bde185f3b8",
+        "inputs.ts": "01284ecf0ab1edf0998ec654144de255542f17d17440e0b101a63dba72fab80f",
+        "watchdog.mjs": "ab8eb106c7a507db22ae7e52554788eb0b1f4f09acba5a2ac1433be8b0529600",
+        "test-image-pins.json": "f9df82270d3dab411942b80c4bdd9cfc5eb2f1ed554c29ab88180f7a99387bce",
+        "guest.py": "c995a289cf0c7671ea34989a5c8417427a70a59720e5f0c05c87c4e1c935cf43",
+        "guest-init.sh": "99f56ab5b5c41d2d5ac1e15d8a9f44cdc13d8e21ffb9ca21398037b3becaa8df"
+      },
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-proof-WX6Jw6/graider-grt1-FZvjGi"
+    },
+    "death": {
+      "scenario": "death",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 1700.770792,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 29625,
+        "code": 0,
+        "stopReason": "caller-disconnected",
+        "stderrBytes": 81,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-19T00:51:24.404Z"
+      },
+      "payloadRetainedForReconciliation": true,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-HEKJKl/graider-grt1-HuyL2b",
+      "scriptSha256": "143cf9b633451e642d7d816bff60c068a5e71c51f097f042015bd2d375e6ce8c"
+    },
+    "crash": {
+      "scenario": "crash",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 1743.548916,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 30420,
+        "code": null,
+        "stopReason": "qemu-exit",
+        "stderrBytes": 0,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-19T00:51:26.287Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-XtGRjh/graider-grt1-IXxWIP",
+      "scriptSha256": "143cf9b633451e642d7d816bff60c068a5e71c51f097f042015bd2d375e6ce8c"
+    },
+    "forced": {
+      "scenario": "forced",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 1907.360792,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 31149,
+        "code": null,
+        "stopReason": "caller-stop",
+        "stderrBytes": 0,
+        "sentBytes": 723,
+        "receivedBytes": 384,
+        "at": "2026-11-19T00:51:28.298Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-ts88lM/graider-grt1-c9EoNx",
+      "scriptSha256": "143cf9b633451e642d7d816bff60c068a5e71c51f097f042015bd2d375e6ce8c"
+    },
+    "cancel": {
+      "scenario": "cancel",
+      "confirmedHvfBoot": true,
+      "elapsedMs": 1687.2479170000001,
+      "watchdog": {
+        "status": "reaped",
+        "pid": 32052,
+        "code": 0,
+        "stopReason": "caller-stop",
+        "stderrBytes": 81,
+        "sentBytes": 44531,
+        "receivedBytes": 384,
+        "at": "2026-11-19T00:51:30.119Z"
+      },
+      "outcome": {
+        "type": "outcome",
+        "failed": true,
+        "cleanup": {
+          "reaped": true,
+          "payloadRemoved": true
+        }
+      },
+      "payloadRetainedForReconciliation": false,
+      "vmDirectory": "/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-grt1-recovery-fJkiWj/graider-grt1-LfWQsZ",
+      "scriptSha256": "143cf9b633451e642d7d816bff60c068a5e71c51f097f042015bd2d375e6ce8c"
+    }
+  }
+}

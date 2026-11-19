@@ -37,7 +37,7 @@ function guestPath(value: string): string {
   if (
     !value ||
     value.length > MAX_ARGUMENT_BYTES ||
-    !/^[a-zA-Z0-9_./-]+$/.test(value) ||
+    !/^[a-zA-Z0-9_./()-]+$/.test(value) ||
     segments.some((segment) => /^(?:|\.|\.\.|\.git|\.codex|\.ssh|\.aws)$/i.test(segment))
   )
     throw failure("invalid transfer path");

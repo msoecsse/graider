@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { safePaths } from "../../scripts/orchestrator/baseline-source.js";
 import { Channel } from "../../scripts/orchestrator/grt1/channel.js";
 import pins from "../../scripts/orchestrator/grt1/test-image-pins.json" with { type: "json" };
 import {
@@ -152,12 +153,35 @@ describe("GRT1 bounded framing", () => {
 });
 
 describe("GRT1 manifest admission", () => {
+  it("adds only parentheses to the ASCII alphabet shared with source admission", () => {
+    const ASCII_CHARACTERS = 128;
+    const allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./()-";
+    for (let code = 0; code < ASCII_CHARACTERS; code++) {
+      const character = String.fromCharCode(code);
+      if (!allowed.includes(character)) {
+        const name = `a${character}b`;
+        const value = fixture([0]).manifest;
+        required(value.files[0]).path = name;
+        expect(() => safePaths([name])).toThrow();
+        expect(() => admitManifest(value)).toThrow();
+      }
+    }
+  });
   it.each([
     "../escape",
     "/escape",
     "C:/escape",
     "a:stream",
     "a/CON.txt",
+    "NUL.txt",
+    "a;b",
+    "a$b",
+    "a`b",
+    "a[b]",
+    "a{b}",
+    "a!b",
+    "a&b",
+    "a b",
     "a./file",
     "a/.git/config",
     "a/.env",
@@ -203,6 +227,15 @@ describe("GRT1 manifest admission", () => {
 });
 
 describe("GRT1 complete duplex with the fixed guest source", () => {
+  it.each(["reports/a(b).md", "reports/a(.md", "reports/a).md"])(
+    "round trips literal parentheses through the fixed guest: %s",
+    async (name) => {
+      const input = fixture([SMALL_BYTES]);
+      required(input.manifest.files[0]).path = name;
+      const result = await transfer(await receiver(), input.manifest, input.source);
+      expect(result.dataSha256).toBe(input.source.sha256);
+    }
+  );
   it("handles admitted deep paths without keeping directory descriptors open", async () => {
     const DEPTH = 80;
     const input = fixture([SMALL_BYTES]);
@@ -396,6 +429,8 @@ describe("GRT1 credit and independent host budgets", () => {
 describe("GRT1 guest independently admits supervisor manifests", () => {
   it.each([
     "escape",
+    "reserved-name",
+    "punctuation",
     "alias",
     "protected",
     "mode",
@@ -416,6 +451,8 @@ describe("GRT1 guest independently admits supervisor manifests", () => {
       const manifest = fixture([0, 0]).manifest;
       const first = required(manifest.files[0]);
       if (kind === "escape") first.path = "../escape";
+      if (kind === "reserved-name") first.path = "NUL.txt";
+      if (kind === "punctuation") first.path = "a);b";
       if (kind === "protected") first.path = ".git/config";
       if (kind === "alias") {
         first.path = "A/file";

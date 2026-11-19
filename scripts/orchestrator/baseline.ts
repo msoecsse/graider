@@ -115,7 +115,7 @@ function verifyInventory(output: Buffer, manifest: BaselineManifest, empty: bool
   const value = text(output);
   if (value.length && !value.endsWith("\n")) fail("truncated guest inventory");
   for (const row of value.length ? value.slice(0, LAST_INDEX).split("\n") : []) {
-    const match = /^([a-f0-9]{4,6}) ([0-9]+) ([0-9]+) \.\/([A-Za-z0-9_./-]+)$/.exec(row);
+    const match = /^([a-f0-9]{4,6}) ([0-9]+) ([0-9]+) \.\/([A-Za-z0-9_./()-]+)$/.exec(row);
     if (!match) fail("malformed guest inventory");
     const name = match[4] ?? "";
     const kind = expected.get(name);

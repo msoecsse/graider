@@ -60,7 +60,7 @@ export function admitManifest(input: unknown): {
     const parts = file.path.split("/");
     if (
       file.path <= previous ||
-      !/^[A-Za-z0-9_./-]+$/.test(file.path) ||
+      !/^[A-Za-z0-9_./()-]+$/.test(file.path) ||
       parts.some(
         (part) =>
           /^(?:|\.|\.\.)$/.test(part) ||

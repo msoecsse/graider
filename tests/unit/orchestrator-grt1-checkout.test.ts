@@ -128,15 +128,15 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(parent, { recursive: true, force: true });
 });
-async function failed(): Promise<void> {
-  await expect(proveCheckoutImport(options())).rejects.toThrow();
+async function failed(reason?: string): Promise<void> {
+  await expect(proveCheckoutImport(options())).rejects.toThrow(reason);
   expect(await readdir(path.join(cwd, ".git"))).toContain("graider-orchestrator.lock");
   for (const entry of await readdir(stateParent)) {
     expect(await readdir(path.join(stateParent, entry))).not.toContain("receipt.json");
   }
 }
 describe("standalone locked GRT1 checkout proof", () => {
-  it("retains the complete measured starting tree and rejects its real unsafe path", () => {
+  it("retains the historical measurement and now admits its parenthesized path", () => {
     expect(startingTree.tracked).toHaveLength(startingTree.files);
     expect(startingTree.tracked.reduce((sum, file) => sum + file.size, 0)).toBe(
       startingTree.totalBytes
@@ -161,7 +161,7 @@ describe("standalone locked GRT1 checkout proof", () => {
     expect(startingTree.unsafePaths).toEqual([
       "docs/bugs/resolved/260605/student_report_push)_addendum.md"
     ]);
-    expect(() => admitManifest(manifest)).toThrow("unsafe-path/alias");
+    expect(admitManifest(manifest).total).toBe(startingTree.totalBytes);
   });
   it("admits beyond Slice 2B only through the test profile and releases the lock after final verification", async () => {
     const result = await proveCheckoutImport(options());
@@ -182,6 +182,17 @@ describe("standalone locked GRT1 checkout proof", () => {
       await readFile(path.join(result.directory, "tracked.json"), "utf8")
     ) as unknown[];
     expect(tree).toHaveLength(3);
+  });
+  it("captures and verifies balanced and unmatched parentheses as literal path data", async () => {
+    const names = ["(reports)/student_report_push)_addendum.md", "open(.md", "pair().md"];
+    await mkdir(path.join(cwd, "(reports)"));
+    for (const name of names) await writeFile(path.join(cwd, name), `literal ${name}`);
+    await commit();
+    const receipt = await proveCheckoutImport(options());
+    expect(
+      receipt.manifest.files.filter((file) => names.includes(file.path)).map((file) => file.path)
+    ).toEqual(names);
+    expect(receipt.transfer.cleanup).toEqual({ reaped: true, payloadRemoved: true });
   });
   it("captures all entries beyond the production count cap without changing production admission", async () => {
     await Promise.all(
@@ -244,7 +255,7 @@ describe("standalone locked GRT1 checkout proof", () => {
     "hardlink",
     "alias",
     "protected",
-    "reviewed-character-policy"
+    "prohibited-punctuation"
   ])("rejects %s before VM creation", async (kind) => {
     if (kind === "assume-unchanged" || kind === "skip-worktree")
       await git(["update-index", `--${kind}`, "empty"]);
@@ -275,21 +286,13 @@ describe("standalone locked GRT1 checkout proof", () => {
       await commit();
     }
     if (kind === "alias") {
-      const oid = (await git(["rev-parse", "HEAD:empty"])).trim();
-      await git(["update-index", "--add", "--cacheinfo", `100644,${oid},NUL.txt`]);
-      await git([
-        "-c",
-        "user.name=Fixture",
-        "-c",
-        "user.email=fixture@example.invalid",
-        "commit",
-        "-qm",
-        "alias"
-      ]);
-      head = (await git(["rev-parse", "HEAD"])).trim();
+      // Valid on Windows; still prohibited as short-name alias syntax by admission.
+      // NUL.txt cannot enter a Windows Git index: test it directly in manifest admission.
+      await writeFile(path.join(cwd, "short~1.txt"), "unsafe alias");
+      await commit();
     }
-    if (kind === "reviewed-character-policy") {
-      await writeFile(path.join(cwd, "student_report_push)_addendum.md"), "tracked fixture");
+    if (kind === "prohibited-punctuation") {
+      await writeFile(path.join(cwd, "student_report_push;_addendum.md"), "tracked fixture");
       await commit();
     }
     if (kind === "protected") {
@@ -297,7 +300,11 @@ describe("standalone locked GRT1 checkout proof", () => {
       await writeFile(path.join(cwd, ".aws/data"), "fake");
       await commit();
     }
-    await failed();
+    await failed(
+      ["alias", "protected", "prohibited-punctuation"].includes(kind)
+        ? "Baseline unsafe or aliased source path"
+        : undefined
+    );
     expect(mocks.create).not.toHaveBeenCalled();
   });
   it.each(["truncated", "corrupt", "mode", "hardlink", "extra"])(

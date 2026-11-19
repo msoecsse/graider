@@ -72,7 +72,7 @@ def validate_manifest(raw):
     for item in files:
         require(type(item) is dict and list(item) == ["path", "mode", "size", "sha256"])
         name = item["path"]
-        require(type(name) is str and 0 < len(name) <= PATH_BYTES and re.fullmatch(r"[A-Za-z0-9_./-]+", name) is not None)
+        require(type(name) is str and 0 < len(name) <= PATH_BYTES and re.fullmatch(r"[A-Za-z0-9_./()-]+", name) is not None)
         require(name > previous and item["mode"] in ("100644", "100755"))
         size = number(item["size"], FILE)
         require(type(item["sha256"]) is str and re.fullmatch(HASH, item["sha256"]) is not None)

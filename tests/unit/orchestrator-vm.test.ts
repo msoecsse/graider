@@ -108,7 +108,7 @@ describe("disposable VM lifecycle (deterministic, not OS enforcement)", () => {
 
   it("transfers bounded bytes, executes argv without shell interpolation and never writes guest paths on host", async () => {
     const vm = await running();
-    const put = vm.putFile("src/file.txt", Buffer.from("input"));
+    const put = vm.putFile("src/a(b)_file).txt", Buffer.from("input"));
     reply(1, "OK");
     await put;
     const result = vm.run({ executable: "/bin/printf", args: ["%s", "$(touch host); secret"] });
@@ -118,7 +118,7 @@ describe("disposable VM lifecycle (deterministic, not OS enforcement)", () => {
       stdout: Buffer.from("out"),
       stderr: Buffer.from("err")
     });
-    const get = vm.getFile("src/file.txt");
+    const get = vm.getFile("src/a(b)_file).txt");
     reply(3, "DATA aW5wdXQ=");
     expect(await get).toEqual(Buffer.from("input"));
     await expect(vm.putFile("../escape", Buffer.alloc(0))).rejects.toThrow();

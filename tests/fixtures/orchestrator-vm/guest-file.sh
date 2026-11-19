@@ -3,7 +3,7 @@
 set -efu
 cd /work
 target=$(cat /run/path)
-case "$target" in ''|/*|*[!a-zA-Z0-9_./-]*) exit 1 ;; esac
+case "$target" in ''|/*|*[!a-zA-Z0-9_./\(\)-]*) exit 1 ;; esac
 operation=$(cat /run/operation)
 oldifs=$IFS
 IFS=/

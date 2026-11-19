@@ -1,0 +1,275 @@
+{
+  "scope": "Parentheses-only path repair; renewed Linux arm64 HVF probes, no production execution or native target acceptance",
+  "runtimeManifestSha256": "f712e76cef780566b876734733853b5fb11f89619b573bc491d2cc152c5d4bb8",
+  "imageSha256": "92dad01b3ef19b3dd0d0b0c216f84dac463cd5f380d9c4496b294e310ee9894e",
+  "watchdogSha256": "7ccc0cd3882f906050381685156a65db5e997e96e8fb5f3487af77e0757842f1",
+  "nativeBoots": [
+    {
+      "attempt": 1,
+      "id": "graider-vm-eBXhvZ",
+      "observations": [
+        {
+          "id": "valid-add",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-update",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete-setup",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete",
+          "outcome": "completed"
+        },
+        {
+          "id": "host-read-update-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/guest-protected.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/.git/config",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/tmp/native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/../native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape-dir/guest-protected.txt",
+          "outcome": "rejected"
+        }
+      ],
+      "bytesVerified": true,
+      "hostCanariesUnchanged": true,
+      "innerCommand": true,
+      "reaped": true
+    },
+    {
+      "attempt": 2,
+      "id": "graider-vm-YHERVe",
+      "observations": [
+        {
+          "id": "valid-add",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-update",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete-setup",
+          "outcome": "completed"
+        },
+        {
+          "id": "valid-delete",
+          "outcome": "completed"
+        },
+        {
+          "id": "host-read-update-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-0",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-1",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-2",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-read-update-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "host-add-3",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/guest-protected.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/.git/config",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/tmp/native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/../native-outside.txt",
+          "outcome": "rejected"
+        },
+        {
+          "id": "deny-/work/escape-dir/guest-protected.txt",
+          "outcome": "rejected"
+        }
+      ],
+      "bytesVerified": true,
+      "hostCanariesUnchanged": true,
+      "innerCommand": true,
+      "reaped": true
+    }
+  ],
+  "lifecycle": [
+    {
+      "attempt": 0,
+      "id": "graider-vm-0pgi41",
+      "fresh": true,
+      "transfer": true,
+      "argv": true,
+      "exitCode": true,
+      "timeoutReaped": true,
+      "evidence": {
+        "id": "graider-vm-0pgi41",
+        "digest": "f712e76cef780566b876734733853b5fb11f89619b573bc491d2cc152c5d4bb8",
+        "processId": 25086,
+        "events": [
+          {
+            "event": "started-hvf",
+            "at": "2026-11-19T00:49:38.241Z"
+          },
+          {
+            "event": "timeout",
+            "at": "2026-11-19T00:49:38.401Z"
+          },
+          {
+            "event": "destroyed",
+            "at": "2026-11-19T00:49:38.402Z"
+          }
+        ]
+      }
+    },
+    {
+      "attempt": 1,
+      "id": "graider-vm-m9f238",
+      "fresh": true,
+      "transfer": true,
+      "argv": true,
+      "exitCode": true,
+      "timeoutReaped": true,
+      "evidence": {
+        "id": "graider-vm-m9f238",
+        "digest": "f712e76cef780566b876734733853b5fb11f89619b573bc491d2cc152c5d4bb8",
+        "processId": 25238,
+        "events": [
+          {
+            "event": "started-hvf",
+            "at": "2026-11-19T00:49:42.834Z"
+          },
+          {
+            "event": "timeout",
+            "at": "2026-11-19T00:49:42.973Z"
+          },
+          {
+            "event": "destroyed",
+            "at": "2026-11-19T00:49:42.973Z"
+          }
+        ]
+      }
+    }
+  ],
+  "recovery": {
+    "failedStartupReaped": true,
+    "cancellationReaped": true,
+    "qemuCrashReaped": true,
+    "forcedKillReaped": true,
+    "supervisorCrashVmGroupGone": true,
+    "crashedRun": {
+      "id": "graider-vm-9yRgNq",
+      "pid": 26461
+    },
+    "recoveryFresh": true,
+    "supervisorCrashReapingAttested": true,
+    "watchdog": {
+      "status": "reaped",
+      "pid": 26461,
+      "code": 0,
+      "stopReason": "caller-disconnected",
+      "stderrBytes": 81,
+      "at": "2026-11-19T00:50:57.970Z"
+    }
+  },
+  "localEvidence": {
+    "native": "/private/tmp/graider-72-repair-2a-native-i0CFAy",
+    "lifecycle": "/private/tmp/graider-72-repair-2a-proof-ZbjKmZ",
+    "recovery": "/private/tmp/graider-72-repair-2a-recovery-sGDVGZ"
+  },
+  "reproducibility": {
+    "inputDirectory": "/private/tmp/graider-41-native-edit-2jax2fgj",
+    "outputs": [
+      "/private/tmp/graider-72-repair-vm-image-a",
+      "/private/tmp/graider-72-repair-vm-image-b"
+    ],
+    "identicalVerified": true
+  },
+  "sourceHashes": {
+    "scripts/orchestrator/vm/qemu.ts": "6199ef3ce57858b5b4d53f041ac806b7fd603fcdcd1555641d958b698e669c89",
+    "tests/fixtures/orchestrator-vm/guest-file.sh": "e10a5da8ce9e4ef9146608f7dc40ea5f1bdb476984db1d033f933d9cf055a625",
+    "tests/fixtures/orchestrator-vm/build-image.py": "346b5f6f1de25f06dabd9d42b0dd4d3d330079910e4a494e707e83b35f5347bc"
+  },
+  "failedManagedAttempt": "/private/tmp/graider-72-repair-2a-proof-0o7hI7",
+  "probeHashes": {
+    "native": "e7b44d3348e4638879e9d955656a764997ce814c856cf0577f55a8bb8380c8c3",
+    "smoke": "7d33ff4c5088c4a84be691baf1f8d62698cbdf2daeb884addde9b200f8424cd0",
+    "recovery": "e60ef59517b1434fad05b357f5876ea714f6259e17e1a7c3dd3785c85a020b9d"
+  }
+}

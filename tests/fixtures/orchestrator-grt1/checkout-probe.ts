@@ -1,7 +1,7 @@
 /** Manual exact-HEAD HVF proof. Imported checkout programs are never executed. */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { lstat, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -11,7 +11,8 @@ import pins from "../../../scripts/orchestrator/grt1/test-image-pins.json" with 
 const [cwd, expectedHead, artifactDirectory] = process.argv.slice(2);
 if (!cwd || !expectedHead || !artifactDirectory)
   throw new Error("Pass clean authoritative checkout, exact HEAD and existing pinned artifacts.");
-const stateParent = await mkdtemp(path.join(tmpdir(), "graider-72-2c3-proof-"));
+// Match the canonical VM executable path when macOS tmpdir uses the /var alias.
+const stateParent = await realpath(await mkdtemp(path.join(tmpdir(), "graider-72-2c3-proof-")));
 console.log(stateParent);
 const execute = promisify(execFile);
 const SAMPLE_MS = 250;

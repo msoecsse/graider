@@ -10,6 +10,7 @@ import {
   verifiedBytes
 } from "../../scripts/orchestrator/vm/inputs.js";
 import pins from "../../scripts/orchestrator/vm/reviewed-inputs.json" with { type: "json" };
+import currentObserved from "../fixtures/orchestrator-vm/path-policy-observed.json" with { type: "json" };
 import observed from "../fixtures/orchestrator-vm/observed.json" with { type: "json" };
 import {
   nativeCases,
@@ -20,7 +21,7 @@ import {
 describe("reviewed HVF input policy", () => {
   it("binds the reviewed runtime/image to actual recorded hostile boots, without treating this as OS proof", () => {
     expect(createHash("sha256").update(JSON.stringify(pins)).digest("hex")).toBe(
-      observed.runtimeManifestSha256
+      currentObserved.runtimeManifestSha256
     );
     expect(
       createHash("sha256")
@@ -29,12 +30,12 @@ describe("reviewed HVF input policy", () => {
         )
         .digest("hex")
     ).toBe(pins.watchdogSha256);
-    expect(observed.imageSha256).toBe(pins.imageSha256);
+    expect(currentObserved.imageSha256).toBe(pins.imageSha256);
     const hostCanaries = Array.from({ length: 4 }, (_, index) => ({
       path: `/fake-host/${String(index)}`,
       contents: "canary"
     }));
-    for (const boot of observed.nativeBoots) {
+    for (const boot of [...observed.nativeBoots, ...currentObserved.nativeBoots]) {
       expect(() => {
         const observations = boot.observations.map(({ id, outcome }): NativeObservation => {
           if (outcome !== "completed" && outcome !== "rejected")
@@ -46,6 +47,8 @@ describe("reviewed HVF input policy", () => {
       expect(boot.bytesVerified && boot.hostCanariesUnchanged && boot.reaped).toBe(true);
     }
     expect(observed.recovery.supervisorCrashReapingAttested).toBe(true);
+    expect(currentObserved.recovery.supervisorCrashReapingAttested).toBe(true);
+    expect(currentObserved.recovery.watchdog.status).toBe("reaped");
   });
   it("rejects Windows/Linux, x64, and unknown OS versions instead of falling back", () => {
     expect(() => {

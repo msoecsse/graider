@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import observed from "../fixtures/orchestrator-transfer/observed.json" with { type: "json" };
-import pins from "../../scripts/orchestrator/vm/reviewed-inputs.json" with { type: "json" };
+import historicalNative from "../fixtures/orchestrator-vm/observed.json" with { type: "json" };
 import {
   decode,
   digest,
@@ -164,7 +164,9 @@ it("binds recorded synthetic observations to fixture sources without claiming a 
       )
     ).toBe(hash);
   }
-  expect(observed.imageSha256).toBe(pins.imageSha256);
+  // Preserve this historical probe's image identity; current-image enforcement
+  // is independently renewed and bound to pins by orchestrator-vm-inputs.test.ts.
+  expect(observed.imageSha256).toBe(historicalNative.imageSha256);
   expect(observed.watchdog.status).toBe("reaped");
   expect(observed.byteAndModeVerification).toBe(true);
   expect(observed.rejectedDuplicate).toBe(true);
