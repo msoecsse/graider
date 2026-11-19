@@ -1362,11 +1362,117 @@ to the renewed native observations. No old observation was rewritten or reused
 as a current-image attestation. The sandbox audit DNS failure and authorized
 passing rerun are retained in local logs.
 
-The real-checkout proof and exact-SHA CI results will be recorded below after
-a fresh independently verified source capture.
+The complete real-checkout result is recorded below. Exact-SHA CI/native results
+for the pushed evidence commit are linked from the [#72 handoff](https://github.com/msoecsse/graider/issues/72). Local proof success alone does not certify CI or
+production execution acceptance.
 The original November 10 lock and prior failed-source lock remain byte-identical.
 #72 and #41 stay open/blocked; execution remains disabled. Stop after the proof;
 no production integration, Agent/relay/promotion or #26/#15/Phase 10 work.
+
+### Slice 2C3 complete real-checkout proof (2026-11-18)
+
+**PASS for the exact repair source, standalone GRT1 import/readback/cleanup only.**
+No production integration was started. The fully validated repair commit is
+`cde7fea6efea1eb188a299060b9a233405885ddc`, descended from the requested
+`28a184bb28f1f4861c6ccb7260746a11b220e1cc`. Its entire current tracked tree,
+including the unmatched `student_report_push)_addendum.md`, was admitted and
+imported into a fresh pinned no-NIC HVF guest. No tracked file was omitted,
+renamed or remapped. The later evidence-only commit records this explicit source;
+it is not misrepresented as the source imported by its own proof.
+
+[Every tracked record](../tests/fixtures/orchestrator-grt1/repaired-tree.json)
+and [source-bound success evidence](../tests/fixtures/orchestrator-grt1/checkout-success-observed.json)
+retain all paths, raw Git blob identities, modes, exact sizes and SHA-256 values.
+A fresh independent bundled-Git clone, with no hardlinked objects, inherited
+configuration or credentials, resides at `/private/tmp/graider-72-repair-source-QQRyyq`.
+Every original and cloned tracked byte/mode/blob matched independently before
+admission. The original locked checkout was only measured, never unlocked or
+admitted. Sizing took 361.847 ms in the original and 156.381 ms in the clone;
+these sizing observations are separate from race-aware locked capture.
+
+The manifest contains **1,565 files / 447 directories / 13,364,867 bytes**;
+all Git modes are `100644`, with 22 files above 64 KiB. Manifest SHA-256 is
+`d855195bcfc027a28682cf4703fd497095877fde38790bf0de29ec776f8e275a`.
+The independent sizing oracle's full-record hash includes SHA-256 and differs
+from the adapter's raw-Git-record hash by schema/key ordering; each record was
+compared field by field, rather than equating unlike serialized hashes.
+
+| Resource                                       | Observed/admitted |        Unchanged bound |
+| ---------------------------------------------- | ----------------: | ---------------------: |
+| Files                                          |             1,565 |                  2,048 |
+| Parent directories                             |               447 |                  1,024 |
+| Source bytes                                   |        13,364,867 |             16,777,216 |
+| Largest file bytes                             |           405,384 |                524,288 |
+| Manifest bytes                                 |           252,234 |              1,048,576 |
+| Each exact inventory bytes                     |           214,531 |              1,048,576 |
+| Maximum path ASCII bytes                       |                94 |                    240 |
+| Exchanges                                      |               844 |                  1,126 |
+| Combined raw wire bytes, including diagnostics |        36,761,957 |             67,108,864 |
+| Transfer lifecycle elapsed seconds             |           159.711 |         600 hard lease |
+| Maximum measured exchange seconds              |             0.856 |                     30 |
+| Fixed helper peak RSS KiB                      |            19,440 | 65,536 telemetry bound |
+| Guest workspace bytes                          |        17,145,856 |             67,108,864 |
+| Guest workspace inodes                         |             2,013 |                  4,096 |
+
+The calculated envelope was **844 exchanges / 36,983,520 conservative wire bytes**;
+actual traffic stayed below it and leaves **282 exchanges / 30,346,907 bytes**
+below the hard caps. Transfer lifecycle time leaves **440.289 seconds** below the
+unchanged lease. Total supervisor elapsed time was **161.142 seconds**, including
+**0.686 seconds** capture/setup and **0.745 seconds** final authority/source recheck.
+There was no lease renewal, retry, transport-budget increase or fallback.
+
+The existing standalone verifier independently checked every returned byte,
+per-file hash, length and mode between two exact inventory comparisons, including
+all directories and link counts. The supervisor independently recomputed the
+source concatenation again after completion; SHA-256 is
+`18980be9146d1b6564317301611f3da076b06b02be8bfeed1e6af53441d58356`.
+Host/watchdog counts agree exactly: **18,265,930 sent + 18,495,946 received +
+81 diagnostic bytes**. Transcript SHA-256 is
+`474431a1f6ccfc3973094a6d739e9953fc18685d23ce9c26aaca9ff630bb97f7`.
+The watchdog attested reaping, the probe independently verified disposable-payload
+absence, and the locked adapter rechecked repository/branch/HEAD/index,
+manifest/tracked evidence and every source/parent identity/byte/mode before
+writing its receipt and releasing only the fresh clone's new lock.
+
+Memory/workspace observations: guest MemTotal **1,503,052 KiB**, within the fixed
+1,536-MiB VM configuration; MemAvailable **1,367,164 KiB** at FINISH is a point
+observation. The helper's 19,440-KiB RSS includes its interpreter and metadata;
+it is below the enforced telemetry bound, without implying that a 16-MiB metadata
+planning reserve caps the complete interpreter. Host Node high-water RSS was
+**769,648 KiB**; sampled QEMU RSS reached **355,056 KiB**. The 250-ms sampler made
+**642 samples with zero failures** and observed **55,479,912 logical bytes / 11
+entries** in host evidence/staging. Sampled maxima are lower bounds, not continuous
+peak or allocated-disk measurements; the host staging observation excludes the
+independent source clone and installed dependencies. No separate host RSS/disk
+hard cap was established or is inferred. Guest tmpfs allocation/inode telemetry
+is measured against its actual enforced capacity above.
+
+Evidence/receipt root:
+`/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-oUz5kH`.
+The original November 10 lock still hashes to
+`96a4841334c7ef46e77dc7bb917be2d977dc4578e8db851135d70fda3fbe69b7`;
+the prior failed-source lock still hashes to
+`f43f53351525d5644f5f716c123be9c56546a99db86a2e2cbc335e46b4dfab7b`.
+Both original image artifacts also still match their historical pins. Earlier
+starting-tree, failed-checkout, VM, baseline and synthetic observations remain
+unchanged. No checkpoint was resumed/replayed and no historical lock was cleared.
+
+**Stop after this real-checkout proof. #72 and #41 remain open/blocked, and
+unattended execution remains disabled.** This establishes the requested Linux
+arm64 HVF full-tree transport proof, not native Windows VM/reparse metadata,
+native macOS validation, Agent/model relay, isolated validation/promotion or the
+rest of #41 architecture acceptance. Root/native CI, security/audit and execution
+gates remain required; exact pushed-SHA results belong in the #72 handoff.
+
+Measured task phase walls through proof inspection: investigation **77.544 s**;
+implementation/probe preparation **6,454.437 s**; local validation **352.797 s**;
+exact-source commit/clone/measurement/proof/inspection **273.213 s**; total
+**7,157.991 s**. The long preparation wall includes an approval wait that was not
+separately instrumented; active coding time and total exclusive approval/network
+waiting are **not measured**, so those phase walls must not be read as active
+coding durations. CI waiting was zero through proof inspection. Evidence
+recording, final commit/push and exact-SHA CI waiting follow and are measured in
+the issue handoff. No limits or policies were changed to shorten waiting.
 
 ## Cancellation and recovery
 

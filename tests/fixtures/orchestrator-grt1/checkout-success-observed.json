@@ -1,0 +1,161 @@
+{
+  "scope": "PASS: complete exact repair-commit checkout in a pinned HVF guest; standalone proof only, no production integration/native validation acceptance",
+  "proofSourceHead": "cde7fea6efea1eb188a299060b9a233405885ddc",
+  "source": "/private/tmp/graider-72-repair-source-QQRyyq",
+  "originalAndIndependentTrackedRecordsMatch": true,
+  "allManifestAndRawGitRecordsIndependentlyCompared": true,
+  "independentlyRecomputedAggregateSha256": "18980be9146d1b6564317301611f3da076b06b02be8bfeed1e6af53441d58356",
+  "measurement": {
+    "scope": "sizing only; unsafe names are measured, never admitted",
+    "head": "cde7fea6efea1eb188a299060b9a233405885ddc",
+    "files": 1565,
+    "directories": 447,
+    "totalBytes": 13364867,
+    "manifestBytes": 252234,
+    "manifestSha256": "d855195bcfc027a28682cf4703fd497095877fde38790bf0de29ec776f8e275a",
+    "maximumPathBytes": 94,
+    "maximumFileBytes": 405384,
+    "above64KiB": 22,
+    "modes": {
+      "regular": 1565,
+      "executable": 0
+    },
+    "unsafePaths": [],
+    "rawTreeSha256": "d5b642057d5de13a631978dd2482e46117c70e5709f63f54b6317046d8adf42e",
+    "trackedSha256": "a1f8069cce99afd5325de12c221402f93b882156923cae80e702e6dd61e1400f",
+    "elapsedMs": 361.846791,
+    "tracked": null
+  },
+  "independentMeasurement": {
+    "scope": "sizing only; unsafe names are measured, never admitted",
+    "head": "cde7fea6efea1eb188a299060b9a233405885ddc",
+    "files": 1565,
+    "directories": 447,
+    "totalBytes": 13364867,
+    "manifestBytes": 252234,
+    "manifestSha256": "d855195bcfc027a28682cf4703fd497095877fde38790bf0de29ec776f8e275a",
+    "maximumPathBytes": 94,
+    "maximumFileBytes": 405384,
+    "above64KiB": 22,
+    "modes": {
+      "regular": 1565,
+      "executable": 0
+    },
+    "unsafePaths": [],
+    "rawTreeSha256": "d5b642057d5de13a631978dd2482e46117c70e5709f63f54b6317046d8adf42e",
+    "trackedSha256": "a1f8069cce99afd5325de12c221402f93b882156923cae80e702e6dd61e1400f",
+    "elapsedMs": 156.380916,
+    "tracked": null
+  },
+  "calculation": {
+    "inventoryBytes": 214531,
+    "directories": 447,
+    "operations": 844,
+    "raw": 27411030,
+    "wire": 36983520,
+    "dataChunks": 408
+  },
+  "result": {
+    "scope": "complete real starting-HEAD checkout; standalone GRT1 only",
+    "head": "cde7fea6efea1eb188a299060b9a233405885ddc",
+    "measurement": {
+      "head": "cde7fea6efea1eb188a299060b9a233405885ddc",
+      "files": 1565,
+      "directories": 447,
+      "totalBytes": 13364867,
+      "manifestBytes": 252234,
+      "inventoryBytes": 214531,
+      "manifestSha256": "d855195bcfc027a28682cf4703fd497095877fde38790bf0de29ec776f8e275a",
+      "trackedSha256": "c668b33517cbfe44eebb00ad8af6e8309b7cb821d660da7019de725b63c125cc",
+      "maximumPathBytes": 94,
+      "maximumFileBytes": 405384,
+      "above64KiB": 22,
+      "modes": {
+        "regular": 1565,
+        "executable": 0
+      }
+    },
+    "captureMs": 686.033583,
+    "recheckMs": 744.6898330000113,
+    "elapsedMs": 161142.44575,
+    "hostMaxRssKiB": 769648,
+    "transfer": {
+      "profile": "GRT1-test-2c2",
+      "session": "1963406a8c8540043381c2a30490dd0b",
+      "manifestSha256": "d855195bcfc027a28682cf4703fd497095877fde38790bf0de29ec776f8e275a",
+      "dataSha256": "18980be9146d1b6564317301611f3da076b06b02be8bfeed1e6af53441d58356",
+      "wireBytes": 36761957,
+      "sentBytes": 18265930,
+      "receivedBytes": 18495946,
+      "diagnosticBytes": 81,
+      "operations": 844,
+      "guestUsage": [19440, 17145856, 2013, 1503052, 1367164],
+      "transcriptSha256": "474431a1f6ccfc3973094a6d739e9953fc18685d23ce9c26aaca9ff630bb97f7",
+      "maxExchangeMs": 855.8876249999998,
+      "cleanup": {
+        "reaped": true,
+        "payloadRemoved": true
+      },
+      "elapsedMs": 159711.36025
+    },
+    "sampling": {
+      "periodMs": 250,
+      "samples": 642,
+      "sampleFailure": false,
+      "qemuPeakRssKiB": 355056,
+      "workspacePeakBytes": 55479912,
+      "workspacePeakEntries": 11
+    },
+    "sourceHashes": {
+      "../baseline-source.ts": "c47b2ec48b4dc1ead6fcd60642c5e4d7b6ecb83cf333d34224c30cde4dcfd4c4",
+      "../baseline.ts": "76c0f555b9e5c23a00d325901658b1fab4007357651403d1a528dca85fbf3acf",
+      "./checkout.ts": "489f18ad7d4070bbe1dc9dc03b7db14f26948db970e08b06e39bbc8968028212",
+      "./transfer.ts": "a728ba78c7dffbced17195500b6774718e13930db6bac9578395bd1ce316377e",
+      "./manifest.ts": "0fd8d252e8b23bef36a7e6acfcddca23647d5e75d1d1f48e21758346a9cbf456",
+      "./protocol.ts": "032fc8b855146888a761128f18b930e18d303524ca4edb5227b95ce7f396050e",
+      "./channel.ts": "1c40c2a19356b65417de45a40c4f06bb0f0863bb7940196974b07557a58fddb5",
+      "./hvf.ts": "bfd686ccc83e7a162aea73aa59aba9c4bdabb14479c5b120a34dc8bde185f3b8",
+      "./inputs.ts": "01284ecf0ab1edf0998ec654144de255542f17d17440e0b101a63dba72fab80f",
+      "./watchdog.mjs": "ab8eb106c7a507db22ae7e52554788eb0b1f4f09acba5a2ac1433be8b0529600",
+      "./test-image-pins.json": "f9df82270d3dab411942b80c4bdd9cfc5eb2f1ed554c29ab88180f7a99387bce",
+      "./guest.py": "c995a289cf0c7671ea34989a5c8417427a70a59720e5f0c05c87c4e1c935cf43",
+      "./guest-init.sh": "99f56ab5b5c41d2d5ac1e15d8a9f44cdc13d8e21ffb9ca21398037b3becaa8df"
+    },
+    "probeSha256": "3afb99622bc6cedfc961a4df9e191291290b9ba9941e6cd296dc0111aa5e54b5",
+    "imageSha256": "938a11e962f0c0ee3db05372e8480d5cf0b552051c3fac8fdd9d09842698a5bd",
+    "vmDirectory": "/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-oUz5kH/graider-grt1-checkout-IutTL9/graider-grt1-Y9TiLe",
+    "directory": "/private/var/folders/4q/0ln9xxf56fs72yv0g3pw8ch80000gn/T/graider-72-2c3-proof-oUz5kH/graider-grt1-checkout-IutTL9",
+    "watchdog": {
+      "status": "reaped",
+      "pid": 76390,
+      "code": 0,
+      "stopReason": "caller-stop",
+      "stderrBytes": 81,
+      "sentBytes": 18265930,
+      "receivedBytes": 18495946,
+      "at": "2026-11-19T01:01:37.032Z"
+    }
+  },
+  "preservedArtifacts": {
+    "/Users/sean/Box Sync/WebstormProjects/graider/.git/graider-orchestrator.lock": "96a4841334c7ef46e77dc7bb917be2d977dc4578e8db851135d70fda3fbe69b7",
+    "/private/tmp/graider-72-2c3-source-kG9YEb/.git/graider-orchestrator.lock": "f43f53351525d5644f5f716c123be9c56546a99db86a2e2cbc335e46b4dfab7b",
+    "/private/tmp/graider-72-grt1-depth-image-a/guest-initramfs.gz": "c1ee8d45a7da724136a3d39c7f95a63c11bed781c5714ed5a0b01fd8aade2f96",
+    "/private/tmp/graider-41-slice2a-inputs/guest-initramfs.gz": "0bc6c58baff447f3a4d722f46213e981ee9e4de126432a182310e24c0312e033"
+  },
+  "preservedFixtureSha256": {
+    "tests/fixtures/orchestrator-grt1/starting-tree.json": "ace6b4c8af40823b1f2763e04b41648ca6543a83fe2f11341c940ecef61f8bea",
+    "tests/fixtures/orchestrator-grt1/checkout-observed.json": "a8118f65d7d9433f38d620fb3f7f26865e22e6458afbaa39e0666bedd0c0c78b",
+    "tests/fixtures/orchestrator-grt1/observed.json": "bf9a8ecf6e340b94ad50f576b2ff66754e22bf27cf695bbbcc0a7ac5a126bee1",
+    "tests/fixtures/orchestrator-vm/observed.json": "9cd0d4d18b6c8e1a9df48e8e60215192860b15deeb2bdfd83ffc20666971ce3d",
+    "tests/fixtures/orchestrator-baseline/observed.json": "d4c9c04dfac8e58419c29ee2ba9ded5d439450f582ffd5b141c6a1a9ac5f2055",
+    "tests/fixtures/orchestrator-transfer/observed.json": "1aec57cd0392f9db9d0f4f3783e057b69566c46ddd067fd8dab6d76feac240c5"
+  },
+  "currentTreeFileSha256": "9020ce1bb8583a33439b2e2da7d785c78d9b3be86c11f57909aed412c1b72b7c",
+  "limitations": [
+    "The proof captures every tracked file at the explicit repair commit; the later evidence-only commit is not claimed as that imported source.",
+    "Guest telemetry comes from the fixed pinned helper; independent supervisor bytes/inventory/lifecycle checks grant acceptance.",
+    "QEMU RSS and host staging logical byte footprint are 250-ms sampled lower bounds; Node high-water RSS is process-wide. No separate host RSS/disk hard limit is specified or inferred.",
+    "No host filesystem shares, credentials, model relay, imported executable, production executor or promotion was connected.",
+    "All original locks, failed evidence and images remain preserved. Native Windows VM/reparse metadata and native macOS validation remain separate outstanding architecture acceptance."
+  ]
+}
