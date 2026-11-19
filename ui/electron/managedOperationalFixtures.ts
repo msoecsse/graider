@@ -22,6 +22,7 @@ import type {
 } from "./githubOAuthSession.js";
 import type { RemoteCourse } from "./remoteCourseTypes.js";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories.js";
+import type { gitIntegrationTiming } from "./gitIntegrationFixtures.js";
 
 export const fixtureGit = async (cwd: string, args: string[]) => {
   const result = await exec(args, cwd);
@@ -56,7 +57,11 @@ sections:
   - id: "001"
     faculty: [jones]
 `;
-export const managedOperationalFixture = async () => {
+export const managedOperationalFixture = async (
+  timing?: ReturnType<typeof gitIntegrationTiming>
+) => {
+  const measure = <T>(name: string, operation: () => Promise<T>): Promise<T> =>
+    timing ? timing.phase(name, operation) : operation();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-managed-transaction-"));
   const remote = path.join(root, "remote.git"),
     writer = path.join(root, "writer"),
@@ -118,13 +123,15 @@ export const managedOperationalFixture = async () => {
     topics: []
   };
   const reader: RemoteRepositoryReader = {
-    revision: async () => git(remote, ["rev-parse", "refs/heads/main"]),
+    revision: async () =>
+      measure("remote-revision", () => git(remote, ["rev-parse", "refs/heads/main"])),
     resolveId: async () => repository,
     resolve: async () => repository,
-    file: async (_repo, file, revision = "refs/heads/main") => {
-      const result = await exec(["show", `${revision}:${file}`], remote);
-      return result.exitCode === 0 ? result.stdout : null;
-    },
+    file: async (_repo, file, revision = "refs/heads/main") =>
+      measure("remote-file", async () => {
+        const result = await exec(["show", `${revision}:${file}`], remote);
+        return result.exitCode === 0 ? result.stdout : null;
+      }),
     terms: async () => ["27s1"],
     list: async () => [],
     search: async () => ({ ids: [], incomplete: false })
@@ -269,15 +276,17 @@ export const managedOperationalFixture = async () => {
           refreshFailures--;
           throw new Error("Injected local refresh failure");
         }
-        return performSynchronization({
-          ...input,
-          userData: root,
-          username: "jones",
-          reader,
-          authenticate: () => auth,
-          onProgress: () => {},
-          requireFacultyAuthorization: !afterPublication
-        });
+        return measure("synchronization", () =>
+          performSynchronization({
+            ...input,
+            userData: root,
+            username: "jones",
+            reader,
+            authenticate: () => auth,
+            onProgress: () => {},
+            requireFacultyAuthorization: !afterPublication
+          })
+        );
       };
       return serializeManagedOperation(input, async () =>
         operation({ ...input, resynchronize: synchronize }, await synchronize())

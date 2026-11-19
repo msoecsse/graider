@@ -4,6 +4,7 @@ import {
   describeGitIntegration as describe,
   GIT_INTEGRATION_TIMEOUT_MS,
   itGitIntegration,
+  gitIntegrationTiming,
   removeGitFixture
 } from "./gitIntegrationFixtures";
 import fs from "node:fs";
@@ -43,14 +44,22 @@ vi.mock("./githubRemoteRepositories.js", async (original) => ({
   createRemoteRepositoryReader: () => remote.reader
 }));
 const roots: string[] = [];
+let timing: ReturnType<typeof gitIntegrationTiming> | undefined;
 const fixture = async () => {
-  const f = await managedOperationalFixture();
+  const f = await managedOperationalFixture(timing);
   roots.push(f.root);
   remote.reader = f.reader;
   return f;
 };
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map(removeGitFixture));
+  const cleanup = () => Promise.all(roots.splice(0).map(removeGitFixture));
+  try {
+    if (timing) await timing.phase("cleanup", cleanup);
+    else await cleanup();
+  } finally {
+    timing?.finish();
+    timing = undefined;
+  }
 });
 const sender = (id = 1) =>
   Object.assign(new EventEmitter(), {
@@ -502,8 +511,10 @@ describe("course admin transaction inventory", () => {
   itGitIntegration(
     "uses existing assignment create/edit/delete and roster validators in isolated transactions",
     async () => {
-      const f = await fixture();
-      await f.guard.cutover("registered");
+      timing = gitIntegrationTiming();
+      const measured = timing.phase;
+      const f = await measured("fixture", fixture);
+      await measured("cutover", () => f.guard.cutover("registered"));
       const { saveAssignmentSetup } = await import("./assignmentSetupService");
       const { getAssignmentForEdit, saveAssignmentEdit } = await import("./assignmentEditService");
       const { deleteAssignment } = await import("./assignmentDeleteService");
@@ -514,14 +525,18 @@ describe("course admin transaction inventory", () => {
         fields: Record<string, unknown>,
         mutate: (root: string) => unknown
       ) =>
-        f.guard.run("registered", f.legacy, "new_mutation", async (context, input) =>
-          f.guard.transaction(
-            context,
-            input,
-            context.authoritativeCommit,
-            (file) => allowedCourseMutationPath(channel, fields, file),
-            async (root) => mutate(root),
-            vi.fn()
+        measured(channel, () =>
+          f.guard.run("registered", f.legacy, "new_mutation", async (context, input) =>
+            measured(`${channel}/transaction`, () =>
+              f.guard.transaction(
+                context,
+                input,
+                context.authoritativeCommit,
+                (file) => allowedCourseMutationPath(channel, fields, file),
+                async (root) => measured(`${channel}/domain`, async () => mutate(root)),
+                vi.fn()
+              )
+            )
           )
         );
       const setup = {
@@ -579,14 +594,16 @@ describe("course admin transaction inventory", () => {
       a.ipc.handle(IPC_CHANNELS.applyAssignment, (_event, request: unknown) =>
         applyAssignment(request as AssignmentApplyRequest, { runner: applyRunner, env: {} })
       );
-      const applied = await a.call(IPC_CHANNELS.applyAssignment, {
-        courseFolderId: "registered",
-        courseFolderPath: f.legacy,
-        assignmentFile: file,
-        token: "renderer-assertion",
-        userId: 999,
-        authoritativeCommit: f.head
-      });
+      const applied = await measured("apply", () =>
+        a.call(IPC_CHANNELS.applyAssignment, {
+          courseFolderId: "registered",
+          courseFolderPath: f.legacy,
+          assignmentFile: file,
+          token: "renderer-assertion",
+          userId: 999,
+          authoritativeCommit: f.head
+        })
+      );
       expect(applied).toMatchObject({ status: "success" });
       expect(applyRunner).not.toHaveBeenCalled();
       expect(runManagedAssignmentApply).toHaveBeenCalledOnce();
