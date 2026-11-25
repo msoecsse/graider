@@ -502,7 +502,11 @@ export const createCourseMutationIpc = (
               });
           }
           const notify = (value: unknown) => {
-            if (!event.sender.isDestroyed()) event.sender.send(COURSE_MUTATION_NOTICE, value);
+            try {
+              if (!event.sender.isDestroyed()) event.sender.send(COURSE_MUTATION_NOTICE, value);
+            } catch {
+              // Progress delivery must not change mutation ownership or its result.
+            }
           };
           const key = `${event.sender.id}:${channel}:${String(folderId)}`;
           if (active.has(key))
@@ -512,8 +516,8 @@ export const createCourseMutationIpc = (
               "retry"
             );
           active.add(key);
-          notify({ status: "checking" });
           try {
+            notify({ status: "checking" });
             requireFreshView(view, epoch);
             const boundary = guard();
             if (!boundary)

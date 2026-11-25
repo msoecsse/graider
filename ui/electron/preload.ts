@@ -51,6 +51,8 @@ import {
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
   type AssignmentTemplateSyncProgress,
+  type AssignmentRepositoryUpdateProgress,
+  type AssignmentRepositoryUpdateResult,
   type AssignmentTemplateSyncRequest,
   type AssignmentGradeRequest,
   type AssignmentGradeResult,
@@ -359,6 +361,25 @@ const graiderUI: GraiderUIApi = {
     request: GradingStudentViewStateRequest
   ): Promise<GradingStudentViewStateResult> =>
     await invoke<GradingStudentViewStateResult>(IPC_CHANNELS.clearGradingStudentViewState, request),
+  pullLatestAssignmentStudentChanges: async (request: GradingWorkspacePrepareRequest) =>
+    await invoke<AssignmentRepositoryUpdateResult>(
+      IPC_CHANNELS.pullLatestAssignmentStudentChanges,
+      request
+    ),
+  onAssignmentRepositoryUpdateProgress: (
+    listener: (progress: AssignmentRepositoryUpdateProgress) => void
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: AssignmentRepositoryUpdateProgress
+    ) => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.assignmentRepositoryUpdateProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.assignmentRepositoryUpdateProgress, handler);
+    };
+  },
   pullLatestGradingStudentChanges: async (request: GradingStudentSourceRequest) =>
     await invoke<
       import("./gradingStudentRepositoryUpdateService.js").GradingStudentRepositoryUpdateResult

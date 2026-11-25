@@ -1,5 +1,6 @@
 import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
+import { isTrustedGitHubWebUrl } from "./externalNavigation.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -17,9 +18,11 @@ export interface GradingWorkspaceAssignment {
   readonly termCode: string;
   readonly slug: string;
   readonly title: string;
+  readonly dueAt?: string;
 }
 
 export interface GradingWorkspaceStudent {
+  readonly repositoryUrl?: string;
   readonly firstName?: string;
   readonly lastName?: string;
   readonly studentId: string;
@@ -91,12 +94,20 @@ export const createGradingWorkspaceService = (
     if (!isValidGradingWorkspaceIdentity(request)) return { status: "assignment_config_error" };
     const scope = services.resolveFacultyScope(request);
     if (scope.status !== "success") return { status: scope.status };
-    return services.backend.resolveGradingWorkspaceContext({
+    const result = services.backend.resolveGradingWorkspaceContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       students: scope.students
     });
+    if (result.status !== "success") return result;
+    return {
+      ...result,
+      students: result.students.map(({ repositoryUrl, ...student }) => ({
+        ...student,
+        ...(isTrustedGitHubWebUrl(repositoryUrl) ? { repositoryUrl } : {})
+      }))
+    };
   };
 };
 

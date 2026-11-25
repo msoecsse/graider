@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  AssignmentApplyResult,
   CreateGradingLibraryCommentRequest,
   DeleteGradingLibraryCommentRequest,
   EditGradingLibraryCommentRequest,
@@ -31,7 +32,101 @@ vi.mock("electron", () => ({
 
 import "./preload.js";
 
+it("forwards explicit zero undo through the existing grading completion bridge", async () => {
+  const request = {
+    courseFolderId: "course",
+    courseFolderPath: "course",
+    termCode: "27s1",
+    assignmentSlug: "lab1",
+    studentId: "ada",
+    undoZeroAndComplete: true
+  };
+  const result = { status: "success", studentId: "ada", gradingStatus: "in_progress" };
+  electron.invoke.mockResolvedValueOnce(result);
+  expect(await electron.exposedApi!.markGradingStudentComplete!(request)).toEqual(result);
+  expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(
+    "graider-ui:grading-student:mark-complete",
+    request
+  );
+});
+
+describe("Apply result preload bridge", () => {
+  it("forwards accessPageError independently of successful repository results", async () => {
+    const request = {
+      courseFolderId: "course",
+      courseFolderPath: "course",
+      assignmentFile: "assignment.yml"
+    };
+    const result: AssignmentApplyResult = {
+      ...request,
+      status: "success",
+      apply: {
+        schemaVersion: 1,
+        commandName: "assignment apply",
+        assignmentFile: request.assignmentFile,
+        status: "success",
+        exitCode: 0,
+        diagnostics: [],
+        warnings: [],
+        errors: [],
+        generatedFiles: ["manifest.yml"],
+        summary: { created: 1 }
+      },
+      error: null,
+      accessPageError: {
+        code: "student_repository_access_page_generation_failed",
+        message: "Select the Pages repository.",
+        exitCode: null,
+        stdoutSnippet: null,
+        stderrSnippet: null
+      },
+      appliedAt: "2026-11-25T16:00:00.000Z"
+    };
+    electron.invoke.mockResolvedValueOnce(result);
+
+    expect(await electron.exposedApi!.applyAssignment(request)).toEqual(result);
+    expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(
+      "graider-ui:assignment-apply:run",
+      request
+    );
+  });
+});
+
 describe("grading workflow repair preload bridge", () => {
+  it("invokes the assignment pull and cleans up assignment progress subscriptions", async () => {
+    const api = electron.exposedApi!;
+    const request = {
+      courseFolderId: "course",
+      courseFolderPath: "/course",
+      termCode: "27s1",
+      assignmentSlug: "lab1"
+    };
+    await api.pullLatestAssignmentStudentChanges!(request);
+    expect(electron.invoke).toHaveBeenCalledExactlyOnceWith(
+      "graider-ui:assignment-student-repositories:pull",
+      request
+    );
+    const listener = vi.fn();
+    const unsubscribe = api.onAssignmentRepositoryUpdateProgress!(listener);
+    const handler = electron.on.mock.calls.find(
+      ([channel]) => channel === "graider-ui:assignment-student-repositories:progress"
+    )?.[1] as (event: unknown, progress: unknown) => void;
+    const progress = {
+      courseFolderId: "course",
+      termCode: "27s1",
+      assignmentSlug: "lab1",
+      completed: 1,
+      total: 1
+    };
+    handler({}, progress);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(progress);
+    unsubscribe();
+    expect(electron.removeListener).toHaveBeenCalledWith(
+      "graider-ui:assignment-student-repositories:progress",
+      handler
+    );
+  });
+
   it("subscribes to projected template-sync progress and cleans up its listener", () => {
     const api = electron.exposedApi;
     if (api === undefined) throw new Error("Expected preload API.");

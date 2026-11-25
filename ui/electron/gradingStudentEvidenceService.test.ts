@@ -51,6 +51,45 @@ const evidence = {
 };
 
 describe("grading student evidence Electron service", () => {
+  it("awaits local SHA proof and sends its content match to the renderer without exposing paths", async () => {
+    const previousSha = "60674587ef2988ead89aff60db5808db7f5d9c0e";
+    const result = await createGradingStudentEvidenceService({
+      resolveFacultyScope: () => authorized,
+      resolveRepository: () => ({ status: "success", localPath: "/trusted/local" }),
+      readHead: () => Promise.resolve({ status: "success", submissionCommitSha: SHA }),
+      resolveToken: () => Promise.resolve({ status: "success", token: "synthetic" }),
+      provideClient,
+      loadBackend: () => ({
+        prepareGradingStudentEvidenceContext: () =>
+          Promise.resolve({
+            status: "success",
+            value: { ...prepared, equivalentSubmissionCommitShas: [SHA, previousSha] }
+          }),
+        retrievePreparedGradingStudentEvidence: () =>
+          Promise.resolve({
+            status: "success",
+            value: {
+              runId: 10,
+              runAttempt: 2,
+              artifactId: 20,
+              evidence: {
+                ...evidence,
+                metadata: { ...evidence.metadata, submissionCommitSha: previousSha }
+              }
+            }
+          })
+      })
+    })(request);
+    expect(result).toMatchObject({
+      status: "success",
+      submissionCommitSha: SHA,
+      submissionContentMatches: true,
+      evidence: { metadata: { submissionCommitSha: previousSha } }
+    });
+    expect(result).not.toHaveProperty("equivalentSubmissionCommitShas");
+    expect(JSON.stringify(result)).not.toContain("/trusted");
+  });
+
   it("authorizes before trusted repository/HEAD preparation and token/client retrieval", async () => {
     const order: string[] = [];
     const prepare = vi.fn(() => {
@@ -101,7 +140,8 @@ describe("grading student evidence Electron service", () => {
       termCode: "27s1",
       assignmentSlug: "lab1",
       studentId: "ada",
-      currentSubmissionCommitSha: SHA
+      currentSubmissionCommitSha: SHA,
+      repositoryRoot: "/trusted/local"
     });
     expect(provideClient).toHaveBeenCalledExactlyOnceWith("secret");
     expect(retrieve).toHaveBeenCalledWith(prepared, client);

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useRef, type ReactElement } from "react";
 import type { GradingStudentSnapshotResult } from "../../electron/ipc";
 import { FormattedGradingComment } from "./FormattedGradingComment";
 import type { CanonicalSourceRange } from "./submissionSourceView";
@@ -45,6 +45,11 @@ export const GradingAppliedCommentsPanel = ({
   readonly sourceLocationLabel: (location: CanonicalSourceRange) => string;
 }): ReactElement => {
   const disabled = gradingMutationStudentId !== undefined || isStudentMutationBlocked(studentId);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelDelete = (): void => {
+    deleteButtonRef.current?.focus();
+    onCancelDelete();
+  };
   return (
     <section aria-labelledby="applied-comments-heading">
       <h3 id="applied-comments-heading">Applied comments</h3>
@@ -121,52 +126,70 @@ export const GradingAppliedCommentsPanel = ({
                     className="danger-action"
                     type="button"
                     aria-label={`Delete comment: ${comment.text}`}
+                    ref={
+                      deleteConfirmation?.studentId === studentId &&
+                      deleteConfirmation.commentId === comment.id
+                        ? deleteButtonRef
+                        : undefined
+                    }
                     disabled={disabled}
                     onClick={() => onRequestDelete(comment)}
                   >
                     Delete
                   </button>
                 </div>
+                {deleteConfirmation !== undefined &&
+                deleteConfirmation.studentId === studentId &&
+                deleteConfirmation.commentId === comment.id ? (
+                  <div
+                    className="grading-delete-comment-confirmation"
+                    role="alertdialog"
+                    aria-labelledby="delete-comment-heading"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (gradingMutationStudentId !== studentId) cancelDelete();
+                      } else if (event.key === "Enter" || event.key === " ") {
+                        event.stopPropagation();
+                      }
+                    }}
+                  >
+                    <h4 id="delete-comment-heading">Delete applied comment?</h4>
+                    <p>
+                      “{deleteConfirmation.text.slice(0, 100)}” · Adjustment:{" "}
+                      {deleteConfirmation.deduction}
+                    </p>
+                    {deleteConfirmation.sourceLocation === undefined ? null : (
+                      <p>Source: {sourceLocationLabel(deleteConfirmation.sourceLocation)}</p>
+                    )}
+                    <div className="grading-apply-comment__actions">
+                      <button
+                        className="danger-action"
+                        type="button"
+                        disabled={gradingMutationStudentId === deleteConfirmation.studentId}
+                        onClick={onConfirmDelete}
+                      >
+                        {gradingMutationStudentId === deleteConfirmation.studentId
+                          ? "Deleting comment…"
+                          : "Confirm deleting comment"}
+                      </button>
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        disabled={gradingMutationStudentId === deleteConfirmation.studentId}
+                        onClick={cancelDelete}
+                      >
+                        Cancel deleting comment
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
       )}
-      {deleteConfirmation !== undefined && deleteConfirmation.studentId === studentId ? (
-        <div
-          className="grading-delete-comment-confirmation"
-          role="alertdialog"
-          aria-labelledby="delete-comment-heading"
-        >
-          <h4 id="delete-comment-heading">Delete applied comment?</h4>
-          <p>
-            “{deleteConfirmation.text.slice(0, 100)}” · Adjustment: {deleteConfirmation.deduction}
-          </p>
-          {deleteConfirmation.sourceLocation === undefined ? null : (
-            <p>Source: {sourceLocationLabel(deleteConfirmation.sourceLocation)}</p>
-          )}
-          <div className="grading-apply-comment__actions">
-            <button
-              className="danger-action"
-              type="button"
-              disabled={gradingMutationStudentId === deleteConfirmation.studentId}
-              onClick={onConfirmDelete}
-            >
-              {gradingMutationStudentId === deleteConfirmation.studentId
-                ? "Deleting comment…"
-                : "Confirm deleting comment"}
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={gradingMutationStudentId === deleteConfirmation.studentId}
-              onClick={onCancelDelete}
-            >
-              Cancel deleting comment
-            </button>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 };

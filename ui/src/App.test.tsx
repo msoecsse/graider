@@ -495,8 +495,8 @@ describe("App routing — reached from the dashboard", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders assignment detail panels, compact grade status summary, and workflow actions", async () => {
-    mockGraiderUI({});
+  it("renders assignment detail panels, explicitly refreshes grade status, and shows workflow actions", async () => {
+    const api = mockGraiderUI({});
     renderAtRoute("/");
 
     await openAssignmentDetail();
@@ -505,7 +505,20 @@ describe("App routing — reached from the dashboard", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
     const gradeSummary = screen.getByLabelText("Grade status summary");
-    expect(within(gradeSummary).getByText("s001")).toBeInTheDocument();
+    expect(api.getAssignmentGradeStatus).not.toHaveBeenCalled();
+    expect(
+      within(gradeSummary).getByText("Grade status data is not available yet.")
+    ).toBeInTheDocument();
+    expect(within(gradeSummary).queryByText("s001")).not.toBeInTheDocument();
+    fireEvent.click(within(gradeSummary).getByRole("button", { name: "Refresh grade status" }));
+    expect(await within(gradeSummary).findByText("s001")).toBeInTheDocument();
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledExactlyOnceWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: ASSIGNMENT_FILE
+    });
+    expect(api.gradeAssignment).not.toHaveBeenCalled();
+    expect(api.applyAssignment).not.toHaveBeenCalled();
     expect(getApplyPrimaryButton()).toBeEnabled();
     await openAssignmentOverflowMenu();
     expect(screen.getByRole("menuitem", { name: /^Faculty report/u })).toBeEnabled();

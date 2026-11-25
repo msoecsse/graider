@@ -45,6 +45,31 @@ afterEach(() => {
 
 describe("mark grading student complete context", () => {
   it.each([false, true])(
+    "clears the resubmission marker on re-completion (zero score: %s)",
+    (setScoreToZero) => {
+      const { request, stateRequest } = setup();
+      const initial = createInitialGradingState("jones", SHA);
+      if (initial.status === "failure") throw new Error(initial.message);
+      const previous = {
+        ...initial.value,
+        status: "in_progress" as const,
+        updatedSinceGrading: true,
+        repositoryUpdates: [
+          { previousSha: makeTestGitSha("b"), newSha: SHA, updatedAt: "2026-11-25T00:00:00Z" }
+        ],
+        appliedComments: [{ id: "keep", text: "Prior published feedback", deduction: 2 }]
+      };
+      expect(saveGradingState(stateRequest, previous).status).toBe("success");
+      expect(markGradingStudentCompleteContext({ ...request, setScoreToZero }).status).toBe(
+        "success"
+      );
+      expect(loadGradingState(stateRequest)).toMatchObject({
+        status: "success",
+        value: { ...previous, status: "complete", updatedSinceGrading: false }
+      });
+    }
+  );
+  it.each([false, true])(
     "atomically persists a zero total and completion, preserving existing work: %s",
     (hasWork) => {
       const { request, stateRequest } = setup();

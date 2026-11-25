@@ -15,6 +15,13 @@ import type {
 export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
   resolveHead(): Promise<string>;
   readRevisionFile(revision: string, file: string): Promise<string | null>;
+  listTree(revision: string): Promise<
+    readonly {
+      readonly path: string;
+      readonly objectId: string;
+      readonly mode: string;
+    }[]
+  >;
   pullUpstream(request: {
     readonly authentication: GitAuthenticationContextRef;
     readonly requiredAncestorCommits?: readonly string[];
@@ -38,6 +45,13 @@ export interface RepositoryUpdateBackend {
       revalidate?(): Promise<void>;
       resolveHead(): Promise<string>;
       readRevisionFile(revision: string, file: string): Promise<string | null>;
+      listTree(revision: string): Promise<
+        readonly {
+          readonly path: string;
+          readonly objectId: string;
+          readonly mode: string;
+        }[]
+      >;
       pullUpstream(request: {
         readonly expectedHead: string;
         readonly externalFastForward?: { readonly expectedRemote: string };
@@ -126,6 +140,7 @@ export const createGradingStudentRepositoryUpdateService =
           revalidate,
           resolveHead: () => workspace.resolveHead(),
           readRevisionFile: (revision, file) => workspace.readRevisionFile(revision, file),
+          listTree: (revision) => workspace.listTree(revision),
           pullUpstream: (update) => {
             const proof = overrides.reviewImport;
             if (

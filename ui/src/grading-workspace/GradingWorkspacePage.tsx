@@ -1,4 +1,5 @@
 import { ReviewImportWorkflow } from "../review-import/ReviewImportWorkflow";
+import { GradingSubmissionTiming } from "./GradingSubmissionTiming";
 import { getStudentSort, rememberStudentSort, sortGradingStudents } from "./studentSort";
 import { mapCanonicalSourceRangeToCombinedLineRange } from "./submissionSourceView";
 import { RECENT_COMMENT_LIMIT } from "../../electron/recentCommentLimit";
@@ -91,6 +92,7 @@ import {
 } from "./GradingCommentWorkspace";
 
 type Student = {
+  repositoryUrl?: string;
   studentId: string;
   section: string;
   firstName?: string;
@@ -99,7 +101,7 @@ type Student = {
 };
 type Ready = {
   status: "success";
-  assignment: { title: string; termCode: string; slug: string };
+  assignment: { title: string; termCode: string; slug: string; dueAt?: string };
   requiredFiles: string[];
   rubric: { id: string; name: string; points: number }[];
   students: Student[];
@@ -352,7 +354,9 @@ const gradingMutationFailureMessage = (
     source_location_mismatch:
       "The selected source location is no longer valid for this assignment.",
     duplicate_applied_comment_id:
-      "That comment could not be uniquely recorded. Try applying it again."
+      "That comment could not be uniquely recorded. Try applying it again.",
+    zero_score_override_missing:
+      "This student no longer has a saved zero override. Reload grading details before retrying."
   };
   if (code !== undefined && codeMessages[code] !== undefined) return codeMessages[code];
   const messages: Readonly<Record<string, string>> = {
@@ -506,6 +510,8 @@ const sourceTargetLabel = (location: CanonicalSourceRange): string =>
 
 const isGradingShortcutSuppressedTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof Element)) return false;
+  if (target.closest(".grading-comment-list .grading-delete-comment-confirmation") !== null)
+    return true;
   if (target.closest(".grading-source-editor") !== null) return false;
   if (target.closest(".grading-comment-formatting-controls") !== null) return true;
   if (target.closest(".repository-document__find") !== null) return true;
@@ -617,6 +623,10 @@ export const GradingWorkspacePage = ({
   const [evidenceFocusRequest, setEvidenceFocusRequest] = useState<GradingEvidenceFocusRequest>();
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const filterPillsContainerRef = useRef<HTMLDivElement>(null);
+  const selectedStudentRowRef = useRef<HTMLButtonElement>(null);
+  const completionFocusRequest = useRef<{ studentId: string; revision: number } | undefined>(
+    undefined
+  );
   const evidencePanelPriorFocusRef = useRef<HTMLElement | null>(null);
   const commentEditorBaseline = useRef<CommentEditorState | undefined>(undefined);
   const commentEditorBaselineSourceTarget = useRef<CanonicalSourceRange | undefined>(undefined);
@@ -685,6 +695,13 @@ export const GradingWorkspacePage = ({
   const selectionRevision = useRef(0);
   if (currentStudentIdRef.current !== currentStudentId) selectionRevision.current += 1;
   currentStudentIdRef.current = currentStudentId;
+
+  useEffect(() => {
+    const pending = completionFocusRequest.current;
+    completionFocusRequest.current = undefined;
+    if (pending?.studentId === currentStudentId && pending?.revision === selectionRevision.current)
+      selectedStudentRowRef.current?.focus();
+  }, [currentStudentId]);
 
   const setStudentWarning = useCallback((studentId: string, message?: string): void => {
     if (!mounted.current) return;
@@ -2366,6 +2383,40 @@ export const GradingWorkspacePage = ({
     );
   };
 
+  const undoZeroAndComplete = async (studentId: string): Promise<void> => {
+    const mutate = window.graiderUI.markGradingStudentComplete;
+    if (mutate === undefined) {
+      setGradingMutationError("Undoing zero and complete is unavailable.");
+      return;
+    }
+    let persisted = false;
+    const succeeded = await runGradingMutation(
+      studentId,
+      () => mutate({ ...request, studentId, undoZeroAndComplete: true }),
+      () => {},
+      () => {
+        persisted = true;
+        setStudentStatusOverrides((current) => ({ ...current, [studentId]: "in_progress" }));
+        if (currentStudentIdRef.current === studentId) {
+          // Persisted undo invalidates the displayed score/report even if snapshot reload fails.
+          setSnapshot({ status: "loading", studentId });
+          reportPreviewRequestGeneration.current += 1;
+          setReportPreview({ status: "idle" });
+          setReportPublicationConfirmation(undefined);
+          setReportPublicationNotice(undefined);
+          setCompletionNotice(undefined);
+        }
+      }
+    );
+    if (persisted && !succeeded && currentStudentIdRef.current === studentId)
+      setSnapshot({
+        status: "failure",
+        studentId,
+        message:
+          "Zero override removed and grading reopened. Reload grading details before continuing; the updated score could not be loaded safely."
+      });
+  };
+
   const confirmMarkComplete = async (): Promise<boolean> => {
     if (
       markCompleteConfirmation === undefined ||
@@ -2403,10 +2454,11 @@ export const GradingWorkspacePage = ({
       if (next)
         latestStudentSwitch.current(() => {
           void flushPendingViewState(confirmation.studentId);
+          completionFocusRequest.current = {
+            studentId: next.student.studentId,
+            revision: revision + 1
+          };
           setSelectedStudentId(next.student.studentId);
-          filterPillsContainerRef.current
-            ?.querySelector<HTMLElement>('button[aria-pressed="true"]')
-            ?.focus();
         });
       else setCompletionNotice("Grading is finished. No students remain to grade.");
     }
@@ -3155,6 +3207,11 @@ export const GradingWorkspacePage = ({
         return;
       }
       if (key === "Enter") {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('button, a[href], [role="button"], [role="link"], summary') !== null
+        )
+          return;
         event.preventDefault();
         markCompleteAndAdvance();
         return;
@@ -3498,6 +3555,7 @@ export const GradingWorkspacePage = ({
             studentFilter={studentFilter}
             onFilterChange={setStudentFilter}
             filterPillsContainerRef={filterPillsContainerRef}
+            selectedStudentRowRef={selectedStudentRowRef}
             toGradeCount={toGradeCount}
             gradedOnlyCount={gradedOnlyCount}
             publishedCount={publishedCount}
@@ -3550,6 +3608,30 @@ export const GradingWorkspacePage = ({
           />
           <aside className="grading-workspace__grading-pane">
             <h2>Grading</h2>
+            {student === undefined ? null : (
+              <div>
+                <GradingSubmissionTiming
+                  studentId={student.studentId}
+                  dueAt={result.assignment.dueAt}
+                  submittedAt={
+                    snapshot.status === "success" &&
+                    snapshot.snapshot.studentId === student.studentId
+                      ? snapshot.snapshot.lastStudentWorkAt
+                      : undefined
+                  }
+                />
+                {student.repositoryUrl === undefined ? null : (
+                  <a
+                    href={student.repositoryUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open GitHub repository for ${student.studentId}`}
+                  >
+                    Open GitHub repository
+                  </a>
+                )}
+              </div>
+            )}
             {student === undefined ? null : (
               <div className="grading-repository-controls">
                 <button
@@ -3932,6 +4014,33 @@ export const GradingWorkspacePage = ({
             />
             {snapshot.status === "success" ? (
               <div className="grading-zero-score-action">
+                {snapshot.snapshot.grade.finalScoreOverride === 0 ? (
+                  <>
+                    <p>Instructor zero override is active. No comment was added by this action.</p>
+                    <button
+                      className="secondary-action grading-zero-score-undo"
+                      type="button"
+                      disabled={
+                        publishReviewRunning ||
+                        gradingMutationStudentId !== undefined ||
+                        repositoryUpdateStudentId !== undefined ||
+                        reportPublicationStudentId !== undefined ||
+                        gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                      }
+                      onClick={() =>
+                        requestPanelOpen(() => {
+                          void undoZeroAndComplete(snapshot.snapshot.studentId);
+                        })
+                      }
+                    >
+                      Undo zero and complete
+                    </button>
+                    <p>
+                      Removes the zero override and reopens grading. Existing feedback is preserved.
+                      Review the score and mark complete again before publishing.
+                    </p>
+                  </>
+                ) : null}
                 <button
                   className="secondary-action"
                   type="button"

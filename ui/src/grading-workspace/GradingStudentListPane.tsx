@@ -24,6 +24,7 @@ export const GradingStudentListPane = ({
   studentFilter,
   onFilterChange,
   filterPillsContainerRef,
+  selectedStudentRowRef,
   toGradeCount,
   gradedOnlyCount,
   publishedCount,
@@ -44,6 +45,7 @@ export const GradingStudentListPane = ({
   readonly studentFilter: StudentFilterId;
   readonly onFilterChange: (id: StudentFilterId) => void;
   readonly filterPillsContainerRef: RefObject<HTMLDivElement | null>;
+  readonly selectedStudentRowRef?: RefObject<HTMLButtonElement | null>;
   readonly toGradeCount: number;
   readonly gradedOnlyCount: number;
   readonly publishedCount: number;
@@ -113,6 +115,7 @@ export const GradingStudentListPane = ({
       filteredStudents.map(({ student: item, index, status }) => (
         <button
           key={item.studentId}
+          ref={index === selectedIndex ? selectedStudentRowRef : undefined}
           className={
             index === selectedIndex
               ? "grading-workspace__student-row selected"

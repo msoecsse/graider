@@ -1,4 +1,8 @@
-import { withApplyPerformance, measureApplyPhase } from "../github/apply-performance.js";
+import {
+  withApplyPerformance,
+  measureApplyPhase,
+  measureApplyAuthorityValidation
+} from "../github/apply-performance.js";
 import { runAssignmentApplyCommand } from "../cli/commands/assignment.command.js";
 import { normalizeCommonCommandOptions } from "../core/command-context.js";
 import { createCommandResult } from "../core/command-result.js";
@@ -71,14 +75,15 @@ const runManagedAssignmentApplyInternal = async (
       remoteUrl: (await workspace.remoteUrl(origin)) ?? "",
       localRevision: await workspace.resolveHead()
     });
-    const validate = async () => {
-      await assertAuthoritativeLegacyCourse({
-        root: request.root,
-        client,
-        readLocalState,
-        managedAuthorization: { binding: request.binding, revalidate }
+    const validate = () =>
+      measureApplyAuthorityValidation(async () => {
+        await assertAuthoritativeLegacyCourse({
+          root: request.root,
+          client,
+          readLocalState,
+          managedAuthorization: { binding: request.binding, revalidate }
+        });
       });
-    };
     await measureApplyPhase("readiness", validate);
     if (request.runtimeRoot) registerCourseRuntimeRoot(request.root, request.runtimeRoot);
     const guarded = new Proxy(client, {

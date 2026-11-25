@@ -1,5 +1,23 @@
 # Electron Assignment Detail Developer Guide
 
+Assignment Detail's **Pull latest student changes** action uses
+`pullLatestAssignmentStudentChanges` through preload and guarded main IPC.
+`assignmentRepositoryUpdateService.ts` derives the faculty-scoped roster and
+serially delegates `gradingStudentRepositoryUpdateService.ts`; the batch owns no
+Git or grading persistence logic. It rejects overlapping batches across renderer
+windows and continues after independent student failures. Progress delivery may
+fail or the view may close without interrupting safe updates or leaking ownership.
+The renderer refreshes only `getAssignmentGradingLifecycle` afterward, without
+calling routine assignment detail or GitHub grade-status scans.
+
+Shared clones deliberately have separate per-member outcomes and may fetch again.
+There is no trusted fetch-only/reconcile-only split in the current student update
+API; caching one member's successful pull would bypass the next member's expected
+SHA, repository identity and working-tree checks. Each accessible member therefore
+uses the full service; out-of-scope members are left for their authorized faculty.
+An absent locator reports **not downloaded**, while a missing recorded folder is
+a failure requiring restoration. No batch path clones, resets, cleans or publishes.
+
 Reusable Codex instructions for Electron UI changes live in the
 [Codex Electron UI Contract](codex-electron-ui-contract.md).
 The Apply Preview and Confirm Apply flow is documented in

@@ -97,9 +97,11 @@ export const isMarkGradingStudentCompleteRequest = (
 ): value is import("./ipc.js").MarkGradingStudentCompleteRequest => {
   const request = record(value);
   if (request === null) return false;
-  const { setScoreToZero, ...identity } = request;
+  const { setScoreToZero, undoZeroAndComplete, ...identity } = request;
   return (
     (setScoreToZero === undefined || typeof setScoreToZero === "boolean") &&
+    (undoZeroAndComplete === undefined || typeof undoZeroAndComplete === "boolean") &&
+    !(setScoreToZero === true && undoZeroAndComplete === true) &&
     isGradingStudentViewStateRequest(identity)
   );
 };

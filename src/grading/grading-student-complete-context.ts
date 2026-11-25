@@ -14,6 +14,7 @@ export interface GradingStudentCompleteContextRequest {
   readonly studentId: string;
   readonly currentSubmissionCommitSha: string;
   readonly setScoreToZero?: boolean;
+  readonly undoZeroAndComplete?: boolean;
 }
 
 export type GradingStudentCompleteContextResult =
@@ -47,6 +48,8 @@ const success = (studentId: string, state: GradingState): GradingStudentComplete
 export const markGradingStudentCompleteContext = (
   request: GradingStudentCompleteContextRequest
 ): GradingStudentCompleteContextResult => {
+  if (request.undoZeroAndComplete && request.setScoreToZero)
+    return stateError(request.studentId, "conflicting_completion_actions");
   const loaded = loadGradingState(stateRequest(request));
   if (loaded.status === "failure") return stateError(request.studentId, loaded.code);
   if (loaded.status === "success" && loaded.value.studentId !== request.studentId)
@@ -56,6 +59,19 @@ export const markGradingStudentCompleteContext = (
     loaded.value.submissionCommitSha !== request.currentSubmissionCommitSha
   )
     return { status: "submission_changed", studentId: request.studentId };
+
+  if (request.undoZeroAndComplete) {
+    // This marker is specific to zero-completion, including older saved records.
+    // A calculated zero without it must never be treated as this decision.
+    if (loaded.status !== "success" || loaded.value.finalScoreOverride !== 0)
+      return stateError(request.studentId, "zero_score_override_missing");
+    const reopened: GradingState = { ...loaded.value, status: "in_progress" };
+    delete reopened.finalScoreOverride;
+    const saved = saveGradingState(stateRequest(request), reopened);
+    return saved.status === "success"
+      ? success(request.studentId, reopened)
+      : stateError(request.studentId, saved.code);
+  }
 
   let current: GradingState;
   if (loaded.status === "success") current = loaded.value;

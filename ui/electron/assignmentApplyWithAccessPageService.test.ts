@@ -182,7 +182,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain("unrelated.txt");
   });
 
-  it("reports Apply failure when the required student access page cannot be generated", async () => {
+  it("retains confirmed Apply success when the student access page cannot be generated", async () => {
     const root = createRoot();
     writeFixture(root, false);
 
@@ -193,8 +193,13 @@ describe("assignmentApplyWithAccessPageService", () => {
       pagesRepositoryFolderPath: path.join(root, "pages")
     });
 
-    expect(result.status).toBe("failure");
-    expect(result.error).toMatchObject({
+    expect(result.status).toBe("success");
+    expect(result.apply).toEqual({
+      ...applyJson,
+      summary: { ...applyJson.summary, accessPagePerformance: expect.any(Object) }
+    });
+    expect(result.error).toBeNull();
+    expect(result.accessPageError).toMatchObject({
       code: "student_repository_access_page_generation_failed"
     });
   });
@@ -217,10 +222,39 @@ describe("assignmentApplyWithAccessPageService", () => {
       pagesRepositoryFolderPath: pagesRoot(root)
     });
 
-    expect(result.status).toBe("failure");
-    expect(result.error).toMatchObject({
+    expect(result.status).toBe("success");
+    expect(result.apply).toEqual({
+      ...applyJson,
+      summary: { ...applyJson.summary, accessPagePerformance: expect.any(Object) }
+    });
+    expect(result.error).toBeNull();
+    expect(result.accessPageError).toMatchObject({
       code: "student_repository_access_page_publication_failed",
       message: expect.stringMatching(/Unable to push/u)
     });
+  });
+
+  it("retains partial repository outcomes if a follow-up mappings read throws", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    const partial = { ...applyJson, status: "partial_success", exitCode: 2 };
+    const run: ProcessRunner = vi.fn(async (command) => {
+      if (command.args[1] === "apply")
+        return { stdout: JSON.stringify(partial), stderr: "", exitCode: 2, error: null };
+      throw new Error("Unexpected transport error containing ghp_do_not_expose");
+    });
+    const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      runner: run,
+      env: { GRAIDER_GITHUB_TOKEN: "fake-token" },
+      pagesRepositoryFolderPath: pagesRoot(root)
+    });
+    expect(result.status).toBe("success");
+    expect(result.apply).toEqual({
+      ...partial,
+      summary: { ...partial.summary, accessPagePerformance: expect.any(Object) }
+    });
+    expect(result.error).toBeNull();
+    expect(result.accessPageError?.code).toBe("student_repository_access_page_generation_failed");
+    expect(JSON.stringify(result)).not.toContain("ghp_do_not_expose");
   });
 });

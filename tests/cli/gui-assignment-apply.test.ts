@@ -24,6 +24,7 @@ const BUNDLED_BACKEND = path.resolve("ui/dist-electron/assignmentApplyBackend.cj
 const OAUTH_TOKEN = "oauth-fixture-secret";
 const COURSE_ID = 20;
 const USER_ID = 42;
+const GUARD_MS = 10;
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab05/assignment.yml";
 const roots: string[] = [];
 const git = async (root: string, args: string[]) => {
@@ -174,12 +175,39 @@ const fixture = async (repositoryMode: "individual" | "group" = "individual") =>
     revision,
     getRevision,
     readCourse,
+    revalidate,
     invalidate: () => {
       authorized = false;
     }
   };
 };
 describe("GUI OAuth Apply backend boundary", () => {
+  it("includes every live authority guard in the managed Apply timing subtotal", async () => {
+    const f = await fixture();
+    let elapsedMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => elapsedMs);
+    f.revalidate.mockImplementation(() => {
+      elapsedMs += GUARD_MS;
+      return Promise.resolve();
+    });
+    const result = await f.run({});
+    expect(result.status).toBe("success");
+    expect(f.readCourse.mock.calls.length).toBeGreaterThan(1);
+    expect(f.revalidate).toHaveBeenCalledTimes(f.readCourse.mock.calls.length * 2);
+    expect(result.apply?.summary).toMatchObject({
+      githubPerformance: {
+        elapsedMs,
+        authorityValidation: {
+          elapsedMs: f.revalidate.mock.calls.length * GUARD_MS,
+          httpRequests: 0,
+          httpWriteRequests: 0
+        }
+      }
+    });
+    expect(f.runner).not.toHaveBeenCalled();
+    expect(await git(f.root, ["status", "--porcelain"])).toBe("");
+  });
+
   it("revalidates authority before a managed group workflow write and preserves its checkpoint", async () => {
     const f = await fixture("group");
     const enableActions = f.client.enableActions.bind(f.client);

@@ -3886,6 +3886,281 @@ it("navigates saved comment anchors after reopening and uses relocated positions
 });
 
 describe("grading workflow cleanup", () => {
+  it.each(["complete", "published", "in_progress"] as const)(
+    "explicitly undoes a marked %s zero without changing student, source, or comments; persists across remount",
+    async (status) => {
+      let zeroed = true;
+      const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+        Promise.resolve(
+          studentId === "grace"
+            ? snapshot("grace", "complete")
+            : {
+                ...snapshot(studentId, zeroed ? status : "in_progress"),
+                appliedComments: [{ id: "keep", text: "Preserved instructor note", deduction: 2 }],
+                grade: {
+                  ...snapshot(studentId).grade,
+                  categories: [
+                    {
+                      id: "code",
+                      name: "Code",
+                      pointsPossible: 100,
+                      score: 98,
+                      categorizedCommentAdjustmentTotal: -2,
+                      manualAdjustmentTotal: 0
+                    }
+                  ],
+                  totalScore: zeroed ? 0 : 98,
+                  ...(zeroed ? { finalScoreOverride: 0 } : {})
+                }
+              }
+        )
+      );
+      setApis(
+        vi.fn().mockResolvedValue(
+          workspace([
+            { studentId: "ada", section: "001", gradingStatus: status },
+            { studentId: "grace", section: "002", gradingStatus: "complete" }
+          ])
+        ),
+        vi.fn(({ studentId }: { studentId: string }) =>
+          Promise.resolve(source(studentId, "fresh student source"))
+        ),
+        undefined,
+        undefined,
+        loadSnapshot
+      );
+      const undo = vi.fn().mockImplementation(() => {
+        zeroed = false;
+        return Promise.resolve({
+          status: "success",
+          studentId: "ada",
+          gradingStatus: "in_progress"
+        });
+      });
+      Object.assign(window.graiderUI, { markGradingStudentComplete: undo });
+      const page = render(<GradingWorkspacePage request={REQUEST} />);
+      const action = await screen.findByRole("button", { name: "Undo zero and complete" });
+      expect(screen.getByText(/Final score set to 0/u)).toBeInTheDocument();
+      action.focus();
+      expect(fireEvent.keyDown(action, { key: "Enter" })).toBe(true);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      fireEvent.click(action);
+      await waitFor(() =>
+        expect(undo).toHaveBeenCalledExactlyOnceWith({
+          ...REQUEST,
+          studentId: "ada",
+          undoZeroAndComplete: true
+        })
+      );
+      expect(
+        await screen.findByText("98 / 100", { selector: ".grading-score-total" })
+      ).toBeInTheDocument();
+      expect(screen.getByText("Preserved instructor note")).toBeInTheDocument();
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:fresh student source");
+      expect(
+        screen.queryByRole("button", { name: "Undo zero and complete" })
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "To grade 1" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Graded 1" })).toBeInTheDocument();
+      await showAllStudents();
+      fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+      fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+      expect(
+        await screen.findByText("98 / 100", { selector: ".grading-score-total" })
+      ).toBeInTheDocument();
+      page.unmount();
+      render(<GradingWorkspacePage request={REQUEST} />);
+      expect(
+        await screen.findByText("98 / 100", { selector: ".grading-score-total" })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Undo zero and complete" })
+      ).not.toBeInTheDocument();
+    }
+  );
+
+  it("does not offer undo for an unmarked calculated zero", async () => {
+    setApis(
+      vi
+        .fn()
+        .mockResolvedValue(
+          workspace([{ studentId: "ada", section: "001", gradingStatus: "complete" }])
+        ),
+      vi.fn().mockResolvedValue(source("ada")),
+      undefined,
+      undefined,
+      vi.fn().mockResolvedValue({
+        ...snapshot("ada", "complete"),
+        grade: {
+          ...snapshot("ada").grade,
+          totalScore: 0
+        }
+      })
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    expect(
+      screen.queryByRole("button", { name: "Undo zero and complete" })
+    ).not.toBeInTheDocument();
+    expect(window.graiderUI.markGradingStudentComplete).not.toHaveBeenCalled();
+  });
+
+  it("keeps the explicit undo available after Pull latest and invalidates a stale report preview", async () => {
+    let pulled = false;
+    let undone = false;
+    setApis(
+      vi
+        .fn()
+        .mockResolvedValue(
+          workspace([{ studentId: "ada", section: "001", gradingStatus: "complete" }])
+        ),
+      vi.fn(() => Promise.resolve(source("ada", pulled ? "Fresh correction" : "Original source"))),
+      undefined,
+      undefined,
+      vi.fn(() =>
+        Promise.resolve({
+          ...snapshot("ada", pulled || undone ? "in_progress" : "complete"),
+          grade: {
+            ...snapshot("ada").grade,
+            totalScore: undone ? 100 : 0,
+            ...(undone ? {} : { finalScoreOverride: 0 })
+          }
+        })
+      )
+    );
+    const pendingPreview = deferred<{
+      status: string;
+      studentId: string;
+      html: string;
+      warnings: [];
+    }>();
+    const undo = vi.fn().mockImplementation(() => {
+      undone = true;
+      return Promise.resolve({ status: "success", studentId: "ada", gradingStatus: "in_progress" });
+    });
+    Object.assign(window.graiderUI, {
+      pullLatestGradingStudentChanges: vi.fn(async () => {
+        pulled = true;
+        return { status: "success" };
+      }),
+      markGradingStudentComplete: undo,
+      previewGradingStudentReport: vi.fn().mockReturnValue(pendingPreview.promise)
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pull latest changes" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Fresh correction")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview Report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo zero and complete" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Undo zero and complete" })
+      ).not.toBeInTheDocument()
+    );
+    await act(async () =>
+      pendingPreview.resolve({
+        status: "success",
+        studentId: "ada",
+        html: "<p>Stale zero report</p>",
+        warnings: []
+      })
+    );
+    expect(screen.queryByTitle("Grading report preview")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish Report" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark Complete" })).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Fresh correction");
+    expect(undo).toHaveBeenCalledExactlyOnceWith({
+      ...REQUEST,
+      studentId: "ada",
+      undoZeroAndComplete: true
+    });
+  });
+
+  it.each(["rejected", "submission_changed"])(
+    "preserves zero and surfaces an undo %s failure",
+    async (failure) => {
+      setApis(
+        vi
+          .fn()
+          .mockResolvedValue(
+            workspace([{ studentId: "ada", section: "001", gradingStatus: "complete" }])
+          ),
+        vi.fn().mockResolvedValue(source("ada")),
+        undefined,
+        undefined,
+        vi.fn().mockResolvedValue({
+          ...snapshot("ada", "complete"),
+          grade: {
+            ...snapshot("ada").grade,
+            totalScore: 0,
+            finalScoreOverride: 0
+          }
+        })
+      );
+      const undo =
+        failure === "rejected"
+          ? vi.fn().mockRejectedValue(new Error("failure"))
+          : vi.fn().mockResolvedValue({ status: "submission_changed", studentId: "ada" });
+      Object.assign(window.graiderUI, { markGradingStudentComplete: undo });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Undo zero and complete" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      expect(screen.getByText("0 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Graded 1" })).toBeInTheDocument();
+      if (failure === "submission_changed")
+        expect(screen.getByRole("button", { name: "Undo zero and complete" })).toBeDisabled();
+    }
+  );
+
+  it("blocks duplicate undo while pending and removes publish eligibility even if the saved undo cannot refresh", async () => {
+    const pending = deferred<{
+      status: "success";
+      studentId: string;
+      gradingStatus: "in_progress";
+    }>();
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...snapshot("ada", "complete"),
+        grade: {
+          ...snapshot("ada").grade,
+          totalScore: 0,
+          finalScoreOverride: 0
+        }
+      })
+      .mockRejectedValue(new Error("Snapshot unavailable"));
+    setApis(
+      vi
+        .fn()
+        .mockResolvedValue(
+          workspace([{ studentId: "ada", section: "001", gradingStatus: "complete" }])
+        ),
+      vi.fn().mockResolvedValue(source("ada")),
+      undefined,
+      undefined,
+      loadSnapshot
+    );
+    const undo = vi.fn().mockReturnValue(pending.promise);
+    Object.assign(window.graiderUI, { markGradingStudentComplete: undo });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const action = await screen.findByRole("button", { name: "Undo zero and complete" });
+    fireEvent.click(action);
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    await act(async () =>
+      pending.resolve({ status: "success", studentId: "ada", gradingStatus: "in_progress" })
+    );
+    expect(undo).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Zero override removed");
+    expect(
+      screen.queryByText("0 / 100", { selector: ".grading-score-total" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Graded 0" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish Report" })).not.toBeInTheDocument();
+  });
+
   it("confirms the bottom-pane zero action, preserves work, and shares its score across Graded and Publish", async () => {
     let zeroed = false;
     const markComplete = vi.fn().mockImplementation(() => {
@@ -4480,6 +4755,55 @@ describe("completion navigation", () => {
     await waitFor(() =>
       expect(screen.getByTestId("mock-monaco")).toHaveTextContent(zero ? "zed:" : "grace:")
     );
+    expect(
+      screen.getByRole("button", { name: zero ? /zed · Section 003/u : /grace · Section 002/u })
+    ).toHaveFocus();
+  });
+
+  it.each([false, true])(
+    "wraps to the first ungraded row or stays on the last student (last=%s)",
+    async (last) => {
+      setApis(
+        vi.fn().mockResolvedValue(
+          workspace([
+            { studentId: "ada", section: "001", gradingStatus: last ? "complete" : "not_started" },
+            { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+          ])
+        ),
+        vi.fn().mockImplementation(({ studentId }) => Promise.resolve(source(studentId)))
+      );
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await showAllStudents();
+      fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+      fireEvent.click(screen.getByRole("button", { name: "Mark Complete" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
+      const filter = screen.getByRole("button", { name: "All 2" });
+      filter.focus();
+      if (last) {
+        await screen.findByText("Grading is finished. No students remain to grade.");
+        expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
+        expect(filter).toHaveFocus();
+      } else {
+        await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+        expect(screen.getByRole("button", { name: /ada · Section 001/u })).toHaveFocus();
+      }
+    }
+  );
+
+  it("does not move selection or focus after cancelling completion", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn().mockImplementation(({ studentId }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
+    const row = screen.getByRole("button", { name: /ada · Section 001/u });
+    row.focus();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel marking complete" }));
+    expect(window.graiderUI.markGradingStudentComplete).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
+    expect(row).toHaveFocus();
   });
 });
 
@@ -4531,7 +4855,7 @@ it("benchmarks latency-injected student switching", async () => {
   );
 });
 
-it.each(["failure", "submission_changed", "manual_navigation"])(
+it.each(["failure", "submission_changed", "manual_navigation", "manual_navigation_back"])(
   "does not auto-advance on %s",
   async (scenario) => {
     const pending = deferred<unknown>();
@@ -4551,13 +4875,20 @@ it.each(["failure", "submission_changed", "manual_navigation"])(
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
     await waitFor(() => expect(window.graiderUI.markGradingStudentComplete).toHaveBeenCalled());
-    if (scenario === "manual_navigation") {
+    const manuallyNavigated = scenario.startsWith("manual_navigation");
+    if (manuallyNavigated) {
       fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
       await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
     }
+    if (scenario === "manual_navigation_back") {
+      fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+    }
+    const filter = screen.getByRole("button", { name: "To grade 2" });
+    filter.focus();
     await act(async () =>
       pending.resolve({
-        status: scenario === "manual_navigation" ? "success" : scenario,
+        status: manuallyNavigated ? "success" : scenario,
         studentId: "ada",
         gradingStatus: "complete"
       })
@@ -4567,6 +4898,7 @@ it.each(["failure", "submission_changed", "manual_navigation"])(
         scenario === "manual_navigation" ? "grace:" : "ada:"
       )
     );
+    expect(filter).toHaveFocus();
   }
 );
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -420,6 +420,12 @@ const renderAssignmentDetailPage = (
     />
   );
 
+const refreshGradeStatus = async (): Promise<void> => {
+  const refresh = await screen.findByRole("button", { name: "Refresh grade status" });
+  fireEvent.click(refresh);
+  await waitFor(() => expect(refresh).toBeEnabled());
+};
+
 const openOverflowMenu = async (): Promise<void> => {
   fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
 };
@@ -432,6 +438,198 @@ const clickOverflowItem = async (label: string): Promise<void> => {
 };
 
 describe("AssignmentDetailPage", () => {
+  it("does not request remote grade status on mount, selection changes, or detail refresh", async () => {
+    const api = mockGraiderUI({});
+    const props = {
+      onPreviewApply: vi.fn(),
+      onPreviewGrade: vi.fn(),
+      onViewFacultyReport: vi.fn(),
+      onViewGradeStatus: vi.fn()
+    };
+    const view = renderAssignmentDetailPage(props);
+    await screen.findByRole("heading", { level: 2, name: "Students" });
+    expect(screen.getByRole("button", { name: "Needs grading 2" })).toBeEnabled();
+    expect(api.getAssignmentGradeStatus).not.toHaveBeenCalled();
+
+    const selections = [
+      { ...SELECTION, assignmentFile: "terms/27s1/assignments/lab03/assignment.yml" },
+      { ...SELECTION, courseFolderId: "another-course" },
+      { ...SELECTION, courseFolderPath: "/courses/another-course" }
+    ];
+    for (const selection of selections) {
+      view.rerender(<AssignmentDetailPage {...props} selection={selection} />);
+      await waitFor(() =>
+        expect(api.getAssignmentDetail).toHaveBeenLastCalledWith({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          assignmentFile: selection.assignmentFile
+        })
+      );
+      expect(api.getAssignmentGradeStatus).not.toHaveBeenCalled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    await waitFor(() => expect(api.getAssignmentDetail).toHaveBeenCalledTimes(5));
+    expect(api.getAssignmentGradeStatus).not.toHaveBeenCalled();
+    await refreshGradeStatus();
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledExactlyOnceWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: "/courses/another-course",
+      assignmentFile: SELECTION.assignmentFile
+    });
+  });
+
+  it("fetches grade status only on explicit refresh and keeps pending status independent of detail", async () => {
+    let finishStatus: (result: AssignmentGradeStatusResult) => void = () => undefined;
+    const pendingStatus = new Promise<AssignmentGradeStatusResult>((resolve) => {
+      finishStatus = resolve;
+    });
+    const api = mockGraiderUI({ getAssignmentGradeStatus: vi.fn().mockReturnValue(pendingStatus) });
+    renderAssignmentDetailPage();
+    const refresh = await screen.findByRole("button", { name: "Refresh grade status" });
+    fireEvent.click(refresh);
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledExactlyOnceWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile
+    });
+    expect(refresh).toBeDisabled();
+    expect(screen.getByText("Loading grade status summary...")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Needs grading 2" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    await waitFor(() => expect(api.getAssignmentDetail).toHaveBeenCalledTimes(2));
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledTimes(1);
+    await act(async () => finishStatus(createAssignmentGradeStatusResult()));
+    expect(refresh).toBeEnabled();
+    expect(
+      within(screen.getByLabelText("Grade status summary")).getByText("s001")
+    ).toBeInTheDocument();
+  });
+
+  it.each(["rejection", "failure"] as const)(
+    "keeps detail and retry available after grade status %s",
+    async (outcome) => {
+      const readStatus = vi.fn().mockResolvedValue(createAssignmentGradeStatusResult());
+      if (outcome === "rejection")
+        readStatus.mockRejectedValueOnce(new Error("Remote unavailable"));
+      else
+        readStatus.mockResolvedValueOnce(
+          createAssignmentGradeStatusResult(null, {
+            error: {
+              code: "assignment_grade_status_failed",
+              message: "Remote unavailable",
+              exitCode: null,
+              stdoutSnippet: null,
+              stderrSnippet: null
+            }
+          })
+        );
+      mockGraiderUI({ getAssignmentGradeStatus: readStatus });
+      renderAssignmentDetailPage();
+      fireEvent.click(await screen.findByRole("button", { name: "Refresh grade status" }));
+      const summary = screen.getByLabelText("Grade status summary");
+      expect(await within(summary).findByRole("alert")).toHaveTextContent(
+        "Unable to load grade status summary."
+      );
+      expect(screen.getByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Needs grading 2" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Refresh grade status" }));
+      expect(await within(summary).findByText("s001")).toBeInTheDocument();
+      expect(within(summary).queryByRole("alert")).toBeNull();
+      expect(readStatus).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it.each(["rejection", "failure"] as const)(
+    "preserves the last fetched status when an explicit refresh ends in %s",
+    async (outcome) => {
+      const readStatus = vi.fn().mockResolvedValueOnce(createAssignmentGradeStatusResult());
+      if (outcome === "rejection")
+        readStatus.mockRejectedValueOnce(new Error("Remote unavailable"));
+      else
+        readStatus.mockResolvedValueOnce(
+          createAssignmentGradeStatusResult(null, {
+            error: {
+              code: "assignment_grade_status_failed",
+              message: "Remote unavailable",
+              exitCode: null,
+              stdoutSnippet: null,
+              stderrSnippet: null
+            }
+          })
+        );
+      mockGraiderUI({ getAssignmentGradeStatus: readStatus });
+      renderAssignmentDetailPage();
+      await refreshGradeStatus();
+      await refreshGradeStatus();
+      const summary = screen.getByLabelText("Grade status summary");
+      expect(within(summary).getByText("s001")).toBeInTheDocument();
+      expect(within(summary).getByRole("alert")).toHaveTextContent(
+        "Unable to load grade status summary."
+      );
+      expect(screen.getByRole("button", { name: "Needs grading 2" })).toBeEnabled();
+    }
+  );
+
+  it.each(["success", "rejection"] as const)(
+    "ignores pending grade status %s after selection changes and restores cached status on return",
+    async (outcome) => {
+      let finishOld: () => void = () => undefined;
+      const pending = new Promise<void>((resolve) => {
+        finishOld = resolve;
+      });
+      const readStatus = vi
+        .fn()
+        .mockResolvedValueOnce(createAssignmentGradeStatusResult())
+        .mockImplementationOnce(async () => {
+          await pending;
+          if (outcome === "rejection") throw new Error("Old request failed");
+          return createAssignmentGradeStatusResult(
+            createAssignmentGradeStatusJson({ repositories: [] })
+          );
+        });
+      mockGraiderUI({ getAssignmentGradeStatus: readStatus });
+      const props = {
+        onPreviewApply: vi.fn(),
+        onPreviewGrade: vi.fn(),
+        onViewFacultyReport: vi.fn(),
+        onViewGradeStatus: vi.fn()
+      };
+      const view = renderAssignmentDetailPage(props);
+      fireEvent.click(await screen.findByRole("button", { name: "Refresh grade status" }));
+      expect(
+        await within(screen.getByLabelText("Grade status summary")).findByText("s001")
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Refresh grade status" }));
+      expect(
+        within(screen.getByLabelText("Grade status summary")).getByText("s001")
+      ).toBeInTheDocument();
+      const otherSelection = {
+        ...SELECTION,
+        assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
+      };
+      view.rerender(<AssignmentDetailPage {...props} selection={otherSelection} />);
+      const refresh = await screen.findByRole("button", { name: "Refresh grade status" });
+      expect(refresh).toBeEnabled();
+      expect(within(screen.getByLabelText("Grade status summary")).queryByText("s001")).toBeNull();
+      await act(async () => {
+        finishOld();
+        await pending;
+      });
+      expect(within(screen.getByLabelText("Grade status summary")).queryByRole("alert")).toBeNull();
+      expect(
+        within(screen.getByLabelText("Grade status summary")).queryByText(
+          "No student grading rows were returned."
+        )
+      ).toBeNull();
+      view.rerender(<AssignmentDetailPage {...props} selection={SELECTION} />);
+      expect(
+        await within(await screen.findByLabelText("Grade status summary")).findByText("s001")
+      ).toBeInTheDocument();
+      expect(readStatus).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("treats not-applied template sync as a normal lifecycle state", async () => {
     const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
       available: false,
@@ -503,6 +701,7 @@ describe("AssignmentDetailPage", () => {
     const executeAssignmentTemplateSync = vi.fn();
     mockAppliedGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
@@ -541,6 +740,7 @@ describe("AssignmentDetailPage", () => {
     });
     mockAppliedGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
@@ -611,6 +811,7 @@ describe("AssignmentDetailPage", () => {
       })
     });
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
@@ -933,6 +1134,7 @@ describe("AssignmentDetailPage", () => {
       })
     });
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const action = await screen.findByRole("button", { name: "Update Student Repositories" });
     await waitFor(() => expect(action).toBeEnabled());
@@ -1101,6 +1303,135 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByText(/Workflow changes are not saved/u)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save workflow|push workflow/u })).toBeNull();
   });
+
+  it("reloads link and grading readiness when detail recovers after provisioning", async () => {
+    const api = mockGraiderUI({
+      getAssignmentDetail: vi
+        .fn()
+        .mockResolvedValueOnce(createAssignmentDetailResult())
+        .mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({
+              applyState: { status: "applied" }
+            })
+          )
+        ),
+      getStudentRepositoryAccessPageStatus: vi
+        .fn()
+        .mockResolvedValueOnce(createAccessPageResult({ status: "not_ready", pagesUrl: null }))
+        .mockResolvedValue(createAccessPageResult({ status: "generated", exists: true })),
+      getStudentRepositoryAccessPagePublishStatus: vi
+        .fn()
+        .mockResolvedValue(createAccessPagePublishResult())
+    });
+    renderAssignmentDetailPage();
+    await waitFor(() => expect(api.getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: "Copy Canvas link" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    expect(await screen.findByRole("button", { name: "Copy Canvas link" })).toBeEnabled();
+    expect(api.getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(2);
+    expect(api.getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(2);
+    expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(2);
+    expect(api.getAssignmentGradeStatus).not.toHaveBeenCalled();
+  });
+
+  it("ignores older link status after a newer detail refresh has recovered", async () => {
+    let finishOld: ((value: ReturnType<typeof createAccessPageResult>) => void) | undefined;
+    const old = new Promise<ReturnType<typeof createAccessPageResult>>((resolve) => {
+      finishOld = resolve;
+    });
+    const read = vi
+      .fn()
+      .mockReturnValueOnce(old)
+      .mockResolvedValue(
+        createAccessPageResult({
+          status: "generated",
+          exists: true,
+          diagnostics: []
+        })
+      );
+    mockAppliedGraiderUI({ getStudentRepositoryAccessPageStatus: read });
+    renderAssignmentDetailPage();
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "Copy Canvas link" })).toBeEnabled();
+    if (!finishOld) throw new Error("Missing old status response");
+    finishOld(createAccessPageResult({ status: "not_ready", pagesUrl: null }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copy Canvas link" })).toBeEnabled()
+    );
+    expect(screen.queryByText("1 active student is missing a repository link.")).toBeNull();
+  });
+
+  it.each(["success", "failure"] as const)(
+    "keeps refreshed summaries when older reads finish with %s",
+    async (outcome) => {
+      let finishOldReads: () => void = () => undefined;
+      const oldReads = new Promise<void>((resolve) => {
+        finishOldReads = resolve;
+      });
+      const api = mockAppliedGraiderUI({
+        getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
+        getAssignmentGradingLifecycle: vi
+          .fn()
+          .mockImplementationOnce(async () => {
+            await oldReads;
+            if (outcome === "failure") throw new Error("Old grading lifecycle failed");
+            return createLifecycleResult();
+          })
+          .mockResolvedValue(createDefaultAssignmentGradingLifecycle()),
+        getStudentRepositoryAccessPageStatus: vi
+          .fn()
+          .mockImplementationOnce(async () => {
+            await oldReads;
+            return createAccessPageResult({ status: "not_ready", pagesUrl: null });
+          })
+          .mockResolvedValue(
+            createAccessPageResult({ status: "generated", exists: true, diagnostics: [] })
+          ),
+        getStudentRepositoryAccessPagePublishStatus: vi
+          .fn()
+          .mockImplementationOnce(async () => {
+            await oldReads;
+            return createAccessPagePublishResult({
+              diagnostics: [{ message: "Older publish readiness" }]
+            });
+          })
+          .mockResolvedValue(
+            createAccessPagePublishResult({
+              diagnostics: [{ message: "Current publish readiness" }]
+            })
+          )
+      });
+      renderAssignmentDetailPage();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeEnabled()
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+      await refreshGradeStatus();
+      expect(api.getAssignmentGradeStatus).toHaveBeenCalledTimes(1);
+      expect(await screen.findByRole("button", { name: "Copy Canvas link" })).toBeEnabled();
+      expect(await screen.findByText("Current publish readiness")).toBeInTheDocument();
+
+      await act(async () => {
+        finishOldReads();
+        await oldReads;
+      });
+
+      const gradeSummary = screen.getByLabelText("Grade status summary");
+      expect(within(gradeSummary).getByText("s001")).toBeInTheDocument();
+      expect(within(gradeSummary).queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("button", { name: "Needs grading 2" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Copy Canvas link" })).toBeEnabled();
+      expect(screen.getByText("Current publish readiness")).toBeInTheDocument();
+      expect(screen.queryByText("Older publish readiness")).toBeNull();
+      expect(api.getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(2);
+      expect(api.getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(2);
+      expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("shows and generates the student repository access page with a copyable Canvas link", async () => {
     const getStudentRepositoryAccessPageStatus = vi
@@ -1714,6 +2045,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     const configurationAndTools = screen.getByText("Configuration and tools").closest("details");
@@ -1815,6 +2147,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).getByText("Grading disabled")).toBeInTheDocument();
@@ -1859,6 +2192,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).getByText("jonesse")).toBeInTheDocument();
@@ -1902,6 +2236,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(
@@ -1981,6 +2316,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).queryByRole("link", { name: "Open run" })).toBeNull();
@@ -2226,6 +2562,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).getByText("Queued")).toBeInTheDocument();
@@ -2262,6 +2599,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     const summary = await screen.findByLabelText("Grade status summary");
     expect(within(summary).getByText("Grade status diagnostics (1)")).toBeInTheDocument();
@@ -2278,6 +2616,7 @@ describe("AssignmentDetailPage", () => {
     });
 
     renderAssignmentDetailPage();
+    await refreshGradeStatus();
 
     await screen.findByLabelText("Grade status summary");
 
@@ -2371,6 +2710,147 @@ describe("AssignmentDetailPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/secret-token-value/u)).toBeNull();
     expect(screen.queryByText(/Authorization/u)).toBeNull();
+  });
+
+  it("explicitly pulls existing assignment repositories, shows progress and refreshes only local lifecycle counts", async () => {
+    let finish!: (
+      value: import("../../electron/assignmentRepositoryUpdateService").AssignmentRepositoryUpdateResult
+    ) => void;
+    let reportProgress!: (
+      value: import("../../electron/assignmentRepositoryUpdateService").AssignmentRepositoryUpdateProgress
+    ) => void;
+    const pullLatestAssignmentStudentChanges = vi.fn(
+      () =>
+        new Promise<
+          import("../../electron/assignmentRepositoryUpdateService").AssignmentRepositoryUpdateResult
+        >((resolve) => {
+          finish = resolve;
+        })
+    );
+    const api = mockAppliedGraiderUI({
+      pullLatestAssignmentStudentChanges,
+      onAssignmentRepositoryUpdateProgress: (listener) => {
+        reportProgress = listener;
+        return () => undefined;
+      },
+      downloadAssignmentRepositories: vi.fn()
+    });
+    renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    await waitFor(() => expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(1));
+    expect(pullLatestAssignmentStudentChanges).not.toHaveBeenCalled();
+    const gradeStatusCalls = vi.mocked(api.getAssignmentGradeStatus).mock.calls.length;
+    const detailCalls = vi.mocked(api.getAssignmentDetail).mock.calls.length;
+    await clickOverflowItem("Pull latest student changes");
+    expect(pullLatestAssignmentStudentChanges).toHaveBeenCalledExactlyOnceWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      termCode: "27s1",
+      assignmentSlug: "lab02"
+    });
+    const identity = {
+      courseFolderId: SELECTION.courseFolderId,
+      termCode: "27s1",
+      assignmentSlug: "lab02"
+    };
+    act(() => reportProgress({ ...identity, completed: 1, total: 2, studentId: "grace" }));
+    expect(screen.getByText(/1 of 2 students processed/u)).toBeInTheDocument();
+    await clickOverflowItem("Pull latest student changes");
+    expect(pullLatestAssignmentStudentChanges).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      finish({
+        status: "partial_success",
+        counts: { total: 2, updated: 1, unchanged: 0, failure: 1, notDownloaded: 0 },
+        results: [
+          { studentId: "ada", outcome: "updated", status: "success", message: "Updated." },
+          {
+            studentId: "grace",
+            outcome: "failure",
+            status: "merge_conflict",
+            message: "Resolve conflicts manually, then retry."
+          }
+        ]
+      })
+    );
+    const results = await screen.findByRole("region", { name: "Student pull results" });
+    expect(within(results).getByText(/1 updated/u)).toBeInTheDocument();
+    expect(within(results).getByText(/Resolve conflicts manually/u)).toBeInTheDocument();
+    await waitFor(() => expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(2));
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledTimes(gradeStatusCalls);
+    expect(api.getAssignmentDetail).toHaveBeenCalledTimes(detailCalls);
+    expect(api.downloadAssignmentRepositories).not.toHaveBeenCalled();
+  });
+
+  it("ignores unrelated progress and cleans up a pull subscription when the assignment view closes", async () => {
+    let finish!: (value: import("../../electron/ipc").AssignmentRepositoryUpdateResult) => void;
+    let reportProgress!: (
+      value: import("../../electron/ipc").AssignmentRepositoryUpdateProgress
+    ) => void;
+    const unsubscribe = vi.fn();
+    const api = mockAppliedGraiderUI({
+      pullLatestAssignmentStudentChanges: () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      onAssignmentRepositoryUpdateProgress: (listener) => {
+        reportProgress = listener;
+        return unsubscribe;
+      }
+    });
+    const view = renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    await clickOverflowItem("Pull latest student changes");
+    act(() =>
+      reportProgress({
+        courseFolderId: "another-course",
+        termCode: "27s1",
+        assignmentSlug: "lab02",
+        completed: 2,
+        total: 3
+      })
+    );
+    expect(screen.getByText("Preparing student updates…")).toBeInTheDocument();
+    view.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      finish({
+        status: "success",
+        counts: { total: 0, updated: 0, unchanged: 0, failure: 0, notDownloaded: 0 },
+        results: []
+      })
+    );
+    expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers assignment pull loading after rejection and permits an explicit retry", async () => {
+    const pullLatestAssignmentStudentChanges = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("secret raw transport failure"))
+      .mockResolvedValueOnce({
+        status: "partial_success",
+        counts: { total: 1, updated: 0, unchanged: 0, failure: 0, notDownloaded: 1 },
+        results: [
+          {
+            studentId: "ada",
+            outcome: "not_downloaded",
+            status: "repository_not_recorded",
+            message: "Use Download student repositories to clone missing repositories."
+          }
+        ]
+      });
+    const api = mockAppliedGraiderUI({ pullLatestAssignmentStudentChanges });
+    renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    await clickOverflowItem("Pull latest student changes");
+    expect(
+      await screen.findByText(/Unable to finish pulling student changes/u)
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Pulling latest student changes")).toBeNull());
+    expect(screen.queryByText(/secret raw/u)).toBeNull();
+    await clickOverflowItem("Pull latest student changes");
+    expect(await screen.findByText(/1 not downloaded/u)).toBeInTheDocument();
+    expect(pullLatestAssignmentStudentChanges).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.getAssignmentGradingLifecycle).toHaveBeenCalledTimes(3));
   });
 
   it("opens the repository download folder picker and runs the fixed download command API", async () => {

@@ -577,6 +577,13 @@ pagination and retries; an injected client without HTTP transport reports zero
 HTTP requests. Request time ends when response headers arrive; summed request
 time can exceed phase elapsed time when reads overlap. Unused phases are zero.
 
+`authorityValidation` contains the same numeric fields as a phase. For managed
+GUI Apply it measures initial authority validation and fresh validation before
+each guarded write, including live session guards, local source checks and HTTP
+attempts. It is an inclusive subtotal of existing phase measurements, not an
+additional phase: do not add it to phase totals. Standalone CLI Apply reports
+zeros for this subtotal. It contains no repository or account identities.
+
 `expectedMissingResponses` counts 404s from nullable lookup endpoints, including
 repository, permission, file and workflow lookups. It describes API semantics,
 not whether Apply can proceed: missing tracked repositories and required

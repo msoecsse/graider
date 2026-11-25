@@ -184,7 +184,11 @@ export const deleteManualAdjustment = (
 };
 
 export const markComplete = (state: GradingState): GradingStateResult<GradingState> =>
-  validateGradingState({ ...state, status: "complete" });
+  validateGradingState({
+    ...state,
+    status: "complete",
+    ...(state.updatedSinceGrading === true ? { updatedSinceGrading: false } : {})
+  });
 
 export const markPublished = (state: GradingState): GradingStateResult<GradingState> =>
   validateGradingState({ ...state, status: "published" });

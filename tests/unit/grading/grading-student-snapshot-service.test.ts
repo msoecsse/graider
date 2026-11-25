@@ -13,6 +13,56 @@ const request = {
 };
 
 describe("grading student snapshot production service", () => {
+  it.each(["2026-11-23T21:00:00Z", null, "failed"])(
+    "adds informational timing (%s) without changing saved grading or blocking it",
+    async (timestamp) => {
+      const saved = {
+        status: "success" as const,
+        studentId: "jones",
+        gradingStatus: "published" as const,
+        appliedComments: [],
+        manualAdjustments: [],
+        grade: {
+          pointsPossible: 100,
+          totalScore: 95,
+          categories: [],
+          uncategorizedCommentAdjustmentTotal: 0
+        }
+      };
+      const readTime = vi.fn(() =>
+        timestamp === "failed"
+          ? Promise.reject(new Error("history unavailable"))
+          : Promise.resolve(timestamp)
+      );
+      const service = createGradingStudentSnapshotService({
+        resolveFacultyScope: () => ({
+          status: "success",
+          sections: ["001"],
+          students: [{ studentId: "jones", githubUsername: "github", section: "001" }],
+          errors: []
+        }),
+        resolveRepository: () => ({ status: "success", localPath: "/trusted/repository" }),
+        readHead: () => Promise.resolve({ status: "success", submissionCommitSha: SHA }),
+        loadBackend: () => ({
+          loadGradingStudentSnapshotContext: () => saved,
+          readGradingStudentSubmissionTime: readTime
+        })
+      });
+      await expect(service(request)).resolves.toEqual({
+        ...saved,
+        ...(timestamp === null || timestamp === "failed" ? {} : { lastStudentWorkAt: timestamp })
+      });
+      expect(readTime).toHaveBeenCalledWith({
+        courseRoot: request.courseFolderPath,
+        termCode: request.termCode,
+        assignmentSlug: request.assignmentSlug,
+        studentId: request.studentId,
+        repositoryRoot: "/trusted/repository",
+        submissionCommitSha: SHA
+      });
+    }
+  );
+
   it("rejects inaccessible faculty before repository, HEAD, or state access", async () => {
     const resolveRepository = vi.fn();
     const readHead = vi.fn();

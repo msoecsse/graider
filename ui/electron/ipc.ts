@@ -5,6 +5,14 @@ import type {
   ImportResult
 } from "./reviewImportService.js";
 import type { GithubOAuthApi } from "./githubOAuthTypes.js";
+import type {
+  AssignmentRepositoryUpdateProgress,
+  AssignmentRepositoryUpdateResult
+} from "./assignmentRepositoryUpdateService.js";
+export type {
+  AssignmentRepositoryUpdateProgress,
+  AssignmentRepositoryUpdateResult
+} from "./assignmentRepositoryUpdateService.js";
 import type { GradingEditorViewStateDto } from "./gradingStudentViewStateService.js";
 import type {
   AppliedCommentDto,
@@ -104,6 +112,8 @@ export const IPC_CHANNELS = {
   saveGradingStudentViewState: "graider-ui:grading-student-view-state:save",
   clearGradingStudentViewState: "graider-ui:grading-student-view-state:clear",
   pullLatestGradingStudentChanges: "graider-ui:grading-student-repository:pull",
+  pullLatestAssignmentStudentChanges: "graider-ui:assignment-student-repositories:pull",
+  assignmentRepositoryUpdateProgress: "graider-ui:assignment-student-repositories:progress",
   loadGradingStudentSnapshot: "graider-ui:grading-student-snapshot:load",
   loadGradingStudentEvidence: "graider-ui:grading-student-evidence:load",
   repairGradingStudentWorkflow: "graider-ui:grading-student-workflow:repair",
@@ -847,6 +857,7 @@ export interface DeleteGradingStudentManualAdjustmentRequest extends GradingStud
 export type { GradingStudentManualAdjustmentResult } from "./gradingStudentManualAdjustmentService.js";
 export type MarkGradingStudentCompleteRequest = GradingStudentViewStateRequest & {
   readonly setScoreToZero?: boolean;
+  readonly undoZeroAndComplete?: boolean;
 };
 export type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
 export type PublishGradingStudentReportRequest = GradingStudentViewStateRequest;
@@ -1084,6 +1095,7 @@ export interface AssignmentApplyResult {
   readonly status: "success" | "failure";
   readonly apply: AssignmentApplyJsonResponse | null;
   readonly error: DashboardCommandError | null;
+  readonly accessPageError?: DashboardCommandError | null;
   readonly appliedAt: string | null;
 }
 
@@ -1261,6 +1273,12 @@ export interface GraiderUIApi {
   readonly clearGradingStudentViewState: (
     request: GradingStudentViewStateRequest
   ) => Promise<import("./gradingStudentViewStateService.js").GradingStudentViewStateResult>;
+  readonly pullLatestAssignmentStudentChanges?: (
+    request: GradingWorkspacePrepareRequest
+  ) => Promise<AssignmentRepositoryUpdateResult>;
+  readonly onAssignmentRepositoryUpdateProgress?: (
+    listener: (progress: AssignmentRepositoryUpdateProgress) => void
+  ) => () => void;
   readonly pullLatestGradingStudentChanges?: (
     request: GradingStudentSourceRequest
   ) => Promise<

@@ -1022,6 +1022,38 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("cell", { name: "Archived Quiz" })).toBeInTheDocument();
   });
 
+  it.each(["pointer", "Enter", " ", "Open"])(
+    "opens the full-list assignment detail via %j",
+    async (activation) => {
+      const api = mockGraiderUI({
+        listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+        refreshDashboard: vi
+          .fn()
+          .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()]))
+      });
+      renderAtRoute("/");
+      const cell = await screen.findByRole("cell", { name: "Lab 02" });
+      const row = cell.closest("tr");
+      if (row === null) throw new Error("Expected assignment table row");
+      if (activation === "pointer") {
+        fireEvent.click(cell);
+      } else if (activation === "Open") {
+        fireEvent.click(within(row).getByRole("button", { name: "Open Lab 02" }));
+      } else {
+        row.focus();
+        fireEvent.keyDown(row, { key: activation });
+      }
+      await waitFor(() => {
+        expect(api.getAssignmentDetail).toHaveBeenCalledWith({
+          courseFolderId: COURSE_FOLDER.id,
+          courseFolderPath: COURSE_FOLDER.path,
+          assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+        });
+      });
+      expect(await screen.findByRole("heading", { name: "Lab 02", level: 1 })).toBeInTheDocument();
+    }
+  );
+
   it("does not show the no-card state while startup refresh is still running", async () => {
     const deferredRefresh = createDeferred<CombinedDashboardResult>();
 

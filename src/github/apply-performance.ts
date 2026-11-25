@@ -34,6 +34,7 @@ const emptyMeasurements = (): PhaseMeasurements => ({
 });
 const operationContext = new AsyncLocalStorage<ApplyPerformance>();
 const phaseContext = new AsyncLocalStorage<ApplyPhase>();
+const authorityContext = new AsyncLocalStorage<ApplyPerformance>();
 const nullableContext = new AsyncLocalStorage<boolean>();
 const HTTP_NOT_FOUND = 404;
 const HTTP_ERROR_START = 400;
@@ -43,6 +44,7 @@ export class ApplyPerformance {
   private readonly phases = Object.fromEntries(
     APPLY_PHASES.map((phase) => [phase, emptyMeasurements()])
   ) as Record<ApplyPhase, PhaseMeasurements>;
+  private readonly authorityValidation = emptyMeasurements();
   private readonly startedAt = performance.now();
 
   run<T>(operation: () => Promise<T>): Promise<T> {
@@ -58,22 +60,45 @@ export class ApplyPerformance {
     }
   }
 
-  recordRequest(phase: ApplyPhase, read: boolean, elapsedMs: number, status?: number): void {
-    const measurement = this.phases[phase];
-    measurement.httpRequests += 1;
-    measurement.httpReadRequests += read ? 1 : 0;
-    measurement.httpWriteRequests += read ? 0 : 1;
-    measurement.requestElapsedMs += elapsedMs;
-    if (status === undefined) measurement.networkFailures += 1;
-    else if (status === HTTP_NOT_FOUND && nullableContext.getStore() === true)
-      measurement.expectedMissingResponses += 1;
-    else if (status >= HTTP_ERROR_START) measurement.failedResponses += 1;
+  async measureAuthorityValidation<T>(operation: () => Promise<T>): Promise<T> {
+    if (authorityContext.getStore() === this) return operation();
+    const startedAt = performance.now();
+    try {
+      return await authorityContext.run(this, operation);
+    } finally {
+      this.authorityValidation.elapsedMs += performance.now() - startedAt;
+    }
   }
 
-  snapshot(): { elapsedMs: number; phases: Record<ApplyPhase, PhaseMeasurements> } {
+  recordRequest(
+    phase: ApplyPhase | undefined,
+    read: boolean,
+    elapsedMs: number,
+    status?: number
+  ): void {
+    const measurements = phase === undefined ? [] : [this.phases[phase]];
+    if (authorityContext.getStore() === this) measurements.push(this.authorityValidation);
+    for (const measurement of measurements) {
+      measurement.httpRequests += 1;
+      measurement.httpReadRequests += read ? 1 : 0;
+      measurement.httpWriteRequests += read ? 0 : 1;
+      measurement.requestElapsedMs += elapsedMs;
+      if (status === undefined) measurement.networkFailures += 1;
+      else if (status === HTTP_NOT_FOUND && nullableContext.getStore() === true)
+        measurement.expectedMissingResponses += 1;
+      else if (status >= HTTP_ERROR_START) measurement.failedResponses += 1;
+    }
+  }
+
+  snapshot(): {
+    elapsedMs: number;
+    phases: Record<ApplyPhase, PhaseMeasurements>;
+    authorityValidation: PhaseMeasurements;
+  } {
     return {
       elapsedMs: performance.now() - this.startedAt,
-      phases: structuredClone(this.phases)
+      phases: structuredClone(this.phases),
+      authorityValidation: structuredClone(this.authorityValidation)
     };
   }
 }
@@ -82,6 +107,10 @@ export const measureApplyPhase = <T>(phase: ApplyPhase, operation: () => Promise
   phaseContext.getStore() === undefined
     ? (operationContext.getStore()?.measure(phase, operation) ?? operation())
     : operation();
+
+/** Inclusive subtotal: existing phases still include their fresh authority checks. */
+export const measureApplyAuthorityValidation = <T>(operation: () => Promise<T>): Promise<T> =>
+  operationContext.getStore()?.measureAuthorityValidation(operation) ?? operation();
 
 export const withNullableGitHubRead = <T>(operation: () => Promise<T>): Promise<T> =>
   nullableContext.run(true, operation);
@@ -93,7 +122,8 @@ export const measureApplyHttpRequest = async <T extends { status: number }>(
 ): Promise<T> => {
   const collector = operationContext.getStore();
   const phase = phaseContext.getStore();
-  if (collector === undefined || phase === undefined) return operation();
+  if (collector === undefined || (phase === undefined && authorityContext.getStore() !== collector))
+    return operation();
   const startedAt = performance.now();
   let status: number | undefined;
   try {

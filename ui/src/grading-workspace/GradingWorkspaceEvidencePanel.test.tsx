@@ -199,6 +199,21 @@ const showAllStudents = async (): Promise<void> => {
 };
 
 describe("GradingWorkspacePage automated checks", () => {
+  it("shows proven feedback-equivalent results without calling them a source update", async () => {
+    const result = evidence("ada");
+    setApis({
+      loadEvidence: vi.fn().mockResolvedValue({
+        ...result,
+        submissionCommitSha: "50823d518ce979c2fd328f4ae338d455e6d8b001",
+        submissionContentMatches: true
+      })
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
+    expect(await screen.findByText("Automated checks for ada")).toBeInTheDocument();
+    expect(screen.queryByText(/Source has since been updated/u)).not.toBeInTheDocument();
+  });
+
   it("keeps earlier automated results visible and labels the earlier revision after source updates", async () => {
     const historical = { ...evidence("ada"), submissionCommitSha: "b".repeat(40) };
     setApis({ loadEvidence: vi.fn().mockResolvedValue(historical) });
@@ -374,12 +389,26 @@ describe("GradingWorkspacePage automated checks", () => {
   });
 
   it.each([
-    ["workflow_run_not_found", "No automated results are available yet."],
+    [
+      "workflow_run_not_found",
+      "No automated results are available yet. Run automated checks, then reload."
+    ],
     [
       "evidence_artifact_missing",
-      "Automated results were produced, but the grading evidence artifact is unavailable."
+      "Automated results were produced, but the grading evidence artifact is unavailable. Run automated checks again, then reload."
     ],
-    ["evidence_artifact_expired", "The grading evidence artifact has expired."],
+    [
+      "evidence_artifact_expired",
+      "The grading evidence artifact has expired. Run automated checks again, then reload."
+    ],
+    [
+      "evidence_rate_limited",
+      "GitHub temporarily limited automated-check requests. Wait before reloading."
+    ],
+    [
+      "evidence_archive_member_invalid",
+      "The artifact does not contain supported automated-check evidence. Run automated checks with the current Graider workflow, then reload."
+    ],
     [
       "actions_forbidden",
       "Graider cannot read grading evidence from GitHub Actions. Check the configured GitHub token's Actions read permission."

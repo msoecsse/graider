@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApplyPerformance,
+  measureApplyAuthorityValidation,
+  measureApplyHttpRequest,
   measureApplyPhase,
   withApplyPerformance
 } from "../../../src/github/apply-performance.js";
@@ -16,6 +18,8 @@ const UNAUTHORIZED = 401;
 const RATE_LIMITED = 429;
 const OK = 200;
 const RETRY_WAIT_MS = 1_000;
+const REQUEST_MS = 100;
+const GUARD_MS = 300;
 const client = () => new OctokitGitHubClient({ token: TOKEN });
 const response = (status: number): Response =>
   new Response(JSON.stringify({ message: "Request failed" }), {
@@ -24,10 +28,113 @@ const response = (status: number): Response =>
   });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("Apply HTTP diagnostics", () => {
+  it("reports authority as an inclusive subtotal without changing phase totals or retaining private data", async () => {
+    vi.useFakeTimers({ toFake: ["performance"] });
+    const privateData = {
+      repository: "private-org/private-repository",
+      username: "private-user",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      body: "private-request-body"
+    };
+    const request = () =>
+      measureApplyHttpRequest(true, () => {
+        vi.advanceTimersByTime(REQUEST_MS);
+        return Promise.resolve({ status: OK, ...privateData });
+      });
+    const result = await withApplyPerformance(async () => {
+      await measureApplyPhase("permissions", async () => {
+        await measureApplyAuthorityValidation(async () => {
+          vi.advanceTimersByTime(GUARD_MS);
+          expect(await request()).toEqual({ status: OK, ...privateData });
+          await measureApplyAuthorityValidation(request);
+        });
+        await measureApplyHttpRequest(false, () => {
+          vi.advanceTimersByTime(REQUEST_MS);
+          return Promise.resolve({ status: OK });
+        });
+      });
+      return { summary: {} };
+    });
+    expect(result.summary).toMatchObject({
+      githubPerformance: {
+        elapsedMs: GUARD_MS + REQUEST_MS * 3,
+        authorityValidation: {
+          elapsedMs: GUARD_MS + REQUEST_MS * 2,
+          httpRequests: 2,
+          httpReadRequests: 2,
+          httpWriteRequests: 0,
+          requestElapsedMs: REQUEST_MS * 2
+        },
+        phases: {
+          permissions: {
+            elapsedMs: GUARD_MS + REQUEST_MS * 3,
+            httpRequests: 3,
+            httpWriteRequests: 1
+          }
+        }
+      }
+    });
+    const serialized = JSON.stringify(result.summary);
+    for (const value of [
+      TOKEN,
+      privateData.repository,
+      privateData.username,
+      privateData.body,
+      "authorization",
+      "headers"
+    ])
+      expect(serialized).not.toContain(value);
+  });
+
+  it("records rejected authority spans outside phases and isolates overlapping collectors", async () => {
+    vi.useFakeTimers({ toFake: ["performance"] });
+    const authority = new ApplyPerformance();
+    const provisioning = new ApplyPerformance();
+    const failure = new Error(`Authorization: ${TOKEN} private-user private-repository`);
+    await Promise.all([
+      authority.run(() =>
+        measureApplyAuthorityValidation(async () => {
+          await expect(
+            measureApplyHttpRequest(true, () => {
+              vi.advanceTimersByTime(REQUEST_MS);
+              return Promise.reject(failure);
+            })
+          ).rejects.toBe(failure);
+          throw failure;
+        }).catch((error: unknown) => {
+          expect(error).toBe(failure);
+        })
+      ),
+      provisioning.run(() =>
+        measureApplyPhase("permissions", () =>
+          measureApplyHttpRequest(false, () => Promise.resolve({ status: FORBIDDEN }))
+        )
+      )
+    ]);
+    expect(authority.snapshot().authorityValidation).toMatchObject({
+      elapsedMs: REQUEST_MS,
+      httpRequests: 1,
+      networkFailures: 1,
+      failedResponses: 0
+    });
+    expect(provisioning.snapshot().authorityValidation.httpRequests).toBe(0);
+    expect(provisioning.snapshot().phases.permissions.httpRequests).toBe(1);
+    for (const collector of [authority, provisioning]) {
+      const snapshot = collector.snapshot();
+      for (const measurement of [snapshot.authorityValidation, ...Object.values(snapshot.phases)])
+        for (const value of Object.values(measurement)) expect(typeof value).toBe("number");
+      expect(JSON.stringify(snapshot)).not.toContain(TOKEN);
+    }
+    const snapshot = authority.snapshot();
+    snapshot.authorityValidation.httpRequests = 0;
+    expect(authority.snapshot().authorityValidation.httpRequests).toBe(1);
+  });
+
   it("separates concurrent nullable 404s from required reads and failed writes without console errors", async () => {
     const errors = vi.spyOn(console, "error");
     vi.stubGlobal(
@@ -111,7 +218,9 @@ describe("Apply HTTP diagnostics", () => {
     const collector = new ApplyPerformance();
     await collector.run(() =>
       measureApplyPhase("readiness", async () => {
-        await withGitHubRetry(() => github.getAuthenticatedUser(), { sleep });
+        await measureApplyAuthorityValidation(() =>
+          withGitHubRetry(() => github.getAuthenticatedUser(), { sleep })
+        );
         await github.getAuthenticatedUser();
       })
     );
@@ -119,6 +228,12 @@ describe("Apply HTTP diagnostics", () => {
     expect(transport).toHaveBeenCalledTimes(3);
     expect(collector.snapshot().phases.readiness).toMatchObject({
       httpRequests: 3,
+      failedResponses: 1,
+      expectedMissingResponses: 0
+    });
+    expect(collector.snapshot().authorityValidation).toMatchObject({
+      httpRequests: 2,
+      httpReadRequests: 2,
       failedResponses: 1,
       expectedMissingResponses: 0
     });

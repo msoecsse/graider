@@ -1,4 +1,5 @@
 import { loadGraiderConfig } from "../config/config-loader.js";
+export { readGradingStudentSubmissionTime } from "./student-submission-time.js";
 import {
   createInitialGradingState,
   loadGradingState,

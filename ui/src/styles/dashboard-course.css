@@ -288,6 +288,20 @@
   padding: 0 10px;
 }
 
+.assignment-table__row {
+  cursor: pointer;
+}
+
+.assignment-table__row:hover,
+.assignment-table__row:focus-within {
+  background: var(--accent-tint);
+}
+
+.assignment-table__row:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
 .assignment-table__empty {
   border: 1px dashed var(--border);
   padding: 18px;

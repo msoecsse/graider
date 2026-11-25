@@ -175,7 +175,10 @@ opening its details. Your local files are preserved.
 ## Course Dashboard Overview
 
 The dashboard groups available courses, terms, and assignments. Select an
-assignment row to open Assignment Detail. Use **New Assignment** to create an
+assignment row in the full assignment list, or its **Open** button, to open
+Assignment Detail. Keyboard users can focus a row and press **Enter** or **Space**.
+Selecting row text or using a row's other controls does not open the assignment.
+Use **New Assignment** to create an
 assignment, **Manage Rosters** to edit a section roster, and **Refresh** to
 reload local/GitHub-backed readiness information.
 
@@ -305,8 +308,12 @@ repository names, roster problems, and blockers before continuing.
 
 Use the confirm control on the Apply Preview page to run the apply operation.
 It creates/configures the selected students' repositories, records the local
-manifest, and generates or updates the student repository access page. Apply
-reports failure if the required access page cannot be generated. “Not applied”
+manifest, and generates or updates the student repository access page. If access
+page generation or publication fails after repository Apply, a separate warning
+shows the problem and preserves all repository outcomes. **Repository Apply
+succeeded** confirms repository success only; review the access page and its
+generation or publish readiness in Assignment Detail before sharing the Canvas
+link. “Not applied”
 usually means repositories have not been created yet; it is not automatically
 an error. The Dashboard presents this pre-Apply state as **Not applied**;
 **Blocked** is reserved for diagnostics that prevent Apply. Apply must succeed
@@ -470,6 +477,13 @@ workflows; it does not compute grades locally.
 
 ## Check Grade Status
 
+Assignment Detail shows local grading progress without automatically checking
+GitHub workflow runs. Choose **Refresh grade status** in **Grade status summary**
+to fetch remote status. **Refresh assignment detail** does not run this scan.
+While status loads or if it fails, assignment details and local grading progress
+remain available. Previously fetched status stays visible during refresh and is
+reused when you switch back to that assignment during the same page visit.
+
 Use **View grading status** or **View full grade status**. The status page can
 refresh while work is unfinished; use **Refresh status** if automatic refresh
 stops or you want a new snapshot. A missing run usually means dispatch has not
@@ -574,6 +588,10 @@ downloads; review the per-repository results when the download completes.
 
 ## Local grading responsiveness
 
+Deleting an applied comment opens confirmation directly beneath that comment.
+Confirm to delete only that applied copy, or cancel (or press Escape) to keep it.
+The shared comment-library entry is unchanged.
+
 Once a Schema 1 course is authorized and its verified local cache is available,
 preparing the grading workspace, opening student source, saving comments or
 adjustments, marking grading complete and autosaving editor position use local
@@ -591,6 +609,13 @@ students clears the previous evidence and requires a new request; late results
 from the previous student are discarded. Evidence retrieval does not block local
 grading actions. Startup requests wait for sign-in restoration and course discovery
 rather than treating loading as a sign-in failure.
+
+Reload can reuse results from before report-only commits when local history proves
+the submission content is unchanged. A later source change requires matching new
+results. Missing or expired artifacts require running automated checks again;
+older result-only artifacts without evidence metadata require the current Graider
+workflow. If GitHub limits requests, wait before reloading. Saved comments and
+manual grading remain available independently.
 
 Publishing reports, pulling student changes, downloading repositories, applying
 assignments and running remote grading retain their remote checks. Use an explicit
@@ -727,6 +752,14 @@ student in that order.
 Student switching loads source and saved editor position together. The editor opens
 with its saved cursor and scroll position before position autosave is enabled.
 
+Choose **Open GitHub repository** beside the selected student's identity and
+submission timing in the grading pane to inspect their repository in your default
+browser. The grading workspace keeps your current student and grading state. The
+link follows the recorded student or shared group repository and updates when you
+switch students. It uses local repository metadata without refreshing GitHub; no
+link appears when a repository URL is unavailable. GitHub access and connectivity
+are still needed to view the repository in the browser.
+
 Choose **Replace Graider workflow…** to check workflow repair availability. This
 check runs on demand and can require GitHub access. Replacement still requires
 the confirmation dialog and existing authorization checks.
@@ -734,10 +767,26 @@ the confirmation dialog and existing authorization checks.
 After successful **Mark Complete** or **Set score to 0 and complete**, grading
 moves to the next student needing grading in the current student sort order,
 including students outside the active filter. Completion waits for persistence
-and refreshed grading details. Pending drafts still require resolution. If you
+and refreshed grading details, then focuses the newly selected student row when
+it is visible in the list. Pending drafts still require resolution. If you
 switch students during completion, the completed request leaves your selection
 alone. When none remain, the workspace stays on the completed student and shows
 a grading-finished message.
+
+If you used **Set score to 0 and complete**, select that student again and choose
+**Undo zero and complete** at the bottom of the grading pane. This also works
+after **Pull latest changes** brings in a resubmission, or after an accidental
+zero-completion. The pane shows when the instructor zero override is active;
+the zero action does not add a comment.
+
+Undo removes only that explicit zero override and returns the student to
+**In Progress / To grade**, restoring the calculated score (or the manual-score
+prompt when no rubric is configured). It preserves fresh student content,
+comments, deductions, manual adjustments, editor position, and saved reports.
+Review the submission and mark complete again before publishing. Existing
+published feedback stays unchanged until you explicitly republish. The undo
+control appears only for a saved zero override, including older records with
+that marker; a normal completed grade of zero is not treated as this action.
 
 ### Previously opened courses and background refresh
 
@@ -759,17 +808,49 @@ when connected. Signing out or switching accounts clears the displayed account d
 
 ### Pull latest changes while grading
 
+On Assignment Detail, open **More assignment actions → Pull latest student
+changes** to update existing downloaded repositories for every student in your
+faculty scope for that assignment. **Download student repositories** only clones
+missing repositories; pulling never downloads missing repositories or overwrites
+local work. The selected-student **Pull latest changes** action remains available
+in the grading workspace.
+
+The assignment action processes students one at a time, shows progress, and lists
+each student as updated, unchanged, failed, or not downloaded, with total counts
+and recovery messages. Failed students do not stop the remaining students. Resolve
+their reported access, branch, conflict, or local-file problems before retrying.
+Only one assignment pull can run at a time for the same assignment. Completion
+refreshes local grading counts; it does not start an automated-check scan.
+
+Shared repositories currently use separate per-member updates and results so each
+accessible member's grading state and source anchors are reconciled independently.
+This can fetch a shared clone more than once: the existing safe update service
+combines fetching and per-student SHA verification. Members outside your faculty
+scope are not updated; their faculty must pull or reconcile them separately.
+
 Select a student and choose **Pull latest changes** to fetch that student's
 tracked upstream branch and safely advance the downloaded repository. Signing
 into GitHub in Graider is sufficient; GitHub CLI sign-in and environment tokens
 are not required. An unchanged repository reports that it is already up to date.
 
-Saved feedback, deductions, manual adjustments, zero-score overrides, grading
-status, editor position, publication information, and earlier update history are
-preserved. Complete and Published students retain their status and show
-**Updated Since Grading**. Source, annotations, documents, snapshot, and commit
-history refresh in the open workspace. General comments stay general; uncertain
-source anchors remain visible as stale for review.
+Saved feedback, deductions, manual adjustments, zero-score overrides, editor
+position, publication information, and earlier update history are preserved.
+When the pulled revision changes committed student submission content, Complete
+and Published students reopen as In Progress, appear as **Needs grading** in
+Assignment Detail, return to **To grade**, and show **Updated Since Grading**.
+Marking the student complete again clears that marker. Previously published
+remote feedback remains available until you explicitly republish it.
+
+An unchanged SHA or a revision containing only known Graider output does not
+reopen grading. Comparison uses local committed trees, excluding the conventional
+`grading/report.html`, `grading/report.md`, `grading/results.json`, configured
+Graider report destination, `.graider/` metadata, and `.github/workflows/grade.yml`.
+These are path conventions: edits inside these reserved outputs are ignored;
+unknown paths count as submission content even if they resemble feedback files.
+If configuration cannot be loaded, only conventional paths are excluded. Source,
+annotations, documents, snapshot, and commit history refresh in the open
+workspace. General comments stay general; uncertain source anchors remain visible
+as stale for review.
 
 Pulling does not rerun automated checks or republish feedback. Review the changed
 source and stale anchors, explicitly rerun checks when needed, and review and
@@ -781,6 +862,30 @@ reported problem before retrying. Graider does not reset, clean, stash, or repla
 the checkout. If Git completes but saving the new submission SHA fails, grading
 remains blocked by its consistency guard until the repository and recorded SHA
 are reconciled; existing grading work remains saved.
+
+### Submission timing in the grading workspace
+
+Beside the selected student's identity, Graider shows **On time** or an elapsed
+duration such as **Late by 2 days, 3 hours**. This is informational: late work
+remains gradable and no score, penalty, completion status, or publication rule
+changes. Durations use the assignment's configured due timestamp and timezone,
+with days measured as 24 hours; positive delays under a minute are labeled
+**Late by less than a minute**. The late-policy label does not define a numeric
+grace period.
+
+Timing uses the last substantive change in locally available committed submission
+history, including subsequent student corrections. It uses the same content
+exclusions as **Pull latest changes**, so Graider reports and managed feedback
+updates do not make a submission later. Viewing another student does not fetch
+GitHub history. Pull latest explicitly updates the local evidence.
+
+**No due date** means the assignment has no deadline. **Submission time unavailable**
+means local history cannot establish the student-work timestamp, including missing
+or uncloned repositories, a lone template/root commit, incomplete history, or no
+substantive change found within the most recent 100 comparisons. An invalid or
+timezone-free deadline shows **Due time unavailable**. Git commit timestamps are
+the available local evidence, rather than a verified GitHub receipt time. Timing
+reads never rewrite persisted grading or submission-update history.
 
 ## Importing externally reviewed feedback
 

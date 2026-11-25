@@ -18,6 +18,20 @@ import {
 } from "../../src/github/apply-performance.js";
 import { GITHUB_READ_CONCURRENCY } from "../../src/github/bounded-github-reads.js";
 import { createManifestPath } from "../../src/manifest/manifest-paths.js";
+import { runManagedAssignmentApply } from "../../src/execution/assignment-apply-context.js";
+import { FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS } from "../../src/execution/apply-executor.js";
+
+// Only the local Git observations are faked; authority, HTTP attribution, planning,
+// execution, retry and manifest checkpoint code all run normally.
+vi.mock("../../src/git/dugite-git-workspace-context.js", () => ({
+  createDugiteGitWorkspaceFactory: () => ({
+    open: () =>
+      Promise.resolve({
+        remoteUrl: () => Promise.resolve("https://github.com/example-org/se2030-graider.git"),
+        resolveHead: () => Promise.resolve("baseline-sha")
+      })
+  })
+}));
 
 const STUDENTS = 30;
 const APPLY_TEST_TIMEOUT_MS = 60_000;
@@ -60,6 +74,16 @@ const UNINDEXED_FIRST_MS = 260_200;
 const UNINDEXED_RESUME_REQUESTS = 246;
 const UNINDEXED_RESUME_MS = 20_200;
 const FIRST_EXPECTED_MISSING_DISABLED = 60;
+const LIVE_GUARD_MS = 10;
+const LIVE_GUARDS_PER_VALIDATION = 2;
+const AUTHORITY_HTTP_WALL_MS = 3 * LATENCY_MS;
+const TRANSIENT_WORKFLOW_MISSES = 2;
+const TRANSIENT_WORKFLOW_BACKOFF_MS = 3_000;
+const WORKFLOW_REQUESTS_PER_OBSERVATION = 2;
+const WORKFLOW_VERIFICATION_ERRORS = 2;
+const COURSE_REPOSITORY_ID = 2;
+const FACULTY_USER_ID = 1;
+const COURSE_AND_TEMPLATE_REPOSITORIES = 2;
 
 // Measured at b40becc before this change; includes initial validation in readiness.
 const AUTHORITY_BEFORE = {
@@ -258,6 +282,156 @@ describe(
   "Apply latency with 30 students and 100ms per HTTP request",
   { timeout: APPLY_TEST_TIMEOUT_MS },
   () => {
+    it.each(["transient", "exhausted"] as const)(
+      "separates managed authority and %s workflow wait time while preserving ordered recovery",
+      async (scenario) => {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
+        const transport = new ApplyTransport(true);
+        transport.repositories.add(COURSE);
+        vi.stubGlobal("fetch", transport.fetch);
+        const cwd = fixture(true);
+        transport.courseContent = fs.readFileSync(path.join(cwd, "course.yml"), "utf8");
+        const firstRepository = "27s1-se2030-lab04-student0";
+        const workflow = `GET /repos/example-org/${firstRepository}/actions/workflows/grade.yml`;
+        const misses =
+          scenario === "transient"
+            ? TRANSIENT_WORKFLOW_MISSES
+            : FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS;
+        const backoffMs =
+          scenario === "transient" ? TRANSIENT_WORKFLOW_BACKOFF_MS : PROPAGATION_BACKOFF_MS;
+        transport.failures.set(
+          workflow,
+          Array.from({ length: misses }, () => MISSING)
+        );
+        const progress: string[] = [];
+        const checkpoints: ReturnType<typeof loadManifest>[] = [];
+        const revalidate = vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, LIVE_GUARD_MS));
+        });
+        const request = {
+          root: cwd,
+          assignmentFile: ASSIGNMENT,
+          token: TOKEN,
+          binding: {
+            userId: FACULTY_USER_ID,
+            repositoryId: COURSE_REPOSITORY_ID,
+            revision: "baseline-sha"
+          },
+          revalidate,
+          onProgress: (event: { repository: string }) => {
+            // Progress for the next target must follow the preceding target's
+            // verification checkpoint, including diagnostics after retry exhaustion.
+            if (progress.length === 1) {
+              const checkpoint = loadManifest(
+                createManifestPath(cwd, "27s1", "lab04").absolutePath
+              );
+              checkpoints.push(checkpoint);
+            }
+            progress.push(event.repository);
+          }
+        };
+        const run = () =>
+          runManagedAssignmentApply(request, {
+            githubClient: new OctokitGitHubClient({ token: TOKEN })
+          });
+        const pending = run();
+        await vi.runAllTimersAsync();
+        const first = await pending;
+        const profile = measurements(first.summary);
+        expect(checkpoints).toHaveLength(1);
+        expect(checkpoints[0]?.manifest?.repositories[0]?.actions).toMatchObject({
+          gradingWorkflowFound: scenario === "transient",
+          workflowDispatchSupported: scenario === "transient"
+        });
+        expect(checkpoints[0]?.manifest?.repositories[0]?.errors).toHaveLength(
+          scenario === "transient" ? 0 : WORKFLOW_VERIFICATION_ERRORS
+        );
+        const validations = STUDENTS * WRITES_PER_STUDENT + 1;
+        const authorityMs =
+          validations * (AUTHORITY_HTTP_WALL_MS + LIVE_GUARDS_PER_VALIDATION * LIVE_GUARD_MS);
+        const verificationRequests =
+          STUDENTS * WORKFLOW_REQUESTS_PER_OBSERVATION +
+          (scenario === "transient" ? misses : misses - WORKFLOW_REQUESTS_PER_OBSERVATION);
+        expect(first.status).toBe(scenario === "transient" ? "success" : "partial_success");
+        expect(first.summary.created).toBe(STUDENTS);
+        expect(first.errors).toHaveLength(
+          scenario === "transient" ? 0 : WORKFLOW_VERIFICATION_ERRORS
+        );
+        expect(profile.authorityValidation).toEqual({
+          elapsedMs: authorityMs,
+          httpRequests: validations * AUTHORITY_REQUESTS_PER_VALIDATION,
+          httpReadRequests: validations * AUTHORITY_REQUESTS_PER_VALIDATION,
+          httpWriteRequests: 0,
+          expectedMissingResponses: 0,
+          failedResponses: 0,
+          networkFailures: 0,
+          requestElapsedMs: validations * AUTHORITY_REQUESTS_PER_VALIDATION * LATENCY_MS
+        });
+        expect(revalidate).toHaveBeenCalledTimes(validations * LIVE_GUARDS_PER_VALIDATION);
+        expect(profile.phases.verification).toEqual({
+          elapsedMs: verificationRequests * LATENCY_MS + backoffMs,
+          httpRequests: verificationRequests,
+          httpReadRequests: verificationRequests,
+          httpWriteRequests: 0,
+          expectedMissingResponses: misses,
+          failedResponses: 0,
+          networkFailures: 0,
+          requestElapsedMs: verificationRequests * LATENCY_MS
+        });
+        expect(profile.elapsedMs).toBe(
+          FIRST_MS_WITH_GRADING +
+            authorityMs +
+            (verificationRequests - STUDENTS * WORKFLOW_REQUESTS_PER_OBSERVATION) * LATENCY_MS +
+            backoffMs
+        );
+        expect(APPLY_PHASES.reduce((sum, phase) => sum + profile.phases[phase].elapsedMs, 0)).toBe(
+          profile.elapsedMs
+        );
+        const expectedRepositories = Array.from(
+          { length: STUDENTS },
+          (_, index) => `27s1-se2030-lab04-student${String(index)}`
+        );
+        // Execution uses lexical target order; results retain the roster order.
+        const expectedProgress = expectedRepositories.map((repo) => `example-org/${repo}`).sort();
+        expect(progress).toEqual(expectedProgress);
+        expect(first.summary.repositories).toMatchObject(
+          expectedRepositories.map((repository, index) => ({
+            repository,
+            status: scenario === "exhausted" && index === 0 ? "failed" : "created"
+          }))
+        );
+        expect(transport.calls.filter((call) => call === workflow)).toHaveLength(
+          scenario === "transient" ? misses + 1 : misses
+        );
+        expect(transport.peakWrites).toBe(1);
+
+        const guardsBeforeResume = revalidate.mock.calls.length;
+        progress.length = 0;
+        const resumed = run();
+        await vi.runAllTimersAsync();
+        const second = await resumed;
+        const resumedProfile = measurements(second.summary);
+        expect(second.status).toBe("success");
+        expect(second.errors).toEqual([]);
+        expect(second.summary.created).toBe(0);
+        expect(progress).toEqual(expectedProgress);
+        expect(checkpoints[1]?.manifest?.repositories[0]?.errors).toEqual([]);
+        expect(revalidate.mock.calls.length - guardsBeforeResume).toBe(LIVE_GUARDS_PER_VALIDATION);
+        expect(resumedProfile.authorityValidation.httpRequests).toBe(
+          AUTHORITY_REQUESTS_PER_VALIDATION
+        );
+        expect(resumedProfile.phases.verification.expectedMissingResponses).toBe(0);
+        expect(resumedProfile.phases.verification.elapsedMs).toBe(
+          STUDENTS * WORKFLOW_REQUESTS_PER_OBSERVATION * LATENCY_MS
+        );
+        expect(transport.repositories.size).toBe(STUDENTS + COURSE_AND_TEMPLATE_REPOSITORIES);
+        expect(transport.peakWrites).toBe(1);
+        expect(JSON.stringify([profile, resumedProfile])).not.toMatch(
+          /ghp_|example-org|student|authorization/iu
+        );
+      }
+    );
+
     it("waits through a three-second Actions and workflow propagation delay, exceeding the former retry window", async () => {
       vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
       const transport = new ApplyTransport(true);

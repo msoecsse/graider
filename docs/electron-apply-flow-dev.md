@@ -81,11 +81,30 @@ attempt counts; its fields are defined in the
 [CLI JSON contract](cli-json-contract.md#assignment-apply-assignmentyml---json).
 The managed backend includes initial authoritative validation in readiness.
 Authorization rechecks before each write are attributed to that write's phase.
+The separate `authorityValidation` subtotal measures those managed authority
+checks (including initial validation, live guards and local source checks), with
+the same aggregate timing and request counters. Existing phase totals remain
+inclusive of validation; the subtotal must not be added to them. This isolates
+authority cost without caching, skipping or weakening any fresh check.
 CLI preAction validation, UI preview and UI session setup happen outside the
 Apply command's timer. Total time also includes local configuration, manifest
 and Git work. Phase time includes retry waits and, for individual operations,
 manifest checkpoints. Group phase time covers its GitHub calls; local group
 checkpoint time is included in the total.
+
+The Electron follow-up service adds `summary.accessPagePerformance` to the
+returned Apply JSON through the existing summary record. Its `elapsedMs` covers
+only follow-up wall time, with `phases.repositoryMappings`, `phases.generation`
+and `phases.publication` each containing `{ elapsedMs }`, or `null` when not
+attempted. Attempted phases retain elapsed time on failure or throw. These
+aggregate numbers contain no identities, paths, URLs, tokens, headers, bodies or
+exception details; they do not count HTTP requests. They do not modify or extend
+`githubPerformance` totals or its inclusive `authorityValidation` subtotal.
+Failed Apply has no follow-up timing. Generation/publication failures still
+preserve confirmed Apply success/partial outcomes and use the separate
+`accessPageError`; timing does not imply publication succeeded. Publication time
+includes the publisher's readiness checks and its own generation check. This
+summary extension is Electron-only; standalone CLI JSON is unchanged.
 
 Expected nullable 404s no longer produce Octokit console errors. Normalized
 operation diagnostics still report authentication, authorization, rate limits,

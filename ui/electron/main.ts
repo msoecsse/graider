@@ -61,6 +61,8 @@ import {
   isGradingStudentDocumentRequest
 } from "./gradingStudentDocumentService.js";
 import { createGradingStudentRepositoryUpdateService } from "./gradingStudentRepositoryUpdateService.js";
+import { createAssignmentRepositoryUpdateService } from "./assignmentRepositoryUpdateService.js";
+import { createAssignmentRepositoryUpdateHandler } from "./assignmentRepositoryUpdateIpc.js";
 import { BrowserWindow, app, dialog, ipcMain, shell, safeStorage } from "electron";
 import { registerExternalNavigation } from "./externalNavigation.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
@@ -1455,6 +1457,27 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
+  const pullAssignmentStudentChanges = createAssignmentRepositoryUpdateService({
+    updateStudent: async (request) => {
+      if (!oauthSession) return { status: "github_auth_unavailable" };
+      return oauthSession.withAuthenticatedAccount(async (account) =>
+        createGradingStudentRepositoryUpdateService({
+          authenticate: async () => createAuthenticatedProductionGitWorkspace(account.token),
+          revalidate: async () => {
+            if (!(await account.revalidateSession())) throw new Error("GitHub session changed.");
+          }
+        })(request)
+      );
+    }
+  });
+  courseIpc.handle(
+    IPC_CHANNELS.pullLatestAssignmentStudentChanges,
+    createAssignmentRepositoryUpdateHandler({
+      userDataPath: () => app.getPath("userData"),
+      isRegistered: isRegisteredAssignmentSetupCourse,
+      update: pullAssignmentStudentChanges
+    })
+  );
   courseIpc.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, (_event, request: unknown) => {
     if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for student repository updates.");

@@ -173,6 +173,57 @@ const assertNoDuplicateAccessibleNames = (): void => {
 };
 
 describe("explicit student repository updates", () => {
+  it.each(["completed", "rejected"])(
+    "keeps a pending Ada Pull owned across student switches and permits retry after it is %s",
+    async (outcome) => {
+      const pending = deferred<{ status: string }>();
+      const pull = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          const result = await pending.promise;
+          if (outcome === "rejected") throw new Error("Private Git detail");
+          return result;
+        })
+        .mockResolvedValue({ status: "unchanged" });
+      const { publish } = configureApis({ statuses: { ada: "complete", grace: "complete" } });
+      Object.assign(window.graiderUI, { pullLatestGradingStudentChanges: pull });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByRole("button", { name: "Move ada" });
+      await showAllStudents();
+
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await waitFor(() =>
+        expect(pull).toHaveBeenCalledExactlyOnceWith({ ...REQUEST, studentId: "ada" })
+      );
+      expect(screen.getByRole("button", { name: "Pulling latest changes…" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+      await screen.findByRole("button", { name: "Move grace" });
+      const gracePull = screen.getByRole("button", { name: "Pull latest changes" });
+      expect(gracePull).toBeDisabled();
+      fireEvent.click(gracePull);
+      fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+      await screen.findByRole("button", { name: "Move ada" });
+      const adaPull = screen.getByRole("button", { name: "Pulling latest changes…" });
+      expect(adaPull).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeDisabled();
+      fireEvent.click(adaPull);
+      expect(pull).toHaveBeenCalledTimes(1);
+
+      await act(async () => pending.resolve({ status: "success" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Pull latest changes" })).toBeEnabled()
+      );
+      expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
+      expect(pull).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/Private Git detail/u)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      await screen.findByText("This repository is already up to date.");
+      expect(pull).toHaveBeenNthCalledWith(2, { ...REQUEST, studentId: "ada" });
+      expect(pull).toHaveBeenCalledTimes(2);
+      expect(publish).not.toHaveBeenCalled();
+    }
+  );
+
   it("reopens document bytes after Pull latest changes while preserving grading status", async () => {
     configureApis();
     let revision = 1;
@@ -210,69 +261,84 @@ describe("explicit student repository updates", () => {
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeVisible();
   });
-  it("updates only the selected student, retains graded status and deductions, and does not rerun workflows", async () => {
-    let updated = false;
-    const repair = vi.fn().mockResolvedValue({ status: "grading_not_eligible", studentId: "ada" });
-    const pull = vi.fn(async () => {
-      updated = true;
-      return { status: "success" };
-    });
-    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
-      Promise.resolve({
-        ...studentSnapshot(studentId, "complete"),
-        updatedSinceGrading: updated,
-        appliedComments: [
-          {
-            id: "kept",
-            text: "Existing deduction",
-            deduction: -2,
-            sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 },
-            sourceAnchor: {
-              status: "stale",
-              originalCommitSha: "a".repeat(40),
-              originalText: "old source",
-              originalLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+  it.each(["complete", "published"] as const)(
+    "reopens the selected %s student in To grade, retains deductions, and does not rerun workflows",
+    async (priorStatus) => {
+      let updated = false;
+      const repair = vi
+        .fn()
+        .mockResolvedValue({ status: "grading_not_eligible", studentId: "ada" });
+      const pull = vi.fn(async () => {
+        updated = true;
+        return { status: "success" };
+      });
+      const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+        Promise.resolve({
+          ...studentSnapshot(studentId, updated ? "in_progress" : priorStatus),
+          updatedSinceGrading: updated,
+          appliedComments: [
+            {
+              id: "kept",
+              text: "Existing deduction",
+              deduction: -2,
+              sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 },
+              sourceAnchor: {
+                status: "stale",
+                originalCommitSha: "a".repeat(40),
+                originalText: "old source",
+                originalLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+              }
             }
-          }
-        ]
-      })
-    );
-    configureApis({ statuses: { ada: "complete", grace: "complete" }, loadSnapshot });
-    Object.assign(window.graiderUI, {
-      pullLatestGradingStudentChanges: pull,
-      loadGradingStudentCommitHistory: vi.fn(async () => ({
-        status: "success",
-        studentId: "ada",
-        submissionCommitSha: (updated ? "b" : "a").repeat(40),
-        commits: [
-          {
-            sha: (updated ? "b" : "a").repeat(40),
-            committedAt: "2026-11-17T12:00:00Z",
-            message: updated ? "New student commit" : "Original student commit"
-          }
-        ]
-      })),
-      repairGradingStudentWorkflow: repair
-    });
-    render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByText("Existing deduction");
-    expect(pull).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
-    expect(await screen.findByText(/Updated Since Grading/u)).toBeInTheDocument();
-    expect(pull).toHaveBeenCalledExactlyOnceWith({ ...REQUEST, studentId: "ada" });
-    expect(repair).not.toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }));
-    expect(
-      screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("Existing deduction")).toBeInTheDocument();
-    expect(screen.getByText(/Stale\/unresolved source anchor/u)).toBeInTheDocument();
-    expect(screen.getByText("old source")).toBeInTheDocument();
-    expect(window.graiderUI.loadGradingStudentSource).toHaveBeenCalledTimes(2);
-    expect(loadSnapshot).toHaveBeenCalledTimes(2);
-    expect(window.graiderUI.loadGradingStudentCommitHistory).toHaveBeenCalledTimes(2);
-    expect(window.graiderUI.publishGradingStudentReport).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
-  });
+          ]
+        })
+      );
+      configureApis({ statuses: { ada: priorStatus, grace: "complete" }, loadSnapshot });
+      Object.assign(window.graiderUI, {
+        pullLatestGradingStudentChanges: pull,
+        loadGradingStudentCommitHistory: vi.fn(async () => ({
+          status: "success",
+          studentId: "ada",
+          submissionCommitSha: (updated ? "b" : "a").repeat(40),
+          commits: [
+            {
+              sha: (updated ? "b" : "a").repeat(40),
+              committedAt: "2026-11-17T12:00:00Z",
+              message: updated ? "New student commit" : "Original student commit"
+            }
+          ]
+        })),
+        repairGradingStudentWorkflow: repair
+      });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByText("Existing deduction");
+      expect(pull).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+      expect(await screen.findByText(/Updated Since Grading/u)).toBeInTheDocument();
+      expect(pull).toHaveBeenCalledExactlyOnceWith({ ...REQUEST, studentId: "ada" });
+      expect(repair).not.toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }));
+      expect(
+        screen.getByText("In Progress", { selector: ".grading-student-snapshot strong" })
+      ).toBeInTheDocument();
+      expect(screen.getByText("Existing deduction")).toBeInTheDocument();
+      expect(screen.getByText(/Stale\/unresolved source anchor/u)).toBeInTheDocument();
+      expect(screen.getByText("old source")).toBeInTheDocument();
+      expect(window.graiderUI.loadGradingStudentSource).toHaveBeenCalledTimes(2);
+      expect(loadSnapshot).toHaveBeenCalledTimes(2);
+      expect(window.graiderUI.loadGradingStudentCommitHistory).toHaveBeenCalledTimes(2);
+      expect(window.graiderUI.publishGradingStudentReport).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: "Publish this student's report" })
+      ).not.toBeInTheDocument();
+      const toGrade = screen.getByRole("button", { name: /^To grade\s*1/u });
+      expect(screen.getByRole("button", { name: /^Graded\s*1/u })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^Published\s*0/u })).toBeVisible();
+      fireEvent.click(toGrade);
+      expect(screen.getByRole("button", { name: /ada · Section 001 · In Progress/u })).toHaveClass(
+        "selected"
+      );
+      expect(screen.queryByRole("button", { name: /grace · Section/u })).not.toBeInTheDocument();
+    }
+  );
 
   it.each(["repository_update_failed", "rejected"])(
     "releases UI mutation guards and retries after %s without refreshing failed results",

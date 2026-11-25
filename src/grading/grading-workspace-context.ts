@@ -1,6 +1,12 @@
 import { loadGraiderConfig } from "../config/config-loader.js";
 import { loadGradingState, type GradingState } from "./grading-state.js";
 import { calculateGrade, type RubricCategory } from "./grading-state-operations.js";
+import { loadManifest } from "../manifest/manifest-loader.js";
+import { createManifestPath } from "../manifest/manifest-paths.js";
+import {
+  findStudentRepositoryMapping,
+  normalizeManifestRepositories
+} from "../manifest/repository-targets.js";
 
 export interface GradingWorkspaceScopedStudent {
   readonly firstName?: string;
@@ -42,13 +48,17 @@ interface GradingWorkspaceSuccessResult<
   Status extends string,
   StudentRow extends GradingWorkspaceScopedStudent & {
     readonly gradingStatus: Status;
-  } = GradingWorkspaceScopedStudent & { readonly gradingStatus: Status }
+  } = GradingWorkspaceScopedStudent & {
+    readonly gradingStatus: Status;
+    readonly repositoryUrl?: string;
+  }
 > {
   readonly status: "success";
   readonly assignment: {
     readonly termCode: string;
     readonly slug: string;
     readonly title: string;
+    readonly dueAt?: string;
   };
   readonly requiredFiles: readonly string[];
   readonly rubric: readonly {
@@ -152,7 +162,10 @@ export function resolveGradingWorkspaceContext(
   const assignment = {
     termCode: request.termCode,
     slug: request.assignmentSlug,
-    title: config.config.assignment.assignment.title
+    title: config.config.assignment.assignment.title,
+    ...(config.config.assignment.deadline === undefined
+      ? {}
+      : { dueAt: config.config.assignment.deadline.due_at })
   };
   const requiredFiles = grading?.required_files ?? [];
   const resolveOutcome = (studentId: string): StudentGradingStatusOutcome =>
@@ -180,14 +193,55 @@ export function resolveGradingWorkspaceContext(
     return { status: "success", assignment, requiredFiles, rubric, students };
   }
 
+  // Recorded manifest URLs only: no remote lookup or repository-name inference.
+  const manifest = loadManifest(
+    createManifestPath(config.config.summary.repoRoot, request.termCode, request.assignmentSlug)
+      .absolutePath
+  );
+  const normalized =
+    manifest.status === "loaded" &&
+    (manifest.manifest.schemaVersion === 2 ||
+      (manifest.manifest.assignment.termCode === request.termCode &&
+        manifest.manifest.assignment.assignmentSlug === request.assignmentSlug))
+      ? normalizeManifestRepositories(manifest.manifest)
+      : undefined;
+  const unavailableTargets = new Set(
+    manifest.status !== "loaded"
+      ? []
+      : manifest.manifest.schemaVersion === 2
+        ? (manifest.manifest.targets ?? [])
+            .filter(
+              (target) => target.lifecycleStatus === "missing" || target.lifecycleStatus === "error"
+            )
+            .map((target) => target.targetId)
+        : manifest.manifest.repositories
+            .filter(
+              (record) =>
+                record.lifecycle.status === "missing" || record.lifecycle.status === "error"
+            )
+            .map((record) => record.studentId)
+  );
   const students: (GradingWorkspaceScopedStudent & {
     readonly gradingStatus: GradingWorkspaceStudentStatus;
+    readonly repositoryUrl?: string;
   })[] = [];
   for (const student of request.students) {
     const outcome = resolveOutcome(student.studentId);
     if (outcome.status === "error")
       return { status: "grading_state_error", studentId: student.studentId, code: outcome.code };
-    students.push({ ...student, gradingStatus: outcome.gradingStatus });
+    const mapping =
+      normalized === undefined
+        ? undefined
+        : findStudentRepositoryMapping(normalized, student.studentId);
+    const repositoryUrl =
+      mapping === undefined || unavailableTargets.has(mapping.targetId)
+        ? null
+        : mapping.repositoryUrl;
+    students.push({
+      ...student,
+      gradingStatus: outcome.gradingStatus,
+      ...(repositoryUrl == null ? {} : { repositoryUrl })
+    });
   }
   return { status: "success", assignment, requiredFiles, rubric, students };
 }

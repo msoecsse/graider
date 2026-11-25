@@ -252,6 +252,57 @@ describe("retrieveGradingEvidence", () => {
     }
   });
 
+  it("does not invent identity or phase outcomes for historical result-only archives", async () => {
+    const bytes = zip({
+      "grading-results.json": JSON.stringify({
+        schema_version: 1,
+        status: "passed",
+        checks: [
+          { name: "CheckStyle", status: "passed" },
+          { name: "Unit Tests", status: "passed" }
+        ]
+      })
+    });
+    await expect(retrieve(clientWithEvidence([run()], [artifact()], bytes))).resolves.toMatchObject(
+      {
+        status: "failure",
+        error: { code: "evidence_archive_member_invalid" }
+      }
+    );
+  });
+
+  it.each([
+    "listWorkflowRunsForCommit",
+    "listWorkflowRunArtifacts",
+    "downloadArtifactArchive"
+  ] as const)(
+    "stops on a rate limit at %s without another candidate or revision lookup",
+    async (operation) => {
+      const client = clientWithEvidence([run(), run({ id: 99 })]);
+      client.failNext(operation, "rate_limited");
+      await expect(retrieve(client)).resolves.toMatchObject({
+        status: "failure",
+        error: { code: "evidence_rate_limited" }
+      });
+      expect(client.workflowRunForCommitReadRequests).toHaveLength(
+        operation === "listWorkflowRunsForCommit" ? 0 : 1
+      );
+      expect(client.artifactArchiveDownloads.length).toBeLessThanOrEqual(1);
+    }
+  );
+
+  it("ignores queued and running executions even if they advertise an artifact", async () => {
+    const client = clientWithEvidence([
+      run({ status: "in_progress" }),
+      run({ status: "queued", id: 999 })
+    ]);
+    await expect(retrieve(client)).resolves.toMatchObject({
+      status: "failure",
+      error: { code: "workflow_run_not_found" }
+    });
+    expect(client.workflowRunArtifactReadRequests).toHaveLength(0);
+  });
+
   it("returns typed lookup, permission, download, and archive failures safely", async () => {
     await expect(
       retrieve(clientWithEvidence(), { submissionCommitSha: "invalid" })

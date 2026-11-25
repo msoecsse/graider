@@ -36,6 +36,7 @@ export const GradeStatusSummaryPanel = ({
   status,
   isLoading,
   errorMessage,
+  onRefreshGradeStatus,
   onViewFullGradeStatus,
   canUpdateRepositories,
   isTemplateSyncPending,
@@ -44,6 +45,7 @@ export const GradeStatusSummaryPanel = ({
   readonly status: NormalizedGradeStatus | null;
   readonly isLoading: boolean;
   readonly errorMessage: string | null;
+  readonly onRefreshGradeStatus: () => void;
   readonly onViewFullGradeStatus: () => void;
   readonly canUpdateRepositories: boolean;
   readonly isTemplateSyncPending: boolean;
@@ -58,16 +60,28 @@ export const GradeStatusSummaryPanel = ({
         <h2 id="assignment-grade-status-summary-title">Grade status summary</h2>
         <p className="detail-panel__note">
           {status === null
-            ? "Graider checks grading workflow run status without starting workflows."
+            ? "Choose Refresh grade status to check GitHub workflow runs without starting workflows."
             : getGradeStatusSummaryText(status)}
         </p>
       </div>
+      <button
+        className="secondary-action"
+        type="button"
+        disabled={isLoading}
+        onClick={onRefreshGradeStatus}
+      >
+        Refresh grade status
+      </button>
       <button className="secondary-action" type="button" onClick={onViewFullGradeStatus}>
         View full grade status
       </button>
     </div>
 
-    {isLoading ? <p className="loading-state">Loading grade status summary...</p> : null}
+    {isLoading ? (
+      <p className="loading-state" role="status">
+        Loading grade status summary...
+      </p>
+    ) : null}
     {errorMessage === null ? null : (
       <p className="error-message" role="alert">
         {errorMessage}

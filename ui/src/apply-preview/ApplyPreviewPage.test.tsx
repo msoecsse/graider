@@ -863,6 +863,155 @@ describe("ApplyPreviewPage", () => {
     expect(onRefreshAssignmentDetail).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["student_repository_access_page_generation_failed", "generation"],
+    ["student_repository_access_page_publication_failed", "publication"]
+  ])("warns about %s while retaining successful repository Apply results", async (code, phase) => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(createApplyJson(), {
+          accessPageError: {
+            code,
+            message: "Check the selected Pages repository.",
+            exitCode: null,
+            stdoutSnippet: "Internal output must not be shown",
+            stderrSnippet: "Internal error must not be shown"
+          }
+        })
+      )
+    });
+    renderApplyPreviewPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    const warning = await screen.findByRole("alert", {
+      name: `Student repository access page ${phase} failed`
+    });
+    expect(
+      within(warning).getByText("Repository Apply succeeded. Its results are preserved.")
+    ).toBeInTheDocument();
+    expect(within(warning).getByText("Check the selected Pages repository.")).toBeInTheDocument();
+    expect(
+      within(warning).getByText(
+        /Refresh assignment detail to review the student repository access page/
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 repository was created, 1 updated, 1 skipped.")).toBeInTheDocument();
+    const rows = screen.getByRole("table", { name: "Repository rows" });
+    expect(within(rows).getByText("Created")).toBeInTheDocument();
+    expect(within(rows).getByText("Updated")).toBeInTheDocument();
+    expect(within(rows).getByText("Skipped")).toBeInTheDocument();
+    expect(screen.getAllByText("terms/27s1/manifests/lab02/manifest.yml").length).toBeGreaterThan(
+      0
+    );
+    expect(screen.getByText("Exit code 0")).toBeInTheDocument();
+    expect(screen.getByText("Post-apply actions")).toBeInTheDocument();
+    expect(screen.queryByText("Unable to apply assignment.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Internal (output|error) must not be shown/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh apply preview" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Loading apply preview...")).not.toBeInTheDocument()
+    );
+    expect(warning).toBeInTheDocument();
+  });
+
+  it("keeps partial Apply diagnostics and command errors alongside an access-page warning", async () => {
+    const diagnostic = {
+      code: "repository_setup_incomplete",
+      severity: "error",
+      message: "Repository setup needs attention.",
+      context: {}
+    };
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createApplyJson({
+            status: "partial_success",
+            exitCode: 2,
+            diagnostics: [diagnostic]
+          }),
+          {
+            error: {
+              code: "invalid_assignment_apply_json",
+              message: "Invalid JSON",
+              exitCode: 2,
+              stdoutSnippet: null,
+              stderrSnippet: null
+            },
+            accessPageError: {
+              code: "student_repository_access_page_generation_failed",
+              message: "Select the Pages repository.",
+              exitCode: null,
+              stdoutSnippet: null,
+              stderrSnippet: null
+            }
+          }
+        )
+      )
+    });
+    renderApplyPreviewPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    const warning = await screen.findByRole("alert", {
+      name: "Student repository access page generation failed"
+    });
+    expect(
+      within(warning).getByText(
+        "Repository Apply results are preserved. Review any repository diagnostics below."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Repository Apply succeeded. Its results are preserved.")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Graider returned invalid apply JSON.")).toBeInTheDocument();
+    expect(screen.getByText(diagnostic.message)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Apply partially completed and requires attention/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Exit code 2")).toBeInTheDocument();
+  });
+
+  it.each([undefined, null])(
+    "shows no access-page warning when accessPageError is %s",
+    async (accessPageError) => {
+      mockGraiderUI({
+        getAssignmentApplyPreview: vi
+          .fn()
+          .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+        applyAssignment: vi
+          .fn()
+          .mockResolvedValue(
+            createApplyResult(
+              createApplyJson(),
+              accessPageError === undefined ? {} : { accessPageError }
+            )
+          )
+      });
+      renderApplyPreviewPage();
+      fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+      fireEvent.click(
+        screen.getByLabelText("I understand this will apply changes to student repositories")
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+      await screen.findByText("Post-apply actions");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    }
+  );
+
   it("shows the diagnostics region only once there is something to say, and switches to the result's diagnostics", async () => {
     mockGraiderUI({
       getAssignmentApplyPreview: vi

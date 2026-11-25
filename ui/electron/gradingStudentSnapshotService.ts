@@ -47,6 +47,7 @@ export type GradingStudentSnapshotResult =
   | {
       readonly status: "success";
       readonly studentId: string;
+      readonly lastStudentWorkAt?: string;
       readonly updatedSinceGrading?: boolean;
       readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published";
       readonly appliedComments: readonly AppliedCommentDto[];
@@ -82,6 +83,14 @@ interface BackendRequest {
 
 export interface GradingStudentSnapshotBackend {
   loadGradingStudentSnapshotContext(request: BackendRequest): GradingStudentSnapshotResult;
+  readGradingStudentSubmissionTime?(request: {
+    readonly courseRoot: string;
+    readonly termCode: string;
+    readonly assignmentSlug: string;
+    readonly studentId: string;
+    readonly repositoryRoot: string;
+    readonly submissionCommitSha: string;
+  }): Promise<string | null>;
 }
 
 export interface GradingStudentSnapshotDependencies {
@@ -115,13 +124,33 @@ export const createGradingStudentSnapshotService = (
     if (repository.status !== "success") return repository;
     const head = await readHead(repository.localPath);
     if (head.status !== "success") return head;
-    return getBackend().loadGradingStudentSnapshotContext({
+    const backend = getBackend();
+    const snapshot = backend.loadGradingStudentSnapshotContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       studentId: request.studentId,
       currentSubmissionCommitSha: head.submissionCommitSha
     });
+    if (snapshot.status !== "success") return snapshot;
+    // Timing is informational: unavailable local history must not block grading.
+    let submittedAt: string | null | undefined;
+    try {
+      submittedAt = await backend.readGradingStudentSubmissionTime?.({
+        courseRoot: request.courseFolderPath,
+        termCode: request.termCode,
+        assignmentSlug: request.assignmentSlug,
+        studentId: request.studentId,
+        repositoryRoot: repository.localPath,
+        submissionCommitSha: head.submissionCommitSha
+      });
+    } catch {
+      submittedAt = null;
+    }
+    return {
+      ...snapshot,
+      ...(submittedAt == null ? {} : { lastStudentWorkAt: submittedAt })
+    };
   };
 };
 

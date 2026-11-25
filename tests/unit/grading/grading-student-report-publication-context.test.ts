@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { updateGradingStudentRepository } from "../../../src/grading/grading-student-repository-update.js";
+import { markGradingStudentCompleteContext } from "../../../src/grading/grading-student-complete-context.js";
 import { loadGradingState, saveGradingState } from "../../../src/grading/grading-state.js";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import * as evidenceContext from "../../../src/grading/grading-student-evidence-context.js";
@@ -330,6 +331,7 @@ describe("grading student report publication context", () => {
           {
             resolveHead: () => Promise.resolve(newSha),
             readRevisionFile: () => Promise.resolve("unchanged source"),
+            listTree: () => Promise.resolve([]),
             pullUpstream: vi.fn().mockResolvedValue({ kind: "updated" })
           },
           { expectedRepositoryRemote: () => "https://github.com/trusted-org/lab1-ada.git" }
@@ -478,4 +480,33 @@ it("rejects publication when the final zero override changes during an active op
         .mockReturnValue({ status: "success", value: { ...gradingState(), finalScoreOverride: 0 } })
     })
   ).toEqual({ status: "publication_stale", studentId: "ada" });
+});
+
+it("invalidates an already prepared zero report after explicit undo without writing a replacement report", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-zero-report-"));
+  try {
+    const localRequest = { ...request, courseFolderPath: root };
+    const stateRequest = { ...localRequest, courseRoot: root };
+    const zero = { ...gradingState(), finalScoreOverride: 0 as const };
+    expect(saveGradingState(stateRequest, zero).status).toBe("success");
+    const deps = { ...dependencies(zero), loadState: () => loadGradingState(stateRequest) };
+    const prepared = prepareGradingStudentReportPublicationContext(localRequest, deps);
+    if (prepared.status !== "success") throw new Error(prepared.status);
+    expect(
+      markGradingStudentCompleteContext({ ...localRequest, undoZeroAndComplete: true }).status
+    ).toBe("success");
+    expect(revalidatePreparedGradingStudentReportPublication(prepared.value, SHA, deps)).toEqual({
+      status: "publication_stale",
+      studentId: "ada"
+    });
+    expect(markPreparedGradingStudentReportPublished(prepared.value, SHA, deps).status).toBe(
+      "publication_stale"
+    );
+    expect(deps.saveState).not.toHaveBeenCalled();
+    expect(prepareGradingStudentReportPublicationContext(localRequest, deps).status).toBe(
+      "grading_not_complete"
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

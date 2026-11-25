@@ -95,15 +95,36 @@ status, faculty report generation, and narrowly scoped grading workspace reads
 and mutations. Grading evidence loading accepts only canonical grading student
 identity; the main process derives faculty authorization, repository target,
 submission SHA, effective grading configuration, and GitHub credentials.
+The existing grading completion mutation also accepts optional boolean
+`undoZeroAndComplete`, mutually exclusive with `setScoreToZero: true`. It uses
+the same local grading authorization and trusted HEAD guards, requires a saved
+`finalScoreOverride: 0`, and atomically removes that override while setting
+`in_progress`. It preserves other grading state and never writes a report or
+student repository. Unmarked zero grades are refused. Reports must be completed
+again before publication; previously prepared reports fail state revalidation.
 Commit-history loading uses the same canonical identity and authorization, then
 derives the trusted local repository and grading submission SHA before running
 a fixed, read-only local Git history query.
+Workspace assignment data includes optional `dueAt`. Successful student snapshots
+may include `lastStudentWorkAt`, derived in the trusted backend from local
+first-parent content changes using the same generated-path exclusions as Pull
+latest. This optional display evidence is cached by repository, commit, and output
+policy; it never changes grading state or performs a remote request. Missing or
+unreliable history leaves it absent. The renderer displays timing only for the
+currently selected student's snapshot and never derives it from repository HEAD's
+timestamp or pull/publication history dates.
 Single-student report publication accepts that canonical identity only; report
 HTML, destination, score, repository, submission SHA, evidence, and history are
 derived in the trusted process. Selective bulk publication accepts canonical
 assignment identity plus a strict, nonempty list of unique student IDs and
 sequentially delegates the same authorized single-student operation. Neither
 endpoint exposes a generic repository write or renderer-selected report path.
+Assignment-wide **Pull latest student changes** accepts only registered course,
+term and assignment identity. Main derives the faculty roster and local clone
+locators, sequentially invokes the same authenticated student update service,
+and returns per-member outcomes/counts with assignment-scoped progress. It is a
+local-grading mutation, with the existing course lease and revalidation; it cannot
+download repositories or accept renderer-selected SHAs, students or credentials.
 Some channels are CLI-backed and return parsed command JSON; others call a
 generated in-process context bundle after the main process derives and
 validates the trusted course, assignment, faculty, repository, and student

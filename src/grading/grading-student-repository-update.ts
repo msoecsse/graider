@@ -8,6 +8,11 @@ import {
 } from "../manifest/repository-targets.js";
 import type { PullUpstreamRequest, PullUpstreamResult } from "../git/git-workspace.js";
 import {
+  generatedSubmissionPaths,
+  readStudentSubmissionTree,
+  submissionTreesDiffer
+} from "./submission-content.js";
+import {
   loadGradingState,
   saveGradingState,
   type GradingState,
@@ -18,6 +23,13 @@ export interface StudentRepositoryUpdateWorkspace {
   revalidate?(): Promise<void>;
   resolveHead(): Promise<string>;
   readRevisionFile(revision: string, file: string): Promise<string | null>;
+  listTree(revision: string): Promise<
+    readonly {
+      readonly path: string;
+      readonly objectId: string;
+      readonly mode: string;
+    }[]
+  >;
   pullUpstream(
     request: PullUpstreamRequest & { readonly expectedHead: string }
   ): Promise<PullUpstreamResult>;
@@ -37,6 +49,20 @@ export interface StudentRepositoryUpdateResult {
 }
 
 type Comment = GradingState["appliedComments"][number];
+
+const submissionContentChanged = async (
+  request: GradingStatePathRequest,
+  previousSha: string,
+  newSha: string,
+  workspace: StudentRepositoryUpdateWorkspace
+): Promise<boolean> => {
+  const generatedPaths = generatedSubmissionPaths(request);
+  const [before, after] = await Promise.all([
+    readStudentSubmissionTree(workspace, previousSha, generatedPaths),
+    readStudentSubmissionTree(workspace, newSha, generatedPaths)
+  ]);
+  return submissionTreesDiffer(before, after);
+};
 
 // Exact, unique line sequences are intentionally conservative. Renames, edited text,
 // and repeated snippets need instructor review rather than a guessed source link.
@@ -87,8 +113,9 @@ const expectedRepositoryRemote = (request: GradingStatePathRequest): string | nu
   );
   if (
     manifest.status !== "loaded" ||
-    manifest.manifest.assignment.termCode !== request.termCode ||
-    manifest.manifest.assignment.assignmentSlug !== request.assignmentSlug
+    (manifest.manifest.schemaVersion === 1 &&
+      (manifest.manifest.assignment.termCode !== request.termCode ||
+        manifest.manifest.assignment.assignmentSlug !== request.assignmentSlug))
   )
     return null;
   const mapping = findStudentRepositoryMapping(
@@ -100,6 +127,16 @@ const expectedRepositoryRemote = (request: GradingStatePathRequest): string | nu
     cwd: request.courseRoot,
     assignmentFile: `terms/${request.termCode}/assignments/${request.assignmentSlug}/assignment.yml`
   });
+  // V2 has no embedded assignment identity. Its authority is the requested
+  // assignment's manifest path plus validated course/term/assignment metadata,
+  // never the loader's empty compatibility fields or a manifest-provided URL.
+  if (
+    manifest.manifest.schemaVersion === 2 &&
+    (config.status !== "success" ||
+      config.config.summary.termCode !== request.termCode ||
+      config.config.summary.assignmentSlug !== request.assignmentSlug)
+  )
+    return null;
   const owner =
     manifest.manifest.schemaVersion === 1
       ? manifest.manifest.repositories.find((record) => record.studentId === request.studentId)
@@ -169,6 +206,12 @@ export const updateGradingStudentRepository = async (
       return { status: newSha === head ? "unchanged" : "success" };
     }
     if (newSha === previous.submissionCommitSha) return { status: "unchanged" };
+    const contentChanged = await submissionContentChanged(
+      request,
+      previous.submissionCommitSha,
+      newSha,
+      workspace
+    );
     const appliedComments = await Promise.all(
       previous.appliedComments.map((comment) =>
         relocate(comment, previous.submissionCommitSha, newSha, workspace)
@@ -191,8 +234,13 @@ export const updateGradingStudentRepository = async (
     const saved = saveGradingState(request, {
       ...previous,
       submissionCommitSha: newSha,
+      status:
+        contentChanged && (previous.status === "complete" || previous.status === "published")
+          ? "in_progress"
+          : previous.status,
       updatedSinceGrading:
-        previous.updatedSinceGrading === true || previous.status !== "not_started",
+        previous.updatedSinceGrading === true ||
+        (contentChanged && previous.status !== "not_started"),
       repositoryUpdates: [
         ...(previous.repositoryUpdates ?? []),
         { previousSha: previous.submissionCommitSha, newSha, updatedAt: new Date().toISOString() }

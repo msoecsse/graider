@@ -1,6 +1,5 @@
 import type { EffectiveAssignmentGrading } from "../config/effective-grading.js";
 import type { GitHubClient } from "../github/github-client.js";
-import { GitHubClientError } from "../github/github-errors.js";
 import type { GitHubWorkflowRunForCommit } from "../github/github-models.js";
 import {
   parseGradingEvidenceArtifact,
@@ -24,6 +23,7 @@ export type GradingEvidenceRetrievalErrorCode =
   | "submission_sha_invalid"
   | "workflow_run_not_found"
   | "actions_forbidden"
+  | "evidence_rate_limited"
   | "evidence_artifact_missing"
   | "evidence_artifact_expired"
   | "evidence_artifact_ambiguous"
@@ -45,6 +45,7 @@ export interface GradingEvidenceRetrievalInput {
   };
   readonly grading: EffectiveAssignmentGrading | undefined;
   readonly submissionCommitSha: string;
+  readonly equivalentSubmissionCommitShas?: readonly string[];
 }
 
 export interface TrustedGradingEvidence {
@@ -70,13 +71,25 @@ const failure = (
   message: string
 ): GradingEvidenceRetrievalResult => ({ status: "failure", error: { code, message } });
 
-const githubFailure = (error: unknown, fallbackCode: GradingEvidenceRetrievalErrorCode) =>
-  error instanceof GitHubClientError && error.kind === "permission_denied"
-    ? failure(
-        "actions_forbidden",
-        "GitHub denied access to grading workflow runs or artifacts. Check Actions read permission."
-      )
-    : failure(fallbackCode, "GitHub grading evidence could not be retrieved safely.");
+const githubFailure = (error: unknown, fallbackCode: GradingEvidenceRetrievalErrorCode) => {
+  // Electron bundles the client and this backend independently, so constructor
+  // identity does not survive the boundary. Only classify safe recovery codes.
+  const kind =
+    error instanceof Error && error.name === "GitHubClientError" && "kind" in error
+      ? error.kind
+      : undefined;
+  if (kind === "permission_denied")
+    return failure(
+      "actions_forbidden",
+      "GitHub denied access to grading workflow runs or artifacts. Check Actions read permission."
+    );
+  if (kind === "rate_limited")
+    return failure(
+      "evidence_rate_limited",
+      "GitHub temporarily limited grading evidence requests."
+    );
+  return failure(fallbackCode, "GitHub grading evidence could not be retrieved safely.");
+};
 
 const completionTime = (run: GitHubWorkflowRunForCommit): number => {
   const parsed = Date.parse(run.completedAt ?? run.updatedAt);
@@ -100,7 +113,10 @@ export const retrieveGradingEvidence = async (
   if (input.grading === undefined || !isManualManagedGradingWorkflowEligible(input.grading)) {
     return { status: "not_applicable", reason: "managed_preset_not_enabled" };
   }
-  if (!COMMIT_SHA_PATTERN.test(input.submissionCommitSha)) {
+  if (
+    !COMMIT_SHA_PATTERN.test(input.submissionCommitSha) ||
+    input.equivalentSubmissionCommitShas?.some((sha) => !COMMIT_SHA_PATTERN.test(sha))
+  ) {
     return failure("submission_sha_invalid", "The canonical submission commit SHA is invalid.");
   }
   const workflowPath = input.grading.workflow ?? GRAIDER_MANAGED_WORKFLOW_PATH;
@@ -191,7 +207,8 @@ export const retrieveGradingEvidence = async (
     }
     const evidenceMetadata = parsed.value.metadata;
     if (
-      evidenceMetadata.submissionCommitSha !== input.submissionCommitSha ||
+      (evidenceMetadata.submissionCommitSha !== input.submissionCommitSha &&
+        !input.equivalentSubmissionCommitShas?.includes(evidenceMetadata.submissionCommitSha)) ||
       evidenceMetadata.workflowRunId !== String(candidate.id) ||
       evidenceMetadata.workflowRunAttempt !== String(candidate.runAttempt)
     )

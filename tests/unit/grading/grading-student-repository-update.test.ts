@@ -188,7 +188,7 @@ describeGitIntegration("authorized student repository update", () => {
       expect(updated.repositoryUpdates?.[0]?.newSha).toBe(updated.submissionCommitSha);
       expect(updated.repositoryUpdates?.[0]?.updatedAt).toEqual(expect.any(String));
       expect(updated.updatedSinceGrading).toBe(true);
-      expect(updated.status).toBe("published");
+      expect(updated.status).toBe("in_progress");
       expect(updated.manualAdjustments).toEqual(f.state.manualAdjustments);
       expect(updated.viewState).toEqual(f.state.viewState);
       expect(calculateGrade(updated, rubric)).toEqual(calculateGrade(f.state, rubric));
@@ -317,7 +317,7 @@ describeGitIntegration("authorized student repository update", () => {
       expect(fs.readFileSync(path.join(f.local, "Main.java"), "utf8")).toBe(text);
       expect(await f.update()).toEqual({ status: "unchanged" });
       expect(f.read()).toEqual(saved);
-      expect(saved.status).toBe("published");
+      expect(saved.status).toBe("in_progress");
       expect(saved.manualAdjustments).toEqual(f.state.manualAdjustments);
       expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe("Original report");
     }
@@ -612,7 +612,7 @@ it(
 );
 
 it.each(["in_progress", "complete", "published"] as const)(
-  "preserves %s grading and zero-score override",
+  "reopens %s grading while preserving the zero-score override",
   { timeout: 30_000 },
   async (status) => {
     const f = await fixture();
@@ -621,13 +621,173 @@ it.each(["in_progress", "complete", "published"] as const)(
     f.advance();
     expect(await f.update()).toEqual({ status: "success" });
     expect(f.read()).toMatchObject({
-      status,
+      status: "in_progress",
       finalScoreOverride: 0,
       updatedSinceGrading: true,
       manualAdjustments: previous.manualAdjustments,
       viewState: previous.viewState
     });
     expect(calculateGrade(f.read(), rubric)).toEqual(calculateGrade(previous, rubric));
+  }
+);
+
+it.each(["complete", "published"] as const)(
+  "reopens %s only for committed submission content and clears the marker on re-completion",
+  { timeout: 30_000 },
+  async (status) => {
+    const f = await fixture();
+    const previous = { ...f.state, status };
+    expect(saveGradingState(f.request, previous).status).toBe("success");
+    // These publication paths and Graider namespaces are infrastructure, not submission content.
+    const reportFile = "grading/report.html";
+    const generatedFiles = [
+      reportFile,
+      "grading/report.md",
+      "grading/results.json",
+      ".graider/metadata.json",
+      ".github/workflows/grade.yml"
+    ];
+    for (const file of generatedFiles) {
+      const target = path.join(f.student, file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, "Graider output\n");
+    }
+    git(f.student, "add", ".");
+    git(f.student, "commit", "-m", "Generated files by the same author as the submission");
+    git(f.student, "push");
+    // Dirty source must not affect committed-tree classification.
+    fs.writeFileSync(path.join(f.local, "Main.java"), "Uncommitted instructor source\n");
+    expect(await f.update()).toEqual({ status: "success" });
+    const generatedOnly = f.read();
+    expect(generatedOnly.status).toBe(status);
+    expect(generatedOnly.updatedSinceGrading).not.toBe(true);
+    expect(generatedOnly.appliedComments).toEqual(previous.appliedComments);
+    expect(await f.update()).toEqual({ status: "unchanged" });
+    expect(f.read()).toEqual(generatedOnly);
+
+    // A content addition remains a resubmission even when mixed with generated output.
+    fs.writeFileSync(path.join(f.student, "answer.txt"), "Student correction\n");
+    fs.writeFileSync(path.join(f.student, reportFile), "Updated feedback\n");
+    git(f.student, "add", ".");
+    git(f.student, "commit", "-m", "Mixed content and generated feedback");
+    git(f.student, "push");
+    expect(await f.update()).toEqual({ status: "success" });
+    const reopened = f.read();
+    expect(reopened.status).toBe("in_progress");
+    expect(reopened.updatedSinceGrading).toBe(true);
+    expect(reopened.appliedComments).toEqual(previous.appliedComments);
+    expect(reopened.manualAdjustments).toEqual(previous.manualAdjustments);
+    expect(reopened.repositoryUpdates).toHaveLength(2);
+    expect(reopened.repositoryUpdates?.[0]).toEqual(generatedOnly.repositoryUpdates?.[0]);
+    expect(fs.readFileSync(path.join(f.local, reportFile), "utf8")).toBe("Updated feedback\n");
+    expect(await f.workspace.readRevisionFile(generatedOnly.submissionCommitSha, reportFile)).toBe(
+      "Graider output\n"
+    );
+    const { markGradingStudentCompleteContext } =
+      await import("../../../src/grading/grading-student-complete-context.js");
+    expect(
+      markGradingStudentCompleteContext({
+        courseFolderPath: f.root,
+        ...f.request,
+        currentSubmissionCommitSha: reopened.submissionCommitSha
+      }).status
+    ).toBe("success");
+    expect(f.read()).toEqual({ ...reopened, status: "complete", updatedSinceGrading: false });
+  }
+);
+
+it.each([
+  "empty commit",
+  "delete source",
+  "rename source to feedback",
+  "binary content",
+  "file mode"
+])("compares committed trees for %s", { timeout: 30_000 }, async (change) => {
+  const f = await fixture();
+  if (change === "delete source") git(f.student, "rm", "Main.java");
+  if (change === "rename source to feedback") {
+    fs.mkdirSync(path.join(f.student, "grading"));
+    git(f.student, "mv", "Main.java", "grading/report.html");
+  }
+  if (change === "binary content") {
+    fs.writeFileSync(path.join(f.student, "answer.bin"), Buffer.from([0, 1, 2, 3]));
+    git(f.student, "add", "answer.bin");
+  }
+  if (change === "file mode") git(f.student, "update-index", "--chmod=+x", "Main.java");
+  git(f.student, "commit", "--allow-empty", "-m", change);
+  git(f.student, "push");
+  expect(await f.update()).toEqual({ status: "success" });
+  expect(f.read().status).toBe(change === "empty commit" ? "published" : "in_progress");
+  expect(f.read().updatedSinceGrading).toBe(change !== "empty commit");
+});
+
+it(
+  "excludes the configured Graider report destination but treats unknown feedback paths as content",
+  { timeout: 30_000 },
+  async () => {
+    const f = await fixture();
+    fs.cpSync(path.resolve("tests/fixtures/roster/valid-course"), f.root, { recursive: true });
+    const assignmentDirectory = path.join(f.root, "terms/27s1/assignments/lab1");
+    fs.mkdirSync(assignmentDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(assignmentDirectory, "assignment.yml"),
+      fs
+        .readFileSync(path.join(f.root, "terms/27s1/assignments/lab04/assignment.yml"), "utf8")
+        .replaceAll("lab04", "lab1")
+    );
+    fs.appendFileSync(
+      path.join(f.root, "course.yml"),
+      "  student_publish:\n    enabled: true\n    mode: graider-generated\n    destination_file: feedback.txt\n"
+    );
+    fs.writeFileSync(path.join(f.student, "feedback.txt"), "Configured feedback output\n");
+    git(f.student, "commit", "-am", "Report update");
+    git(f.student, "push");
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(f.read().status).toBe("published");
+    expect(f.read().updatedSinceGrading).toBe(false);
+    // A name resembling a report is not sufficient evidence of Graider ownership.
+    fs.writeFileSync(path.join(f.student, "student-feedback.txt"), "Student explanation\n");
+    git(f.student, "add", ".");
+    git(f.student, "commit", "-m", "Student feedback");
+    git(f.student, "push");
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(f.read().status).toBe("in_progress");
+  }
+);
+
+it.each(["tree read failure", "concurrent grading", "authorization changed"])(
+  "preserves saved grading and releases the lock after %s during content comparison",
+  { timeout: 30_000 },
+  async (mode) => {
+    const f = await fixture();
+    f.advance();
+    const listTree = f.workspace.listTree.bind(f.workspace);
+    const edited = { ...f.state, finalScoreOverride: 0 as const };
+    const compare = vi.spyOn(f.workspace, "listTree").mockImplementation(async (sha) => {
+      if (mode === "tree read failure") throw new Error("Cannot read committed tree");
+      if (mode === "concurrent grading")
+        expect(saveGradingState(f.request, edited).status).toBe("success");
+      return listTree(sha);
+    });
+    const revalidate = vi.fn(() => {
+      if (mode === "authorization changed" && compare.mock.calls.length > 0)
+        throw new Error("Authorization changed during comparison");
+      return Promise.resolve();
+    });
+    expect(
+      (
+        await updateGradingStudentRepository(
+          f.request,
+          Object.assign(f.workspace, { revalidate }),
+          { expectedRepositoryRemote: () => f.remote }
+        )
+      ).status
+    ).toBe("update_state_record_failed");
+    expect(f.read()).toEqual(mode === "concurrent grading" ? edited : f.state);
+    compare.mockRestore();
+    revalidate.mockResolvedValue(undefined);
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(f.read().status).toBe("in_progress");
   }
 );
 

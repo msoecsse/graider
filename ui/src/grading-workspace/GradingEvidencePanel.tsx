@@ -45,21 +45,31 @@ export const evidenceResultToLoadState = (
       Record<string, { readonly message: string; readonly tone: "neutral" | "warning" }>
     > = {
       workflow_run_not_found: {
-        message: "No automated results are available yet.",
+        message: "No automated results are available yet. Run automated checks, then reload.",
         tone: "neutral"
       },
       evidence_artifact_missing: {
         message:
-          "Automated results were produced, but the grading evidence artifact is unavailable.",
+          "Automated results were produced, but the grading evidence artifact is unavailable. Run automated checks again, then reload.",
         tone: "warning"
       },
       evidence_artifact_expired: {
-        message: "The grading evidence artifact has expired.",
+        message:
+          "The grading evidence artifact has expired. Run automated checks again, then reload.",
         tone: "warning"
       },
       actions_forbidden: {
         message:
           "Graider cannot read grading evidence from GitHub Actions. Check the configured GitHub token's Actions read permission.",
+        tone: "warning"
+      },
+      evidence_rate_limited: {
+        message: "GitHub temporarily limited automated-check requests. Wait before reloading.",
+        tone: "warning"
+      },
+      evidence_archive_member_invalid: {
+        message:
+          "The artifact does not contain supported automated-check evidence. Run automated checks with the current Graider workflow, then reload.",
         tone: "warning"
       },
       evidence_identity_mismatch: {
@@ -130,7 +140,8 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
   return (
     <>
       <p className="grading-evidence__student">Automated checks for {result.studentId}</p>
-      {evidence.metadata.submissionCommitSha === result.submissionCommitSha ? null : (
+      {evidence.metadata.submissionCommitSha === result.submissionCommitSha ||
+      result.submissionContentMatches === true ? null : (
         <p role="status">
           Results from previous revision {evidence.metadata.submissionCommitSha.slice(0, 8)}. Source
           has since been updated; rerun automated checks manually.

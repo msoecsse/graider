@@ -14,6 +14,18 @@ describe("mark grading student complete request validation", () => {
     expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: true })).toBe(true);
     expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: "0" })).toBe(false);
     expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: 0 })).toBe(false);
+    expect(isMarkGradingStudentCompleteRequest({ ...identity, undoZeroAndComplete: true })).toBe(
+      true
+    );
+    for (const undoZeroAndComplete of ["true", 0, null, {}])
+      expect(isMarkGradingStudentCompleteRequest({ ...identity, undoZeroAndComplete })).toBe(false);
+    expect(
+      isMarkGradingStudentCompleteRequest({
+        ...identity,
+        setScoreToZero: true,
+        undoZeroAndComplete: true
+      })
+    ).toBe(false);
     for (const extra of [
       { status: "published" },
       { submissionCommitSha: "a".repeat(40) },

@@ -12,6 +12,9 @@ import {
   type AuthenticatedGitWorkspaceContext
 } from "./gitWorkspaceReader.js";
 import type { RepositoryUpdateBackend } from "./gradingStudentRepositoryUpdateService.js";
+import { createAssignmentRepositoryUpdateService } from "./assignmentRepositoryUpdateService.js";
+import { createGradingStudentRepositoryUpdateService } from "./gradingStudentRepositoryUpdateService.js";
+import { getLocalRepositoryLocatorPath, recordLocalRepository } from "./localRepositoryLocator.js";
 const load = createRequire(path.join(process.cwd(), "package.json"));
 const { updateGradingStudentRepository } = load(
   "./dist-electron/gradingStudentRepositoryUpdateBackend.cjs"
@@ -21,6 +24,7 @@ type GradingState = {
   studentId: string;
   submissionCommitSha: string;
   status: string;
+  updatedSinceGrading?: boolean;
   appliedComments: readonly {
     readonly sourceAnchor?: { readonly status: string };
     readonly [key: string]: unknown;
@@ -124,6 +128,228 @@ const fixture = async () => {
   };
   return { root, request, state, workspace, read, advance, student, local, sha, remote };
 };
+
+// Keep identity resolution real; substitute only the network transport after the
+// production Git backend has checked the recorded GitHub origin and expected SHA.
+const mappedUpdate = (f: Awaited<ReturnType<typeof fixture>>, memberIds: readonly string[]) => {
+  fs.cpSync(path.resolve("../tests/fixtures/roster/valid-course"), f.root, { recursive: true });
+  const assignmentDirectory = path.join(f.root, "terms/27s1/assignments/lab1");
+  fs.mkdirSync(assignmentDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(assignmentDirectory, "assignment.yml"),
+    fs
+      .readFileSync(path.join(f.root, "terms/27s1/assignments/lab04/assignment.yml"), "utf8")
+      .replaceAll("lab04", "lab1") + "\nrepository_mode: group\n"
+  );
+  const repositoryName = "27s1-se2030-lab1-team";
+  const remote = `https://github.com/example-org/${repositoryName}.git`;
+  const manifestDirectory = path.join(f.root, "terms/27s1/manifests/lab1");
+  fs.mkdirSync(manifestDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(manifestDirectory, "manifest.yml"),
+    JSON.stringify({
+      schema_version: 2,
+      repository_mode: "group",
+      targets: [
+        {
+          target_id: "team",
+          mode: "group",
+          group_id: "team",
+          repository_name: repositoryName,
+          section_ids: ["001"],
+          student_ids: memberIds,
+          github_usernames: memberIds,
+          diagnostics: []
+        }
+      ],
+      student_mappings: memberIds.map((studentId) => ({
+        student_id: studentId,
+        github_username: studentId,
+        target_id: "team",
+        repository_name: repositoryName
+      })),
+      diagnostics: []
+    })
+  );
+  git(f.local, "remote", "set-url", "origin", remote);
+  for (const studentId of memberIds)
+    expect(
+      recordLocalRepository(getLocalRepositoryLocatorPath(f.root), {
+        courseFolderId: "group-course",
+        termCode: "27s1",
+        assignmentSlug: "lab1",
+        studentId,
+        localPath: f.local
+      })
+    ).toBe(true);
+  type Command = { cwd: string; args: readonly string[]; env?: NodeJS.ProcessEnv };
+  type Runners = {
+    runGit: (command: Command) => Promise<string>;
+    runGitBinary: (command: Command) => Promise<{ stdout: Uint8Array; stderr: Uint8Array }>;
+  };
+  const { createAuthenticatedDugiteGitWorkspace } = load(
+    "./dist-electron/dugiteGitWorkspaceBackend.cjs"
+  ) as {
+    createAuthenticatedDugiteGitWorkspace(
+      token: string,
+      runners: Runners
+    ): AuthenticatedGitWorkspaceContext;
+  };
+  let fetches = 0;
+  const execute = async (command: Command) => {
+    if (command.args.includes("fetch")) fetches += 1;
+    const args = command.args.map((arg) => (arg === remote ? f.remote : arg));
+    // No unexpected destination may escape this isolated fixture.
+    if (args.some((arg) => arg.includes("github.com"))) throw new Error("Unexpected remote");
+    const result = await executeDugite(args, command.cwd, { encoding: "buffer", env: command.env });
+    if (result.exitCode !== 0) throw new Error("Isolated Git command failed");
+    return { stdout: new Uint8Array(result.stdout), stderr: new Uint8Array(result.stderr) };
+  };
+  const authenticated = createAuthenticatedDugiteGitWorkspace("isolated-test-token", {
+    runGit: async (command) => Buffer.from((await execute(command)).stdout).toString("utf8"),
+    runGitBinary: execute
+  });
+  const resolveFacultyScope = () => ({
+    status: "success" as const,
+    sections: ["001"],
+    students: memberIds.map((studentId) => ({
+      studentId,
+      githubUsername: studentId,
+      section: "001"
+    })),
+    errors: []
+  });
+  return {
+    resolveFacultyScope,
+    fetches: () => fetches,
+    updateStudent: createGradingStudentRepositoryUpdateService({
+      resolveFacultyScope,
+      authenticate: async () => authenticated,
+      loadBackend: () => ({ updateGradingStudentRepository })
+    })
+  };
+};
+
+it.each(["student source", "managed feedback"])(
+  "assignment batch reconciles both members of one clone after %s changes",
+  { timeout: 30_000 },
+  async (change) => {
+    const f = await fixture();
+    const memberIds = ["ada", "grace"];
+    const graceFile = path.join(path.dirname(stateFile(f.request)), "grace.json");
+    fs.writeFileSync(
+      graceFile,
+      JSON.stringify({ ...f.state, studentId: "grace", status: "complete", finalScoreOverride: 0 })
+    );
+    fs.writeFileSync(path.join(f.local, "instructor-notes.txt"), "Keep untracked notes");
+    if (change === "student source") f.advance();
+    else {
+      fs.mkdirSync(path.join(f.student, "grading"));
+      fs.writeFileSync(path.join(f.student, "grading/report.html"), "Updated Graider feedback");
+      git(f.student, "add", "grading/report.html");
+      git(f.student, "commit", "-m", "Graider feedback");
+      git(f.student, "push");
+    }
+    const mapped = mappedUpdate(f, memberIds);
+    const update = createAssignmentRepositoryUpdateService(mapped);
+    const request = {
+      courseFolderId: "group-course",
+      courseFolderPath: f.root,
+      termCode: "27s1",
+      assignmentSlug: "lab1",
+      userDataPath: f.root
+    };
+    expect(await update(request)).toMatchObject({ counts: { total: 2, updated: 2, failure: 0 } });
+    const grace = JSON.parse(fs.readFileSync(graceFile, "utf8")) as GradingState & {
+      finalScoreOverride: number;
+    };
+    for (const member of [f.read(), grace]) {
+      expect(member.submissionCommitSha).toBe(git(f.student, "rev-parse", "HEAD"));
+      expect(member.manualAdjustments).toEqual(f.state.manualAdjustments);
+      expect(member.appliedComments.map((comment) => comment.text)).toEqual(
+        f.state.appliedComments.map((comment) => comment.text)
+      );
+    }
+    expect(f.read().status).toBe(change === "student source" ? "in_progress" : "published");
+    expect(grace.status).toBe(change === "student source" ? "in_progress" : "complete");
+    expect(f.read().updatedSinceGrading).toBe(change === "student source");
+    expect(grace.updatedSinceGrading).toBe(change === "student source");
+    expect(grace.finalScoreOverride).toBe(0);
+    expect(fs.readFileSync(path.join(f.local, "instructor-notes.txt"), "utf8")).toBe(
+      "Keep untracked notes"
+    );
+    expect(await update(request)).toMatchObject({ counts: { total: 2, unchanged: 2, failure: 0 } });
+  }
+);
+
+it.each([
+  "other assignment",
+  "wrong term metadata",
+  "wrong assignment metadata",
+  "missing locator"
+])(
+  "v2 production pull refuses %s without changing HEAD or grading",
+  { timeout: 30_000 },
+  async (mode) => {
+    const f = await fixture();
+    const mapped = mappedUpdate(f, ["ada"]);
+    f.advance();
+    const request = {
+      courseFolderId: "group-course",
+      courseFolderPath: f.root,
+      userDataPath: f.root,
+      termCode: "27s1",
+      assignmentSlug: "lab1",
+      studentId: "ada"
+    };
+    if (mode === "wrong term metadata") {
+      const file = path.join(f.root, "terms/27s1/term.yml");
+      fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("code: 27s1", "code: 28s1"));
+    }
+    if (mode === "wrong assignment metadata") {
+      const file = path.join(f.root, "terms/27s1/assignments/lab1/assignment.yml");
+      fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("slug: lab1", "slug: lab2"));
+    }
+    if (mode === "other assignment") {
+      // Both assignments are valid and accessible; a locator pointing at the
+      // first assignment's clone must not authorize the second assignment's pull.
+      request.assignmentSlug = "lab2";
+      for (const category of ["assignments", "manifests"]) {
+        const source = path.join(f.root, "terms/27s1", category, "lab1");
+        const destination = path.join(f.root, "terms/27s1", category, "lab2");
+        fs.cpSync(source, destination, { recursive: true });
+        const file = path.join(
+          destination,
+          category === "assignments" ? "assignment.yml" : "manifest.yml"
+        );
+        fs.writeFileSync(file, fs.readFileSync(file, "utf8").replaceAll("lab1", "lab2"));
+      }
+      expect(
+        recordLocalRepository(getLocalRepositoryLocatorPath(f.root), {
+          ...request,
+          localPath: f.local
+        })
+      ).toBe(true);
+      const otherState = path.join(f.root, ".graider/grading/27s1/lab2/state/ada.json");
+      fs.mkdirSync(path.dirname(otherState), { recursive: true });
+      fs.writeFileSync(otherState, JSON.stringify(f.state));
+    }
+    if (mode === "missing locator") request.assignmentSlug = "lab2";
+    expect((await mapped.updateStudent(request)).status).toBe(
+      mode === "missing locator" ? "repository_not_recorded" : "submission_changed"
+    );
+    expect(mapped.fetches()).toBe(0);
+    expect(await f.workspace.resolveHead()).toBe(f.sha);
+    expect(f.read()).toEqual(f.state);
+    if (mode === "other assignment")
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(f.root, ".graider/grading/27s1/lab2/state/ada.json"), "utf8")
+        )
+      ).toEqual(f.state);
+    expect(fs.existsSync(path.join(f.local, ".git/FETCH_HEAD"))).toBe(false);
+  }
+);
 
 it.each(["sign-out", "account-switch", "success", "scp", "ssh"])(
   "OAuth production service with isolated remote: %s",
@@ -272,7 +498,7 @@ it.each(["sign-out", "account-switch", "success", "scp", "ssh"])(
     if (["success", "scp", "ssh"].includes(mode)) {
       expect(result.status).toBe("success");
       expect(await f.workspace.resolveHead()).toBe(git(f.student, "rev-parse", "HEAD"));
-      expect(f.read().status).toBe("published");
+      expect(f.read().status).toBe("in_progress");
       expect(f.read().manualAdjustments).toEqual(f.state.manualAdjustments);
       expect(
         await f.workspace.readRevisionFile?.(f.read().submissionCommitSha, "Main.java")

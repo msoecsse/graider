@@ -11,7 +11,10 @@ import { IPC_CHANNELS } from "./ipc";
 import { getAssignmentDetail } from "./assignmentDetailRunner";
 import { createGradingWorkspaceService } from "./gradingWorkspaceService";
 import { createGradingStudentSourceService } from "./gradingStudentSourceService";
-import { createGradingStudentSnapshotService } from "./gradingStudentSnapshotService";
+import {
+  createGradingStudentSnapshotService,
+  type GradingStudentSnapshotBackend
+} from "./gradingStudentSnapshotService";
 import { createGradingStudentViewStateService } from "./gradingStudentViewStateService";
 import { createGradingStudentCommentService } from "./gradingStudentCommentService";
 import { createGradingStudentManualAdjustmentService } from "./gradingStudentManualAdjustmentService";
@@ -156,9 +159,16 @@ grading:
     ...common,
     loadBackend: () => backend("gradingStudentSource")
   });
+  const snapshotBackend = backend("gradingStudentSnapshot") as GradingStudentSnapshotBackend;
+  if (snapshotBackend.readGradingStudentSubmissionTime === undefined)
+    throw new Error("The production snapshot backend must provide local submission timing.");
+  const snapshotCalls = {
+    loadGradingStudentSnapshotContext: vi.fn(snapshotBackend.loadGradingStudentSnapshotContext),
+    readGradingStudentSubmissionTime: vi.fn(snapshotBackend.readGradingStudentSubmissionTime)
+  };
   const snapshot = createGradingStudentSnapshotService({
     ...common,
-    loadBackend: () => backend("gradingStudentSnapshot")
+    loadBackend: () => snapshotCalls
   });
   const view = createGradingStudentViewStateService({
     ...common,
@@ -244,6 +254,7 @@ grading:
     student,
     resolveFacultyScope,
     backend,
+    snapshotCalls,
     request,
     viewState: { scrollTop: 12, cursor: { file: "Main.java", line: 1, column: 1 } }
   };
@@ -262,6 +273,8 @@ it(
     await expect(f.call(IPC_CHANNELS.loadGradingStudentSnapshot)).resolves.toMatchObject({
       status: "success"
     });
+    expect(f.snapshotCalls.loadGradingStudentSnapshotContext).toHaveBeenCalledTimes(1);
+    expect(f.snapshotCalls.readGradingStudentSubmissionTime).toHaveBeenCalledTimes(1);
     const viewState = { scrollTop: 12, cursor: { file: "Main.java", line: 1, column: 1 } };
     await expect(
       f.call(IPC_CHANNELS.saveGradingStudentViewState, { viewState })
@@ -276,12 +289,40 @@ it(
       appliedComments: [{ id: "c1" }],
       grade: { totalScore: 97 }
     });
+    const submissionCommitSha = await fixtureGit(f.student, ["rev-parse", "HEAD"]);
+    expect(f.snapshotCalls.loadGradingStudentSnapshotContext.mock.calls).toEqual(
+      Array.from({ length: 2 }, () => [
+        {
+          courseFolderPath: f.cache,
+          termCode: f.request.termCode,
+          assignmentSlug: f.request.assignmentSlug,
+          studentId: f.request.studentId,
+          currentSubmissionCommitSha: submissionCommitSha
+        }
+      ])
+    );
+    expect(f.snapshotCalls.readGradingStudentSubmissionTime.mock.calls).toEqual(
+      Array.from({ length: 2 }, () => [
+        {
+          courseRoot: f.cache,
+          termCode: f.request.termCode,
+          assignmentSlug: f.request.assignmentSlug,
+          studentId: f.request.studentId,
+          repositoryRoot: f.student,
+          submissionCommitSha
+        }
+      ])
+    );
     expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
     for (const sample of f.samples) {
       expect(sample.phases.synchronization?.count ?? 0).toBe(0);
       expect(sample.phases.fetch?.count ?? 0).toBe(0);
       expect(sample.phases.remote_authorization?.count ?? 0).toBe(0);
-      expect(sample.phases.backend?.count).toBe(1);
+      // A snapshot projects grading state and reads informational submission timing
+      // from local Git (cached by commit); neither call observes the network.
+      const expectedBackendCalls =
+        sample.channel === IPC_CHANNELS.loadGradingStudentSnapshot ? 2 : 1;
+      expect(sample.phases.backend?.count).toBe(expectedBackendCalls);
       expect(sample.phases.cache_validation?.count).toBeGreaterThanOrEqual(2);
     }
     if (process.env.GRAIDER_GRADING_BENCHMARK === "1")

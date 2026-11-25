@@ -958,6 +958,13 @@ export const ApplyPreviewPage = ({
   );
   const commandErrorMessage = getCommandErrorMessage(loadResult);
   const applyErrorMessage = getApplyCommandErrorMessage(applyResult);
+  const accessPageError = applyResult?.accessPageError ?? null;
+  const accessPageFailurePhase =
+    accessPageError?.code === "student_repository_access_page_publication_failed"
+      ? "publication"
+      : accessPageError?.code === "student_repository_access_page_generation_failed"
+        ? "generation"
+        : "update";
   const showTokenGuidance =
     normalizedApplyResult === null &&
     preview !== null &&
@@ -1042,6 +1049,28 @@ export const ApplyPreviewPage = ({
           <p className="error-message" role="alert">
             {applyErrorMessage}
           </p>
+        )}
+
+        {accessPageError === null ? null : (
+          <section
+            className="detail-guidance"
+            role="alert"
+            aria-labelledby="access-page-warning-title"
+          >
+            <h2 id="access-page-warning-title">
+              Student repository access page {accessPageFailurePhase} failed
+            </h2>
+            <p>
+              {normalizedApplyResult?.status === "success"
+                ? "Repository Apply succeeded. Its results are preserved."
+                : "Repository Apply results are preserved. Review any repository diagnostics below."}
+            </p>
+            {accessPageError.message.trim() === "" ? null : <p>{accessPageError.message}</p>}
+            <p>
+              Refresh assignment detail to review the student repository access page and its
+              generation or publish readiness before sharing the Canvas link.
+            </p>
+          </section>
         )}
 
         {isApplying ? <p className="loading-state">Applying assignment changes...</p> : null}

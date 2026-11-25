@@ -1,6 +1,6 @@
 import { synchronizationLabel } from "../../electron/remoteCourseTypes";
 import type { RemoteCourse } from "../../electron/remoteCourseTypes";
-import type { ReactElement } from "react";
+import type { KeyboardEvent, MouseEvent, ReactElement } from "react";
 import type { CourseFolderRecord } from "../../electron/ipc";
 import { CourseTermCard } from "./CourseTermCard";
 import type { CombinedDashboardCard, RecentAssignmentSummary } from "./dashboardTypes";
@@ -30,6 +30,36 @@ interface AssignmentRow {
   readonly card: CombinedDashboardCard;
   readonly assignment: RecentAssignmentSummary;
 }
+
+// Descendant controls own their clicks and keys, including custom menus and
+// editable fields. The row itself is the sole tab stop for assignment navigation.
+const ROW_CONTROL_SELECTOR =
+  "a, button, input, select, textarea, label, summary, [role], [tabindex], [contenteditable]:not([contenteditable='false'])";
+const PRIMARY_MOUSE_BUTTON = 0;
+
+const canActivateAssignmentRow = (
+  event: MouseEvent<HTMLTableRowElement> | KeyboardEvent<HTMLTableRowElement>
+): boolean => {
+  const { currentTarget: row, target } = event;
+  const control = target instanceof Element ? target.closest(ROW_CONTROL_SELECTOR) : null;
+  const selection = row.ownerDocument.getSelection();
+  const hasRowSelection =
+    selection !== null &&
+    !selection.isCollapsed &&
+    Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index)).some(
+      (range) => range.intersectsNode(row)
+    );
+
+  return (
+    !event.defaultPrevented &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    (control === null || control === row) &&
+    !hasRowSelection
+  );
+};
 
 const getCourseLabel = (card: CombinedDashboardCard): string => {
   const course = card.card.courseSlug ?? card.card.courseTitle ?? "Course";
@@ -263,6 +293,9 @@ export const CourseCardGrid = ({
                 </div>
               ) : (
                 <div className="assignment-table__scroll">
+                  <p className="visually-hidden" id={`assignment-row-help-${group.sourceFolderId}`}>
+                    Press Enter or Space to open assignment.
+                  </p>
                   <table className="assignment-table">
                     <thead>
                       <tr>
@@ -282,6 +315,41 @@ export const CourseCardGrid = ({
                       {rows.map(({ card, assignment }) => (
                         <tr
                           key={`${card.id}:${assignment.assignmentFile ?? assignment.slug ?? getAssignmentTitle(assignment)}`}
+                          className={
+                            assignment.assignmentFile === null ? undefined : "assignment-table__row"
+                          }
+                          tabIndex={assignment.assignmentFile === null ? undefined : 0}
+                          aria-label={
+                            assignment.assignmentFile === null
+                              ? undefined
+                              : `Open ${getAssignmentTitle(assignment)}`
+                          }
+                          aria-describedby={
+                            assignment.assignmentFile === null
+                              ? undefined
+                              : `assignment-row-help-${group.sourceFolderId}`
+                          }
+                          onClick={(event) => {
+                            if (
+                              assignment.assignmentFile !== null &&
+                              event.button === PRIMARY_MOUSE_BUTTON &&
+                              canActivateAssignmentRow(event)
+                            ) {
+                              onOpenAssignment(card, assignment);
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              assignment.assignmentFile !== null &&
+                              event.target === event.currentTarget &&
+                              !event.repeat &&
+                              (event.key === "Enter" || event.key === " ") &&
+                              canActivateAssignmentRow(event)
+                            ) {
+                              event.preventDefault();
+                              onOpenAssignment(card, assignment);
+                            }
+                          }}
                         >
                           <td>{getAssignmentTitle(assignment)}</td>
                           <td>{assignment.slug ?? "-"}</td>
@@ -305,6 +373,7 @@ export const CourseCardGrid = ({
                               className="secondary-action assignment-table__open"
                               type="button"
                               disabled={assignment.assignmentFile === null}
+                              tabIndex={-1}
                               aria-label={`Open ${getAssignmentTitle(assignment)}`}
                               onClick={() => {
                                 onOpenAssignment(card, assignment);

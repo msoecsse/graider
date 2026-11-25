@@ -35,6 +35,8 @@ import { GradingPanel } from "./GradingPanel";
 import { GroupRepositoryModePanel } from "./GroupRepositoryModePanel";
 import { ReadinessPanel } from "./ReadinessPanel";
 import { RepositoryDownloadResultsPanel } from "./RepositoryDownloadResultsPanel";
+import { RepositoryPullResultsPanel } from "./RepositoryPullResultsPanel";
+import { useAssignmentRepositoryPull } from "./useAssignmentRepositoryPull";
 import { RosterPanel } from "./RosterPanel";
 import {
   StudentRepositoryAccessPagePanel,
@@ -458,6 +460,11 @@ export const AssignmentDetailPage = ({
   const templateSyncExecutionRef = useRef(false);
   const templateSyncProgressActiveRef = useRef(false);
   const detailLoadGenerationRef = useRef(0);
+  const gradeStatusLoadGenerationRef = useRef(0);
+  const gradeStatusCacheRef = useRef(new Map<string, GradeStatusLoadResult>());
+  const gradingLifecycleLoadGenerationRef = useRef(0);
+  const accessPageLoadGenerationRef = useRef(0);
+  const accessPagePublishStatusLoadGenerationRef = useRef(0);
   const templateSyncPreparationGenerationRef = useRef(0);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
@@ -587,38 +594,57 @@ export const AssignmentDetailPage = ({
   };
 
   const loadGradeStatusSummary = async (): Promise<void> => {
+    const generation = gradeStatusLoadGenerationRef.current + 1;
+    gradeStatusLoadGenerationRef.current = generation;
     setIsLoadingGradeStatus(true);
 
     try {
-      setGradeStatusLoadResult(
-        await window.graiderUI.getAssignmentGradeStatus({
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          assignmentFile: selection.assignmentFile
-        })
-      );
-    } catch {
-      setGradeStatusLoadResult((currentResult) => ({
+      const result = await window.graiderUI.getAssignmentGradeStatus({
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
-        assignmentFile: selection.assignmentFile,
-        status: "failure",
-        gradeStatus: currentResult?.gradeStatus ?? null,
-        error: {
-          code: "assignment_grade_status_failed",
-          message: "Unable to load grade status summary.",
-          exitCode: null,
-          stdoutSnippet: null,
-          stderrSnippet: null
-        },
-        refreshedAt: currentResult?.refreshedAt ?? null
-      }));
+        assignmentFile: selection.assignmentFile
+      });
+      if (gradeStatusLoadGenerationRef.current === generation) {
+        const cachedResult = gradeStatusCacheRef.current.get(gradeStatusSelectionKey);
+        const displayResult = {
+          ...result,
+          gradeStatus: result.gradeStatus ?? cachedResult?.gradeStatus ?? null,
+          refreshedAt:
+            result.gradeStatus === null
+              ? (cachedResult?.refreshedAt ?? result.refreshedAt)
+              : result.refreshedAt
+        };
+        if (result.gradeStatus !== null) {
+          gradeStatusCacheRef.current.set(gradeStatusSelectionKey, displayResult);
+        }
+        setGradeStatusLoadResult(displayResult);
+      }
+    } catch {
+      if (gradeStatusLoadGenerationRef.current === generation) {
+        setGradeStatusLoadResult((currentResult) => ({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          assignmentFile: selection.assignmentFile,
+          status: "failure",
+          gradeStatus: currentResult?.gradeStatus ?? null,
+          error: {
+            code: "assignment_grade_status_failed",
+            message: "Unable to load grade status summary.",
+            exitCode: null,
+            stdoutSnippet: null,
+            stderrSnippet: null
+          },
+          refreshedAt: currentResult?.refreshedAt ?? null
+        }));
+      }
     } finally {
-      setIsLoadingGradeStatus(false);
+      if (gradeStatusLoadGenerationRef.current === generation) setIsLoadingGradeStatus(false);
     }
   };
 
   const loadGradingLifecycleSummary = async (): Promise<void> => {
+    const generation = gradingLifecycleLoadGenerationRef.current + 1;
+    gradingLifecycleLoadGenerationRef.current = generation;
     const getGradingLifecycle = window.graiderUI.getAssignmentGradingLifecycle;
     if (
       getGradingLifecycle === undefined ||
@@ -629,18 +655,23 @@ export const AssignmentDetailPage = ({
       return;
     }
     try {
-      setGradingLifecycleResult(
-        await getGradingLifecycle({
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          termCode: selection.termSlug,
-          assignmentSlug: selection.assignmentSlug
-        })
-      );
+      const result = await getGradingLifecycle({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        termCode: selection.termSlug,
+        assignmentSlug: selection.assignmentSlug
+      });
+      if (gradingLifecycleLoadGenerationRef.current === generation) {
+        setGradingLifecycleResult(result);
+      }
     } catch {
-      setGradingLifecycleResult(null);
+      if (gradingLifecycleLoadGenerationRef.current === generation) {
+        setGradingLifecycleResult(null);
+      }
     }
   };
+
+  const repositoryPull = useAssignmentRepositoryPull(selection, loadGradingLifecycleSummary);
 
   const executeTemplateSync = async (confirmed: boolean): Promise<void> => {
     if (!confirmed || templateSyncExecutionRef.current) return;
@@ -857,14 +888,15 @@ export const AssignmentDetailPage = ({
   };
 
   const loadStudentRepositoryAccessPageStatus = async (): Promise<void> => {
+    const generation = accessPageLoadGenerationRef.current + 1;
+    accessPageLoadGenerationRef.current = generation;
     if (window.graiderUI.getStudentRepositoryAccessPageStatus === undefined) return;
-    setAccessPage(
-      await window.graiderUI.getStudentRepositoryAccessPageStatus({
-        courseFolderId: selection.courseFolderId,
-        courseFolderPath: selection.courseFolderPath,
-        assignmentFile: selection.assignmentFile
-      })
-    );
+    const result = await window.graiderUI.getStudentRepositoryAccessPageStatus({
+      courseFolderId: selection.courseFolderId,
+      courseFolderPath: selection.courseFolderPath,
+      assignmentFile: selection.assignmentFile
+    });
+    if (accessPageLoadGenerationRef.current === generation) setAccessPage(result);
   };
 
   const loadAssignmentGroupConfig = async (): Promise<void> => {
@@ -905,14 +937,26 @@ export const AssignmentDetailPage = ({
   };
 
   const loadStudentRepositoryAccessPagePublishStatus = async (): Promise<void> => {
+    const generation = accessPagePublishStatusLoadGenerationRef.current + 1;
+    accessPagePublishStatusLoadGenerationRef.current = generation;
     if (window.graiderUI.getStudentRepositoryAccessPagePublishStatus === undefined) return;
-    setAccessPagePublishStatus(
-      await window.graiderUI.getStudentRepositoryAccessPagePublishStatus({
-        courseFolderId: selection.courseFolderId,
-        courseFolderPath: selection.courseFolderPath,
-        assignmentFile: selection.assignmentFile
-      })
-    );
+    const result = await window.graiderUI.getStudentRepositoryAccessPagePublishStatus({
+      courseFolderId: selection.courseFolderId,
+      courseFolderPath: selection.courseFolderPath,
+      assignmentFile: selection.assignmentFile
+    });
+    if (accessPagePublishStatusLoadGenerationRef.current === generation) {
+      setAccessPagePublishStatus(result);
+    }
+  };
+
+  const refreshAssignmentDetail = async (): Promise<void> => {
+    await Promise.allSettled([
+      loadDetail(),
+      loadGradingLifecycleSummary(),
+      loadStudentRepositoryAccessPageStatus(),
+      loadStudentRepositoryAccessPagePublishStatus()
+    ]);
   };
 
   const generateStudentRepositoryAccessPage = async (): Promise<void> => {
@@ -1032,16 +1076,31 @@ export const AssignmentDetailPage = ({
       setLoadResult(null);
       void loadDetail();
     }
-  }, [selection.assignmentFile, selection.courseFolderId]);
+    return () => {
+      detailLoadGenerationRef.current += 1;
+    };
+  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+
+  const gradeStatusSelectionKey = JSON.stringify([
+    selection.courseFolderId,
+    selection.courseFolderPath,
+    selection.assignmentFile
+  ]);
 
   useEffect(() => {
-    setGradeStatusLoadResult(null);
-    void loadGradeStatusSummary();
+    setGradeStatusLoadResult(gradeStatusCacheRef.current.get(gradeStatusSelectionKey) ?? null);
+    setIsLoadingGradeStatus(false);
+    return () => {
+      gradeStatusLoadGenerationRef.current += 1;
+    };
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
     setGradingLifecycleResult(null);
     void loadGradingLifecycleSummary();
+    return () => {
+      gradingLifecycleLoadGenerationRef.current += 1;
+    };
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
@@ -1134,6 +1193,10 @@ export const AssignmentDetailPage = ({
     setAccessPagePublishStatus(null);
     void loadStudentRepositoryAccessPageStatus();
     void loadStudentRepositoryAccessPagePublishStatus();
+    return () => {
+      accessPageLoadGenerationRef.current += 1;
+      accessPagePublishStatusLoadGenerationRef.current += 1;
+    };
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   const handleCopy = (copyKey: CopyKey, value: string): void => {
@@ -1304,9 +1367,25 @@ export const AssignmentDetailPage = ({
               {
                 id: "download-repositories",
                 label: "Download student repositories",
-                caption: "Clone all student repositories locally.",
-                disabled: isDownloadingRepositories,
+                caption: "Clone missing student repositories locally.",
+                disabled: isDownloadingRepositories || repositoryPull.isPulling,
                 onSelect: () => void downloadStudentRepositories()
+              },
+              {
+                id: "pull-student-changes",
+                label: "Pull latest student changes",
+                caption:
+                  "Pull existing local repositories for all students in your faculty scope. Missing repositories are skipped.",
+                disabled:
+                  repositoryPull.isPulling ||
+                  isDownloadingRepositories ||
+                  isExecutingTemplateSync ||
+                  window.graiderUI.pullLatestAssignmentStudentChanges === undefined ||
+                  selection.termSlug === null ||
+                  selection.assignmentSlug === null,
+                onSelect: () => {
+                  void repositoryPull.pull();
+                }
               }
             ]
           },
@@ -1416,6 +1495,7 @@ export const AssignmentDetailPage = ({
                   disabled:
                     isPreparingTemplateSync ||
                     isExecutingTemplateSync ||
+                    repositoryPull.isPulling ||
                     templateSyncAvailability?.available !== true ||
                     templateSyncAvailability.repositoryCount === 0,
                   onClick: () => {
@@ -1436,7 +1516,7 @@ export const AssignmentDetailPage = ({
                 aria-label="Refresh assignment detail"
                 disabled={isLoading}
                 onClick={() => {
-                  void loadDetail();
+                  void refreshAssignmentDetail();
                 }}
               >
                 ↻
@@ -1538,6 +1618,24 @@ export const AssignmentDetailPage = ({
       {isDownloadingRepositories ? (
         <OperationStatusBar label="Downloading student repositories" />
       ) : null}
+      {repositoryPull.isPulling ? (
+        <OperationStatusBar
+          label="Pulling latest student changes"
+          detail={
+            repositoryPull.progress === null
+              ? "Preparing student updates…"
+              : `${repositoryPull.progress.completed} of ${repositoryPull.progress.total} students processed${repositoryPull.progress.studentId === undefined ? "" : ` · ${repositoryPull.progress.studentId}`}`
+          }
+        />
+      ) : null}
+      {repositoryPull.error === null ? null : (
+        <p className="error-message" role="alert">
+          {repositoryPull.error}
+        </p>
+      )}
+      {repositoryPull.result === null ? null : (
+        <RepositoryPullResultsPanel result={repositoryPull.result} />
+      )}
       <ConfirmDialog
         isOpen={isConfirmingDelete}
         title="Delete assignment?"
@@ -1760,13 +1858,18 @@ export const AssignmentDetailPage = ({
               status={gradeStatus}
               isLoading={isLoadingGradeStatus}
               errorMessage={gradeStatusCommandErrorMessage}
+              onRefreshGradeStatus={() => {
+                void loadGradeStatusSummary();
+              }}
               onViewFullGradeStatus={() => {
                 onViewGradeStatus(selection, detail, loadResult);
               }}
               canUpdateRepositories={
                 templateSyncLifecycleEligible && groupConfig?.repositoryMode === "individual"
               }
-              isTemplateSyncPending={isPreparingTemplateSync || isExecutingTemplateSync}
+              isTemplateSyncPending={
+                isPreparingTemplateSync || isExecutingTemplateSync || repositoryPull.isPulling
+              }
               onUpdateRepository={(studentId) => {
                 void prepareSingleRepositoryTemplateSync(studentId);
               }}

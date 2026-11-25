@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GradingAppliedCommentsPanel } from "./GradingAppliedCommentsPanel";
 
@@ -37,6 +37,35 @@ const baseProps = {
 };
 
 describe("GradingAppliedCommentsPanel", () => {
+  it.each(["first", "middle", "last"])(
+    "places confirmation directly beneath the targeted %s comment, inside its list item",
+    (targetId) => {
+      const comments = ["first", "middle", "last"].map((id) => ({ ...comment, id }));
+      render(
+        <GradingAppliedCommentsPanel
+          {...baseProps}
+          appliedComments={comments}
+          deleteConfirmation={{
+            studentId: "ada",
+            commentId: targetId,
+            text: comment.text,
+            deduction: comment.deduction
+          }}
+        />
+      );
+
+      const items = screen.getAllByRole("listitem");
+      const targetItem = items[comments.findIndex(({ id }) => id === targetId)];
+      expect(targetItem).toContainElement(
+        screen.getByRole("alertdialog", { name: "Delete applied comment?" })
+      );
+      expect(targetItem?.lastElementChild).toBe(screen.getByRole("alertdialog"));
+      for (const item of items.filter((item) => item !== targetItem)) {
+        expect(within(item).queryByRole("alertdialog")).not.toBeInTheDocument();
+      }
+    }
+  );
+
   it("renders each applied comment and requests deletion on click", () => {
     const onRequestDelete = vi.fn();
     render(<GradingAppliedCommentsPanel {...baseProps} onRequestDelete={onRequestDelete} />);
@@ -46,6 +75,122 @@ describe("GradingAppliedCommentsPanel", () => {
 
     fireEvent.click(screen.getByLabelText("Delete comment: Consider extracting this helper."));
     expect(onRequestDelete).toHaveBeenCalledWith(comment);
+  });
+
+  it.each(["another student", "missing comment", "empty list"])(
+    "hides an obsolete confirmation for %s",
+    (scenario) => {
+      render(
+        <GradingAppliedCommentsPanel
+          {...baseProps}
+          appliedComments={scenario === "empty list" ? [] : [comment]}
+          deleteConfirmation={{
+            studentId: scenario === "another student" ? "grace" : "ada",
+            commentId: scenario === "missing comment" ? "missing" : comment.id,
+            text: comment.text,
+            deduction: comment.deduction
+          }}
+        />
+      );
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    }
+  );
+
+  it("keeps confirmation visible outside collapsed source context", () => {
+    const location = { file: "Main.java", startLine: 1, endLine: 1 };
+    render(
+      <GradingAppliedCommentsPanel
+        {...baseProps}
+        appliedComments={[
+          {
+            ...comment,
+            sourceLocation: location,
+            sourceAnchor: {
+              status: "stale",
+              originalCommitSha: "a".repeat(40),
+              originalLocation: location,
+              originalText: "helper();"
+            }
+          }
+        ]}
+        deleteConfirmation={{
+          studentId: "ada",
+          commentId: comment.id,
+          text: comment.text,
+          deduction: comment.deduction,
+          sourceLocation: location
+        }}
+      />
+    );
+    const dialog = screen.getByRole("alertdialog", { name: "Delete applied comment?" });
+    expect(dialog).toBeVisible();
+    expect(dialog.closest("details")).toBeNull();
+    expect(dialog).toHaveTextContent("Source: Main.java:1");
+  });
+
+  it.each(["Cancel", "Escape"])(
+    "%s cancels once and restores focus to the targeted Delete button",
+    (action) => {
+      const onCancelDelete = vi.fn();
+      const onConfirmDelete = vi.fn();
+      const confirmation = {
+        studentId: "ada",
+        commentId: comment.id,
+        text: comment.text,
+        deduction: comment.deduction
+      };
+      const { rerender } = render(<GradingAppliedCommentsPanel {...baseProps} />);
+      const trigger = screen.getByRole("button", { name: `Delete comment: ${comment.text}` });
+      trigger.focus();
+      fireEvent.click(trigger);
+      rerender(
+        <GradingAppliedCommentsPanel
+          {...baseProps}
+          deleteConfirmation={confirmation}
+          onCancelDelete={onCancelDelete}
+          onConfirmDelete={onConfirmDelete}
+        />
+      );
+      expect(trigger).toHaveFocus();
+      const dialog = screen.getByRole("alertdialog");
+      expect(trigger.closest("li")).toContainElement(dialog);
+      const cancel = within(dialog).getByRole("button", { name: "Cancel deleting comment" });
+      cancel.focus();
+      if (action === "Escape") fireEvent.keyDown(cancel, { key: "Escape" });
+      else fireEvent.click(cancel);
+      expect(onCancelDelete).toHaveBeenCalledTimes(1);
+      expect(onConfirmDelete).not.toHaveBeenCalled();
+      rerender(<GradingAppliedCommentsPanel {...baseProps} />);
+      expect(trigger).toHaveFocus();
+    }
+  );
+
+  it("disables confirmation actions while deletion is pending", () => {
+    const onCancelDelete = vi.fn();
+    const onConfirmDelete = vi.fn();
+    render(
+      <GradingAppliedCommentsPanel
+        {...baseProps}
+        gradingMutationStudentId="ada"
+        deleteConfirmation={{
+          studentId: "ada",
+          commentId: comment.id,
+          text: comment.text,
+          deduction: comment.deduction
+        }}
+        onCancelDelete={onCancelDelete}
+        onConfirmDelete={onConfirmDelete}
+      />
+    );
+    const confirm = screen.getByRole("button", { name: "Deleting comment…" });
+    const cancel = screen.getByRole("button", { name: "Cancel deleting comment" });
+    expect(confirm).toBeDisabled();
+    expect(cancel).toBeDisabled();
+    fireEvent.click(confirm);
+    fireEvent.click(cancel);
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(onConfirmDelete).not.toHaveBeenCalled();
+    expect(onCancelDelete).not.toHaveBeenCalled();
   });
 
   it("renders formatted applied-comment bodies but keeps the delete summary plain", () => {

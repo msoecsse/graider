@@ -66,6 +66,7 @@ export const LOCAL_GRADING_MUTATION_CHANNELS: readonly string[] = Object.freeze(
   IPC_CHANNELS.chooseReviewImport,
   IPC_CHANNELS.applyReviewImport,
   IPC_CHANNELS.pullLatestGradingStudentChanges,
+  IPC_CHANNELS.pullLatestAssignmentStudentChanges,
   IPC_CHANNELS.prepareGradingWorkspace,
   IPC_CHANNELS.saveGradingStudentViewState,
   IPC_CHANNELS.clearGradingStudentViewState,
@@ -131,6 +132,7 @@ export const managedOperationFamily = (channel: string): ManagedOperationFamily 
       [
         IPC_CHANNELS.downloadAssignmentRepositories,
         IPC_CHANNELS.pullLatestGradingStudentChanges,
+        IPC_CHANNELS.pullLatestAssignmentStudentChanges,
         IPC_CHANNELS.loadGradingStudentSource,
         IPC_CHANNELS.loadGradingStudentSnapshot,
         IPC_CHANNELS.loadGradingStudentCommitHistory
@@ -184,6 +186,7 @@ export const COURSE_RUNTIME_MUTATION_CHANNELS: readonly string[] = Object.freeze
   IPC_CHANNELS.saveGradingStudentViewState,
   IPC_CHANNELS.clearGradingStudentViewState,
   IPC_CHANNELS.pullLatestGradingStudentChanges,
+  IPC_CHANNELS.pullLatestAssignmentStudentChanges,
   IPC_CHANNELS.markGradingStudentComplete,
   IPC_CHANNELS.addGradingStudentComment,
   IPC_CHANNELS.editGradingStudentComment,

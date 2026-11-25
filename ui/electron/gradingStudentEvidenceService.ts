@@ -74,6 +74,7 @@ export type GradingStudentEvidenceResult =
       readonly status: "success";
       readonly studentId: string;
       readonly submissionCommitSha: string;
+      readonly submissionContentMatches?: true;
       readonly runId: number;
       readonly runAttempt: number;
       readonly evidence: GradingEvidenceDto;
@@ -103,6 +104,7 @@ export type GradingStudentEvidenceResult =
 interface PreparedContext {
   readonly studentId: string;
   readonly submissionCommitSha: string;
+  readonly equivalentSubmissionCommitShas?: readonly string[];
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly grading: unknown;
 }
@@ -131,7 +133,8 @@ interface EvidenceBackend {
     readonly assignmentSlug: string;
     readonly studentId: string;
     readonly currentSubmissionCommitSha?: string;
-  }): PrepareResult;
+    readonly repositoryRoot?: string;
+  }): PrepareResult | Promise<PrepareResult>;
   retrievePreparedGradingStudentEvidence(
     prepared: PreparedContext,
     githubClient: GitHubClient
@@ -235,11 +238,12 @@ export const createGradingStudentEvidenceService = (
     let prepared: PrepareResult;
     try {
       backend = getBackend();
-      prepared = backend.prepareGradingStudentEvidenceContext({
+      prepared = await backend.prepareGradingStudentEvidenceContext({
         courseFolderPath: request.courseFolderPath,
         termCode: request.termCode,
         assignmentSlug: request.assignmentSlug,
         studentId: request.studentId,
+        ...(repository.status === "success" ? { repositoryRoot: repository.localPath } : {}),
         ...(head.status === "success"
           ? { currentSubmissionCommitSha: head.submissionCommitSha }
           : {})
@@ -281,6 +285,11 @@ export const createGradingStudentEvidenceService = (
       status: "success",
       studentId: request.studentId,
       submissionCommitSha: prepared.value.submissionCommitSha,
+      ...(prepared.value.equivalentSubmissionCommitShas?.includes(
+        retrieved.value.evidence.metadata.submissionCommitSha
+      ) === true
+        ? { submissionContentMatches: true as const }
+        : {}),
       runId: retrieved.value.runId,
       runAttempt: retrieved.value.runAttempt,
       evidence: toGradingEvidenceDto(retrieved.value.evidence)

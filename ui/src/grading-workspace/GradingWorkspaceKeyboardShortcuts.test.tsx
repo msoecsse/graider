@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   GradingStudentEvidenceResult,
@@ -59,6 +59,7 @@ interface WorkspaceStudent {
   readonly studentId: string;
   readonly section: string;
   readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published";
+  readonly repositoryUrl?: string;
 }
 
 const students: readonly WorkspaceStudent[] = [
@@ -222,6 +223,181 @@ const setApis = ({
 };
 
 describe("GradingWorkspacePage keyboard shortcuts", () => {
+  it.each(["Enter", " "])(
+    "%s on the original Delete button opens only inline confirmation and Escape restores focus",
+    async (key) => {
+      const markComplete = vi.fn();
+      const deleteComment = vi.fn();
+      const loadSnapshot = vi.fn().mockResolvedValue({
+        ...snapshot("ada", "in_progress"),
+        appliedComments: [{ id: "applied", text: "Existing feedback", deduction: -1 }]
+      });
+      setApis({ loadSnapshot, markComplete });
+      Object.assign(window.graiderUI, { deleteGradingStudentComment: deleteComment });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      const trigger = await screen.findByRole("button", {
+        name: "Delete comment: Existing feedback"
+      });
+      act(() => trigger.focus());
+      expect(trigger).toHaveFocus();
+      expect(fireEvent.keyDown(trigger, { key })).toBe(true);
+      fireEvent.keyUp(trigger, { key });
+      // JSDOM does not synthesize the browser's native keyboard click.
+      fireEvent.click(trigger);
+
+      const dialog = screen.getByRole("alertdialog", { name: "Delete applied comment?" });
+      expect(trigger.closest("li")).toContainElement(dialog);
+      expect(trigger).toHaveFocus();
+      expect(screen.queryByText("Mark ada grading complete?")).not.toBeInTheDocument();
+      expect(markComplete).not.toHaveBeenCalled();
+      expect(deleteComment).not.toHaveBeenCalled();
+
+      const cancel = within(dialog).getByRole("button", { name: "Cancel deleting comment" });
+      act(() => cancel.focus());
+      const bubbleListener = vi.fn();
+      window.addEventListener("keydown", bubbleListener);
+      try {
+        expect(fireEvent.keyDown(cancel, { key })).toBe(true);
+        expect(bubbleListener).not.toHaveBeenCalled();
+        expect(fireEvent.keyDown(cancel, { key: "Escape" })).toBe(false);
+        expect(bubbleListener).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener("keydown", bubbleListener);
+      }
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+      expect(markComplete).not.toHaveBeenCalled();
+      expect(deleteComment).not.toHaveBeenCalled();
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+    }
+  );
+
+  it.each([
+    ["Enter", "Confirm deleting comment"],
+    [" ", "Confirm deleting comment"],
+    ["Enter", "Cancel deleting comment"],
+    [" ", "Cancel deleting comment"]
+  ])("%s activates the focused %s control without marking complete", async (key, action) => {
+    const markComplete = vi.fn();
+    const deleteComment = vi.fn().mockResolvedValue(snapshot("ada", "in_progress"));
+    const loadSnapshot = vi.fn().mockResolvedValue({
+      ...snapshot("ada", "in_progress"),
+      appliedComments: [{ id: "applied", text: "Existing feedback", deduction: -1 }]
+    });
+    setApis({ loadSnapshot, markComplete });
+    Object.assign(window.graiderUI, { deleteGradingStudentComment: deleteComment });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const trigger = await screen.findByRole("button", {
+      name: "Delete comment: Existing feedback"
+    });
+    fireEvent.click(trigger);
+    const control = within(screen.getByRole("alertdialog")).getByRole("button", { name: action });
+    act(() => control.focus());
+    expect(control).toHaveFocus();
+    expect(fireEvent.keyDown(control, { key })).toBe(true);
+    fireEvent.keyUp(control, { key });
+    // JSDOM omits the native keyboard click for both Enter and Space.
+    fireEvent.click(control);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    if (action === "Confirm deleting comment") {
+      expect(deleteComment).toHaveBeenCalledExactlyOnceWith({
+        ...REQUEST,
+        studentId: "ada",
+        commentId: "applied"
+      });
+    } else {
+      expect(deleteComment).not.toHaveBeenCalled();
+      expect(trigger).toHaveFocus();
+    }
+    expect(markComplete).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+  });
+
+  it.each(["Enter", " "])(
+    "%s activates a focused Add comment button without consuming its event",
+    async (key) => {
+      const markComplete = vi.fn();
+      setApis({ markComplete });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByTestId("mock-monaco");
+      const button = screen.getByRole("button", { name: "Add comment" });
+      act(() => button.focus());
+      expect(button).toHaveFocus();
+      const bubbleListener = vi.fn();
+      window.addEventListener("keydown", bubbleListener);
+      try {
+        expect(fireEvent.keyDown(button, { key })).toBe(true);
+        expect(bubbleListener).toHaveBeenCalledTimes(1);
+      } finally {
+        window.removeEventListener("keydown", bubbleListener);
+      }
+      fireEvent.keyUp(button, { key });
+      // Supply the native button activation that JSDOM omits.
+      fireEvent.click(button);
+      expect(await screen.findByRole("form", { name: "Add comment" })).toBeInTheDocument();
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(markComplete).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["Enter", " "])(
+    "%s reaches the focused comment-location button's own keyboard handler",
+    async (key) => {
+      const markComplete = vi.fn();
+      const loadSnapshot = vi.fn().mockResolvedValue({
+        ...snapshot("ada", "in_progress"),
+        appliedComments: [
+          {
+            id: "applied",
+            text: "Existing feedback",
+            deduction: -1,
+            sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+          }
+        ]
+      });
+      setApis({ loadSnapshot, markComplete });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByTestId("mock-monaco");
+      const button = screen.getByRole("button", {
+        name: "Show comment location: Existing feedback"
+      });
+      act(() => button.focus());
+      const localListener = vi.fn();
+      button.addEventListener("keydown", localListener, { once: true });
+      expect(fireEvent.keyDown(within(button).getByText("Existing feedback"), { key })).toBe(false);
+      expect(localListener).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(markComplete).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["Enter", " "])(
+    "%s preserves the focused repository link's native event",
+    async (key) => {
+      const markComplete = vi.fn();
+      setApis({
+        markComplete,
+        workspaceStudents: [
+          {
+            studentId: "ada",
+            section: "001",
+            gradingStatus: "not_started",
+            repositoryUrl: "https://github.com/course/ada"
+          }
+        ]
+      });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByTestId("mock-monaco");
+      const link = screen.getByRole("link", { name: "Open GitHub repository for ada" });
+      act(() => link.focus());
+      expect(link).toHaveFocus();
+      expect(fireEvent.keyDown(link, { key })).toBe(true);
+      expect(fireEvent.keyUp(link, { key })).toBe(true);
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+      expect(markComplete).not.toHaveBeenCalled();
+    }
+  );
+
   it("keeps document find typing and Enter on find buttons out of grading shortcuts", async () => {
     const markComplete = vi.fn();
     setApis({ markComplete });
@@ -360,17 +536,36 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
   });
 
-  it("Enter opens the mark-complete confirmation, then confirms it and advances to the next ungraded student", async () => {
-    setApis({});
-    render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByTestId("mock-monaco");
+  it.each(["workspace", "source"])(
+    "Enter from %s opens the mark-complete confirmation, then confirms it and advances to the next ungraded student",
+    async (target) => {
+      setApis({});
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByTestId("mock-monaco");
 
-    fireEvent.keyDown(window, { key: "Enter" });
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
+      const keyboardTarget =
+        target === "source"
+          ? screen.getByRole("textbox", { name: "Mock Monaco keyboard target" })
+          : document.body;
+      act(() => keyboardTarget.focus());
+      fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent(
+        "Mark ada grading complete?"
+      );
 
-    fireEvent.keyDown(window, { key: "Enter" });
-    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
-  });
+      fireEvent.keyDown(keyboardTarget, { key: "Enter" });
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
+      const row = screen.getByRole("button", { name: /grace · Section 002/u });
+      expect(row).toHaveFocus();
+
+      fireEvent.keyDown(row, { key: "k" });
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+      fireEvent.keyDown(document.activeElement ?? window, { key: "j" });
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
+      fireEvent.keyDown(document.activeElement ?? window, { key: "/" });
+      expect(screen.getByRole("button", { name: "To grade 2" })).toHaveFocus();
+    }
+  );
 
   it("P opens the publish review screen, showing the completed student as ready to publish", async () => {
     const loadSnapshot = vi.fn().mockResolvedValue(snapshot("ada", "complete"));
@@ -515,6 +710,11 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.keyDown(deduction, { key: "p" });
     fireEvent.keyDown(category, { key: "1" });
     fireEvent.keyDown(screen.getByRole("button", { name: "Inline code" }), { key: "p" });
+    for (const control of [title, comment, deduction, category]) {
+      act(() => control.focus());
+      expect(fireEvent.keyDown(control, { key: "Enter" })).toBe(true);
+      expect(fireEvent.keyDown(control, { key: " " })).toBe(true);
+    }
 
     expect(title).toHaveValue("j");
     expect(comment).toHaveValue("Needs a clearer justification");
@@ -523,6 +723,8 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     expect(loadEvidence).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Apply First comment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(window.graiderUI.markGradingStudentComplete).not.toHaveBeenCalled();
   });
 
   it("does not consume modifier shortcuts from the source editor", async () => {

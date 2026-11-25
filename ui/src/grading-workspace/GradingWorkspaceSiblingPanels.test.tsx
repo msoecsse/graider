@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GradingWorkspacePrepareRequest } from "../../electron/ipc";
 
@@ -469,6 +469,103 @@ describe("GradingWorkspacePage current editor draft guards", () => {
 });
 
 describe("GradingWorkspacePage sibling panels after comment takeover", () => {
+  it("cancels and retargets inline deletion among copies of the same library comment", async () => {
+    setApis();
+    let comments = ["first-copy", "middle-copy", "last-copy"].map((id) => ({
+      ...appliedComment,
+      id,
+      sourceCommentId: "shared-library-entry"
+    }));
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({ ...snapshot(studentId, "in_progress"), appliedComments: comments })
+    );
+    const deleteComment = vi.fn(({ commentId }: { commentId: string }) => {
+      comments = comments.filter(({ id }) => id !== commentId);
+      return Promise.resolve({ status: "success", studentId: "ada", appliedComments: comments });
+    });
+    Object.assign(window.graiderUI, {
+      loadGradingStudentSnapshot: loadSnapshot,
+      deleteGradingStudentComment: deleteComment,
+      deleteGradingLibraryComment: vi.fn()
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const buttons = await screen.findAllByRole("button", {
+      name: "Delete comment: Original feedback"
+    });
+    const first = buttons[0] as HTMLButtonElement;
+    const middle = buttons[1] as HTMLButtonElement;
+    first.focus();
+    fireEvent.click(first);
+    expect(first.closest("li")).toContainElement(screen.getByRole("alertdialog"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deleting comment" }));
+    expect(first).toHaveFocus();
+    expect(deleteComment).not.toHaveBeenCalled();
+
+    fireEvent.click(first);
+    fireEvent.click(middle);
+    const dialog = screen.getByRole("alertdialog", { name: "Delete applied comment?" });
+    expect(middle.closest("li")).toContainElement(dialog);
+    expect(first.closest("li")).not.toContainElement(dialog);
+    const confirm = within(dialog).getByRole("button", { name: "Confirm deleting comment" });
+    confirm.focus();
+    fireEvent.keyDown(confirm, { key: "Enter" });
+    expect(window.graiderUI.markGradingStudentComplete).not.toHaveBeenCalled();
+    expect(screen.queryByText("Mark ada grading complete?")).not.toBeInTheDocument();
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(deleteComment).toHaveBeenCalledExactlyOnceWith({
+        ...REQUEST,
+        studentId: "ada",
+        commentId: "middle-copy"
+      })
+    );
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(
+      screen.getAllByRole("button", { name: "Delete comment: Original feedback" })
+    ).toHaveLength(2);
+    expect(window.graiderUI.deleteGradingLibraryComment).not.toHaveBeenCalled();
+  });
+
+  it("clears inline deletion on student switch even when both students share comment IDs", async () => {
+    setApis({
+      students: [
+        { studentId: "ada", section: "001", gradingStatus: "in_progress" },
+        { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+      ]
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete comment: Original feedback" })
+    );
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Graded\b/u }));
+    expect(screen.queryByRole("button", { name: /ada · Section 001/u })).not.toBeInTheDocument();
+    const dialog = screen.getByRole("alertdialog");
+    expect(
+      screen.getByRole("button", { name: "Delete comment: Original feedback" }).closest("li")
+    ).toContainElement(dialog);
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: "Cancel deleting comment" }), {
+      key: "Escape"
+    });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete comment: Original feedback" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: /^To grade\b/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for grace")
+    );
+    await screen.findByRole("button", { name: "Delete comment: Original feedback" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada")
+    );
+    await screen.findByRole("button", { name: "Delete comment: Original feedback" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expectNoGradingMutations();
+  });
+
   it("returns to the existing grading panels without reloading the selected student", async () => {
     setApis();
     render(<GradingWorkspacePage request={REQUEST} />);

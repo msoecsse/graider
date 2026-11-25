@@ -21,6 +21,21 @@ import {
   type GradingSubmissionContextDependencies
 } from "./grading-submission-context.js";
 import { loadGradingState } from "./grading-state.js";
+import { createDugiteGitWorkspaceFactory } from "../git/dugite-git-workspace-context.js";
+import { isObjectId, type ObjectId } from "../git/git-workspace.js";
+import {
+  generatedSubmissionPaths,
+  readStudentSubmissionTree,
+  submissionTreesDiffer,
+  type SubmissionTreeReader
+} from "./submission-content.js";
+
+const MAX_FEEDBACK_COMMIT_COMPARISONS = 100;
+
+interface EvidenceWorkspace extends SubmissionTreeReader {
+  resolveHead(): Promise<string>;
+  listFirstParentCommitTrees(anchor: ObjectId): Promise<readonly { readonly commit: string }[]>;
+}
 
 export interface GradingStudentEvidenceContextRequest {
   readonly courseFolderPath: string;
@@ -28,12 +43,15 @@ export interface GradingStudentEvidenceContextRequest {
   readonly assignmentSlug: string;
   readonly studentId: string;
   readonly currentSubmissionCommitSha?: string;
+  readonly repositoryRoot?: string;
 }
 
 export interface PreparedGradingStudentEvidenceContext {
   readonly studentId: string;
   readonly submissionCommitSha: string;
   readonly previousSubmissionCommitShas?: readonly string[];
+  /** Locally proven consecutive revisions with identical submission content. */
+  readonly equivalentSubmissionCommitShas?: readonly string[];
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly grading: EffectiveAssignmentGrading;
 }
@@ -57,13 +75,15 @@ export interface GradingStudentEvidenceContextDependencies extends GradingSubmis
   }) => ConfigLoadResult;
   readonly loadAssignmentManifest: (manifestPath: string) => ManifestLoadResult;
   readonly retrieve: typeof retrieveGradingEvidence;
+  readonly openWorkspace: (repositoryRoot: string) => Promise<EvidenceWorkspace>;
 }
 
 const dependencies: GradingStudentEvidenceContextDependencies = {
   loadConfig: loadGraiderConfig,
   loadState: loadGradingState,
   loadAssignmentManifest: (manifestPath) => loadManifest(manifestPath, { required: true }),
-  retrieve: retrieveGradingEvidence
+  retrieve: retrieveGradingEvidence,
+  openWorkspace: (repositoryRoot) => createDugiteGitWorkspaceFactory().open(repositoryRoot)
 };
 
 const assignmentFile = (termCode: string, assignmentSlug: string): string =>
@@ -158,6 +178,99 @@ export const historicalEvidenceRevisions = (
       }
     : {};
 
+/** Read-only reload preparation. Never use repository-update history as proof that
+ * an old artifact still grades the current source. Keep the saved grading anchor
+ * and all faculty edits intact; only evidence selection accepts equivalent SHAs.
+ */
+export const prepareLocalGradingStudentEvidenceContext = async (
+  request: GradingStudentEvidenceContextRequest,
+  overrides: Partial<GradingStudentEvidenceContextDependencies> = {}
+): Promise<PrepareGradingStudentEvidenceContextResult> => {
+  const resolved = { ...dependencies, ...overrides };
+  let prepared = prepareGradingStudentEvidenceContext(request, resolved);
+  if (prepared.status !== "success" && prepared.status !== "submission_changed") return prepared;
+  const equivalentShas: string[] = [];
+  if (
+    request.repositoryRoot !== undefined &&
+    request.currentSubmissionCommitSha !== undefined &&
+    isObjectId(request.currentSubmissionCommitSha)
+  ) {
+    try {
+      const workspace = await resolved.openWorkspace(request.repositoryRoot);
+      const head = request.currentSubmissionCommitSha;
+      if ((await workspace.resolveHead()) !== head)
+        return { status: "submission_changed", studentId: request.studentId };
+      const history = await workspace.listFirstParentCommitTrees(head);
+      if (history[0]?.commit === head) {
+        const generatedPaths = generatedSubmissionPaths({
+          courseRoot: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentId: request.studentId
+        });
+        let tree = await readStudentSubmissionTree(workspace, head, generatedPaths);
+        equivalentShas.push(head);
+        let comparing = true;
+        const count = Math.min(history.length, MAX_FEEDBACK_COMMIT_COMPARISONS + 1);
+        for (let index = 1; index < count && comparing; index += 1) {
+          const revision = history[index]?.commit;
+          if (revision === undefined || !isObjectId(revision)) {
+            comparing = false;
+          } else {
+            const previousTree = await readStudentSubmissionTree(
+              workspace,
+              revision,
+              generatedPaths
+            );
+            if (submissionTreesDiffer(tree, previousTree)) {
+              comparing = false;
+            } else {
+              equivalentShas.push(revision);
+              tree = previousTree;
+            }
+          }
+        }
+      }
+      if ((await workspace.resolveHead()) !== head)
+        return { status: "submission_changed", studentId: request.studentId };
+    } catch {
+      // No local proof: retain exact-SHA behavior and persisted/offline anchors.
+      equivalentShas.length = 0;
+    }
+  }
+  if (prepared.status === "submission_changed") {
+    const saved = resolved.loadState({
+      courseRoot: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId: request.studentId
+    });
+    if (saved.status !== "success" || !equivalentShas.includes(saved.value.submissionCommitSha))
+      return prepared;
+    prepared = prepareGradingStudentEvidenceContext(
+      {
+        ...request,
+        currentSubmissionCommitSha: saved.value.submissionCommitSha
+      },
+      resolved
+    );
+  }
+  if (prepared.status !== "success") return prepared;
+  const value: PreparedGradingStudentEvidenceContext = {
+    studentId: prepared.value.studentId,
+    submissionCommitSha: prepared.value.submissionCommitSha,
+    repository: prepared.value.repository,
+    grading: prepared.value.grading
+  };
+  return {
+    status: "success",
+    value: {
+      ...value,
+      ...(equivalentShas.length > 0 ? { equivalentSubmissionCommitShas: equivalentShas } : {})
+    }
+  };
+};
+
 export const retrievePreparedGradingStudentEvidence = async (
   prepared: PreparedGradingStudentEvidenceContext,
   githubClient: GitHubClient,
@@ -169,7 +282,12 @@ export const retrievePreparedGradingStudentEvidence = async (
       githubClient,
       repository: prepared.repository,
       grading: prepared.grading,
-      submissionCommitSha
+      submissionCommitSha,
+      ...(prepared.equivalentSubmissionCommitShas === undefined
+        ? {}
+        : {
+            equivalentSubmissionCommitShas: prepared.equivalentSubmissionCommitShas
+          })
     });
   const current = await retrieve(prepared.submissionCommitSha);
   if (
@@ -187,6 +305,6 @@ export const retrievePreparedGradingStudentEvidence = async (
 };
 
 export const gradingStudentEvidenceContextBackend = {
-  prepareGradingStudentEvidenceContext,
+  prepareGradingStudentEvidenceContext: prepareLocalGradingStudentEvidenceContext,
   retrievePreparedGradingStudentEvidence
 };

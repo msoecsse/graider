@@ -130,6 +130,8 @@ describe("UI security boundary", () => {
       "graider-ui:grading-student-view-state:save",
       "graider-ui:grading-student-view-state:clear",
       "graider-ui:grading-student-repository:pull",
+      "graider-ui:assignment-student-repositories:pull",
+      "graider-ui:assignment-student-repositories:progress",
       "graider-ui:grading-student-snapshot:load",
       "graider-ui:grading-student-evidence:load",
       "graider-ui:grading-student-workflow:repair",
@@ -171,6 +173,17 @@ describe("UI security boundary", () => {
     expect(channelNames).not.toContain("writeFile");
   });
 
+  it("guards assignment Pull as a repository mutation and keeps progress main-to-renderer", () => {
+    const main = fs.readFileSync(path.join(PROJECT_ROOT, "electron", "main.ts"), "utf8");
+
+    expect(main).toMatch(
+      /courseIpc\.handle\(\s*IPC_CHANNELS\.pullLatestAssignmentStudentChanges,\s*createAssignmentRepositoryUpdateHandler\(/u
+    );
+    expect(main).not.toMatch(
+      /(?:ipcMain|courseIpc)\.handle\(\s*IPC_CHANNELS\.assignmentRepositoryUpdateProgress/u
+    );
+  });
+
   it("preload exposes only the graiderUI namespace", () => {
     const preloadSource = fs.readFileSync(PRELOAD_SOURCE, "utf8");
 
@@ -183,6 +196,8 @@ describe("UI security boundary", () => {
     expect(preloadSource).toContain("saveGradingStudentViewState:");
     expect(preloadSource).toContain("clearGradingStudentViewState:");
     expect(preloadSource).toContain("pullLatestGradingStudentChanges:");
+    expect(preloadSource).toContain("pullLatestAssignmentStudentChanges:");
+    expect(preloadSource).toContain("onAssignmentRepositoryUpdateProgress:");
     expect(preloadSource).toContain("loadGradingStudentSnapshot:");
     expect(preloadSource).toContain("loadGradingStudentEvidence:");
     expect(preloadSource).toContain("loadGradingStudentCommitHistory:");

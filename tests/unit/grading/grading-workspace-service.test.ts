@@ -89,7 +89,12 @@ describe("grading workspace preparation", () => {
     const result = service()(requestFor(paths));
     expect(result).toMatchObject({
       status: "success",
-      assignment: { termCode: "27s1", slug: "lab04", title: "Lab 04" },
+      assignment: {
+        termCode: "27s1",
+        slug: "lab04",
+        title: "Lab 04",
+        dueAt: "2027-04-15T23:59:00+09:00"
+      },
       requiredFiles: ["src/A.java", "src/B.java"],
       rubric: [{ id: "correctness" }, { id: "design" }],
       students: [
